@@ -1,0 +1,81 @@
+{
+  "name": "BLOASIS - AI Trading Platform",
+  "dockerComposeFile": "docker-compose.yml",
+  "service": "app",
+  "workspaceFolder": "/workspace",
+  // Wait for services to be ready
+  "waitFor": "onCreateCommand",
+  // Lifecycle scripts
+  "postStartCommand": "bash .devcontainer/scripts/post-start.sh",
+  // VS Code customization
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        // Python
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "ms-python.black-formatter",
+        "charliermarsh.ruff",
+        // Testing
+        "littlefoxteam.vscode-python-test-adapter",
+        // Database
+        "mtxr.sqltools",
+        "mtxr.sqltools-driver-pg",
+        // Docker
+        "ms-azuretools.vscode-docker",
+        // gRPC & Protocol Buffers
+        "drblury.protobuf-vsc",
+        // API Testing
+        "humao.rest-client",
+        // Docs
+        "yzhang.markdown-all-in-one",
+        // Git
+        "eamodio.gitlens",
+        // Claude
+        "anthropic.claude-code"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "/usr/local/bin/python",
+        "python.testing.pytestEnabled": true,
+        "python.testing.unittestEnabled": false,
+        "python.linting.enabled": true,
+        "python.linting.pylintEnabled": false,
+        "python.formatting.provider": "black",
+        "editor.formatOnSave": true,
+        "editor.codeActionsOnSave": {
+          "source.organizeImports": "explicit"
+        },
+        "[python]": {
+          "editor.defaultFormatter": "ms-python.black-formatter",
+          "editor.formatOnSave": true,
+          "editor.rulers": [
+            100
+          ]
+        },
+        "[proto3]": {
+          "editor.tabSize": 2
+        },
+        "files.exclude": {
+          "**/__pycache__": true,
+          "**/*.pyc": true,
+          "**/*_pb2.py": true,
+          "**/*_pb2_grpc.py": true
+        }
+      }
+    }
+  },
+  // Features
+  "features": {
+    "ghcr.io/devcontainers/features/git:1": {},
+    "ghcr.io/devcontainers/features/github-cli:1": {}
+  },
+  // Run as non-root user
+  "remoteUser": "vscode",
+  // Container user
+  "containerUser": "vscode",
+  // Mount configuration
+  "mounts": [
+    "source=claude-code-bashhistory,target=/commandhistory,type=volume",
+    "source=claude-code-config,target=/home/vscode/.claude,type=volume"
+  ]
+}

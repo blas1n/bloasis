@@ -94,6 +94,7 @@ service-account.json
 *.sqlite3
 data/
 *.sql
+!infra/**/*.sql
 
 # Docker
 .devcontainer/.env

@@ -1,0 +1,21 @@
+_format_version: "3.0"
+_transform: true
+
+# Kong Gateway Configuration for BLOASIS
+services: []
+#  - name: market-regime-service
+#    url: grpc://market-regime:50051
+#    routes:
+#      - name: market-regime-route
+#        paths:
+#          - /v1/market-regime
+#        protocols:
+#          - http
+#          - https
+#    plugins:
+#      - name: grpc-gateway
+#        config:
+#          proto: /kong/proto/market_regime.proto
+
+# Add services as they are implemented
+# See services/CLAUDE.md for gRPC service setup
