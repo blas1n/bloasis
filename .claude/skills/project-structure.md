@@ -28,7 +28,7 @@ services/market-regime/
 ├── src/
 │   ├── main.py         # FastAPI + gRPC server
 │   ├── service.py      # gRPC service implementation
-│   ├── models.py       # Service-specific models
+│   ├── models.py       # Service-specific models (Pydantic + SQLAlchemy)
 │   ├── clients/        # gRPC clients for other services
 │   └── utils/          # Service utilities
 ├── tests/
@@ -36,7 +36,8 @@ services/market-regime/
 │   └── test_integration.py
 ├── proto/              # Symlink to ../../shared/proto
 ├── Dockerfile
-└── requirements.txt
+├── .env.example
+└── pyproject.toml      # uv-based dependencies
 ```
 
 ## Shared Structure
@@ -47,14 +48,18 @@ shared/
 │   ├── market_regime.proto
 │   ├── ai_analysis.proto
 │   └── common.proto    # Shared message types
-├── models/             # Shared data models
-│   ├── risk_profile.py
-│   └── market_regime.py
-└── utils/              # Shared utilities
-    ├── redpanda_client.py
-    ├── redis_client.py
-    └── logging.py
+├── utils/              # Shared utilities
+│   ├── redpanda_client.py
+│   ├── redis_client.py
+│   ├── postgres_client.py
+│   └── logging.py
+├── tests/              # Tests for shared code
+├── __init__.py
+├── CLAUDE.md           # Development guide
+└── pyproject.toml      # uv-based dependencies
 ```
+
+**Note**: Models are NOT shared. Each service maintains its own models in `src/models.py` to preserve MSA independence.
 
 ## Proto Files
 
@@ -119,8 +124,8 @@ service MarketRegimeService {
    - Never duplicate .proto files
 
 3. **Shared code**:
-   - Cross-service models → `shared/models/`
    - Cross-service utilities → `shared/utils/`
+   - Models are NOT shared (each service has own `src/models.py`)
    - Never direct imports between services
 
 4. **HTTP annotations required**:

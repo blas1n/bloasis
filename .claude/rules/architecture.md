@@ -51,10 +51,17 @@ async def get_regime(user_id):  # NO!
 **Cross-service code goes in `shared/`:**
 
 - `.proto` files → `shared/proto/`
-- Data models → `shared/models/`
+- Data models → Each service's `src/models.py` (MSA independence)
 - Utilities → `shared/utils/`
 
-**NEVER duplicate code between services.**
+**NEVER share models between services:**
+
+- Sharing models increases coupling between services
+- Each service maintains its own Pydantic/SQLAlchemy models
+- Services communicate via gRPC proto messages only
+- This preserves service independence and allows independent deployment
+
+**NEVER duplicate code between services** (except models).
 
 ### 5. Service Independence
 

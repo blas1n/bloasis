@@ -1,0 +1,53 @@
+[project]
+name = "bloasis-shared"
+version = "0.1.0"
+description = "BLOASIS Shared Package - Common code for all microservices"
+requires-python = ">=3.11"
+dependencies = [
+    # gRPC - Internal MSA communication
+    "grpcio>=1.59.0",
+    "grpcio-tools>=1.59.0",
+    "googleapis-common-protos>=1.61.0",
+
+    # Database - PostgreSQL/TimescaleDB
+    "sqlalchemy[asyncio]>=2.0.23",
+    "asyncpg>=0.29.0",
+
+    # Caching - Redis
+    "redis[hiredis]>=5.0.1",
+
+    # Messaging - Redpanda (Kafka API)
+    "aiokafka>=0.8.1",
+
+    # Data validation
+    "pydantic>=2.4.2",
+
+    # Configuration
+    "python-dotenv>=1.0.0",
+
+    # Async support
+    "aiohttp>=3.9.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    # Testing
+    "pytest>=7.4.3",
+    "pytest-asyncio>=0.21.1",
+    "pytest-cov>=4.1.0",
+
+    # Type checking
+    "mypy>=1.7.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+dev-dependencies = [
+    "pytest>=7.4.3",
+    "pytest-asyncio>=0.21.1",
+    "pytest-cov>=4.1.0",
+    "mypy>=1.7.0",
+]
