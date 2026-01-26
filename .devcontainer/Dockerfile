@@ -60,6 +60,7 @@ ENV PATH=/home/$USERNAME/.linuxbrew/bin:/home/$USERNAME/.linuxbrew/sbin:$PATH
 
 RUN brew install openssl@3 --force-bottle
 RUN brew install git-delta --force-bottle
+RUN brew install bufbuild/buf/buf
 
 # Copy and set up firewall script (for Claude Code)
 COPY scripts/init-firewall.sh /usr/local/bin/

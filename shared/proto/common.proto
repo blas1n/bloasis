@@ -1,0 +1,42 @@
+// Common message types shared across BLOASIS Phase 1 microservices
+// These types are imported by service-specific proto files
+
+syntax = "proto3";
+
+package bloasis.common;
+
+// UserProfile - Represents a user's trading profile and risk preferences
+// Used by AI analysis, backtesting, and portfolio services to customize strategies
+message UserProfile {
+  string user_id = 1;
+  string profile_type = 2;      // "conservative", "moderate", "aggressive"
+  double risk_tolerance = 3;    // 0.0-1.0 scale (normalized risk preference)
+}
+
+// Symbol - Represents a tradeable asset
+// Used across market data, analysis, and execution services
+message Symbol {
+  string ticker = 1;            // Stock ticker symbol (e.g., "AAPL", "GOOGL")
+  string name = 2;              // Full company name
+  string sector = 3;            // Industry sector (e.g., "Technology", "Healthcare")
+}
+
+// TimeRange - ISO 8601 date range for queries
+// Uses string format (not google.protobuf.Timestamp) for:
+// - ISO 8601 compatibility across all client languages
+// - Easier serialization/deserialization without timezone complexity
+// - Consistent format in REST API responses via Kong transcoding
+message TimeRange {
+  string start_date = 1;        // ISO 8601 format: "2025-01-15T00:00:00Z"
+  string end_date = 2;          // ISO 8601 format: "2025-01-20T23:59:59Z"
+}
+
+// Money - Financial amount with currency
+// CRITICAL: amount is string (not double) to preserve Decimal precision
+// This is a core architecture rule - floats cause rounding errors in financial calculations
+// Example: 0.1 + 0.2 = 0.30000000000000004 with floats
+// Python services convert to Decimal: Decimal(money.amount)
+message Money {
+  string amount = 1;            // String for Decimal precision (e.g., "150.25", "1000.00")
+  string currency = 2;          // ISO 4217 currency code (e.g., "USD", "EUR")
+}

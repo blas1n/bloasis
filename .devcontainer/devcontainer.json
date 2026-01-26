@@ -24,6 +24,7 @@
         // Docker
         "ms-azuretools.vscode-docker",
         // gRPC & Protocol Buffers
+        "bufbuild.vscode-buf",
         "drblury.protobuf-vsc",
         // API Testing
         "humao.rest-client",
