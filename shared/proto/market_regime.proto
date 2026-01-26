@@ -1,0 +1,78 @@
+// Market Regime Service - Classifies current market conditions using FinGPT
+// Part of BLOASIS Tier 1 (shared across all users, cached for 6 hours)
+
+syntax = "proto3";
+
+package bloasis.market_regime;
+
+import "google/api/annotations.proto";
+import "common.proto";
+
+// MarketRegimeService provides market regime classification
+// Regime classification is shared across ALL users (Tier 1) and cached for cost optimization
+service MarketRegimeService {
+  // GetCurrentRegime returns the current market regime classification
+  // Uses FinGPT for analysis, cached for 6 hours unless force_refresh is true
+  rpc GetCurrentRegime(GetCurrentRegimeRequest) returns (GetCurrentRegimeResponse) {
+    option (google.api.http) = {
+      get: "/v1/market-regime/current"
+    };
+  }
+
+  // GetRegimeHistory returns historical regime classifications within a time range
+  // Useful for backtesting and analyzing regime transitions
+  rpc GetRegimeHistory(GetRegimeHistoryRequest) returns (GetRegimeHistoryResponse) {
+    option (google.api.http) = {
+      get: "/v1/market-regime/history"
+    };
+  }
+}
+
+// GetCurrentRegimeRequest - Request for current market regime
+message GetCurrentRegimeRequest {
+  // If true, bypass cache and force fresh analysis from FinGPT
+  // Use sparingly to avoid unnecessary API costs
+  bool force_refresh = 1;
+}
+
+// GetCurrentRegimeResponse - Current market regime classification
+message GetCurrentRegimeResponse {
+  // Market regime classification:
+  // - "crisis": High volatility, risk-off (VIX > 30, major drawdowns)
+  // - "normal_bear": Declining market, moderate volatility
+  // - "normal_bull": Rising market, low-moderate volatility
+  // - "euphoria": Extreme optimism, potential bubble conditions
+  // - "high_volatility": Elevated VIX without clear direction
+  // - "low_volatility": Unusually calm markets, potential complacency
+  string regime = 1;
+
+  // Confidence score from FinGPT classification (0.0 to 1.0)
+  // Higher values indicate stronger signal clarity
+  double confidence = 2;
+
+  // ISO 8601 timestamp of when this regime was classified
+  // Example: "2025-01-26T14:30:00Z"
+  string timestamp = 3;
+
+  // What triggered this regime classification:
+  // - "baseline": Scheduled analysis (every 6 hours)
+  // - "fomc": Federal Reserve meeting/announcement
+  // - "circuit_breaker": Market halt or extreme volatility spike
+  // - "earnings_season": Major earnings period affecting sentiment
+  // - "geopolitical": Major geopolitical event
+  string trigger = 4;
+}
+
+// GetRegimeHistoryRequest - Request for historical regime data
+message GetRegimeHistoryRequest {
+  // Time range for historical query
+  // Uses bloasis.common.TimeRange for ISO 8601 date format
+  bloasis.common.TimeRange time_range = 1;
+}
+
+// GetRegimeHistoryResponse - Historical regime classifications
+message GetRegimeHistoryResponse {
+  // List of regime classifications within the requested time range
+  // Ordered chronologically (oldest first)
+  repeated GetCurrentRegimeResponse regimes = 1;
+}
