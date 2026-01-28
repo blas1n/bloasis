@@ -14,6 +14,7 @@ lint:
   except:
     - PACKAGE_VERSION_SUFFIX    # Allow packages without version suffix (e.g., bloasis.common vs bloasis.common.v1)
     - PACKAGE_DIRECTORY_MATCH   # Allow flat directory structure (shared/proto/ instead of bloasis/common/)
+    - DIRECTORY_SAME_PACKAGE    # Allow multiple packages in same directory (common.proto + service protos)
 
 # Breaking change detection
 breaking:

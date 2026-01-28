@@ -122,6 +122,9 @@ tmp/
 temp/
 *.tmp
 
+# Proto Generated Files
+shared/generated/
+
 # Backtest Results
 backtest_results/
 reports/
