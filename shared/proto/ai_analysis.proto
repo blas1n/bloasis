@@ -1,0 +1,125 @@
+// AI Analysis Service - Generates personalized trading strategies using LangGraph
+// Part of BLOASIS Tier 3 (user-specific, customized strategies)
+//
+// This service uses a LangGraph multi-agent workflow to combine:
+// - Market Regime analysis (Tier 1) - current market conditions
+// - Sector Classification strategies (Tier 2) - sector-specific recommendations
+// - User Profile - risk tolerance and trading preferences
+//
+// Dependencies:
+// - Market Regime Service (Tier 1): Provides current regime classification
+// - Classification Service (Tier 2): Provides sector strategies based on regime
+//
+// The workflow uses:
+// - FinGPT: For financial domain analysis (sector, sentiment)
+// - Claude: For complex reasoning and final strategy synthesis
+
+syntax = "proto3";
+
+package bloasis.ai_analysis;
+
+import "google/api/annotations.proto";
+import "common.proto";
+
+// AIAnalysisService provides personalized trading strategy generation
+// Strategies are user-specific (Tier 3) and computed on-demand using LangGraph
+service AIAnalysisService {
+  // GenerateStrategy creates a personalized trading strategy for a user
+  // Uses LangGraph multi-agent workflow to orchestrate FinGPT and Claude
+  //
+  // The workflow:
+  // 1. Retrieves current market regime from Market Regime Service (Tier 1)
+  // 2. Gets sector strategies from Classification Service (Tier 2)
+  // 3. Applies user profile preferences (risk tolerance, profile type)
+  // 4. Generates personalized trading signals with AI-generated rationale
+  //
+  // Note: This is a computationally expensive operation
+  // Consider caching results for short periods (e.g., 15 minutes)
+  rpc GenerateStrategy(GenerateStrategyRequest) returns (GenerateStrategyResponse) {
+    option (google.api.http) = {
+      post: "/v1/ai-analysis/generate-strategy"
+      body: "*"
+    };
+  }
+}
+
+// GenerateStrategyRequest - Request for personalized strategy generation
+message GenerateStrategyRequest {
+  // User identifier for personalization
+  // Used to track strategy history and apply user preferences
+  string user_id = 1;
+
+  // User's trading profile with risk preferences
+  // Uses bloasis.common.UserProfile for consistent profile representation
+  bloasis.common.UserProfile user_profile = 2;
+
+  // Symbols to analyze and generate signals for
+  // Uses bloasis.common.Symbol for consistent symbol representation
+  // Recommendation: 5-50 symbols per request for optimal performance
+  repeated bloasis.common.Symbol symbols = 3;
+
+  // Current market regime classification
+  // Should be fetched from Market Regime Service (Tier 1) before calling
+  // Valid values: "crisis", "normal_bear", "normal_bull", "euphoria",
+  //               "high_volatility", "low_volatility"
+  string regime = 4;
+}
+
+// GenerateStrategyResponse - Personalized trading strategy with signals
+message GenerateStrategyResponse {
+  // Unique identifier for this strategy
+  // Format: "strategy_{user_id}_{timestamp}"
+  string strategy_id = 1;
+
+  // User identifier who requested this strategy
+  string user_id = 2;
+
+  // Trading signals for requested symbols
+  // Each signal contains buy/sell/hold recommendation with price targets
+  repeated TradingSignal signals = 3;
+
+  // AI-generated explanation of the strategy rationale
+  // Includes reasoning from both FinGPT (market analysis) and Claude (synthesis)
+  // Provides transparency for user decision-making
+  string rationale = 4;
+
+  // Overall confidence score for the strategy (0.0 to 1.0)
+  // Higher values indicate stronger conviction from the AI analysis
+  // Calculated as weighted average of individual signal confidences
+  double confidence = 5;
+
+  // ISO 8601 timestamp when this strategy was generated
+  // Example: "2025-01-26T14:30:00Z"
+  string timestamp = 6;
+}
+
+// TradingSignal - Individual trading recommendation for a symbol
+message TradingSignal {
+  // Stock ticker symbol (e.g., "AAPL", "GOOGL")
+  string symbol = 1;
+
+  // Recommended action:
+  // - "BUY": Open or add to long position
+  // - "SELL": Close or reduce long position
+  // - "HOLD": Maintain current position, no action needed
+  string action = 2;
+
+  // Recommended quantity to trade
+  // Calculated based on user's portfolio size and risk tolerance
+  // 0 for "HOLD" action
+  int32 quantity = 3;
+
+  // Target price for profit-taking
+  // Uses bloasis.common.Money for Decimal precision (critical for trading)
+  // Only applicable for "BUY" action
+  bloasis.common.Money target_price = 4;
+
+  // Stop-loss price for risk management
+  // Uses bloasis.common.Money for Decimal precision (critical for trading)
+  // Only applicable for "BUY" action
+  bloasis.common.Money stop_loss = 5;
+
+  // Confidence score for this specific signal (0.0 to 1.0)
+  // Higher values indicate stronger conviction from the AI analysis
+  double confidence = 6;
+}
