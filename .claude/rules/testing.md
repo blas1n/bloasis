@@ -68,11 +68,34 @@ tests/                          # Root-level
 └── e2e/                        # End-to-end
 ```
 
+### Code Quality Checks
+
+**ALWAYS run before commit:**
+
+```bash
+# Lint check (unused imports, code style)
+ruff check [파일경로]
+
+# Format check
+ruff format --check [파일경로]
+```
+
+**Common issues caught by ruff:**
+- Unused imports (F401)
+- Unused variables (F841)
+- Import sorting
+- Line length violations
+
+**QA must verify:** `ruff check` passes with no errors.
+
 ### Running Tests
 
 Before every commit:
 
 ```bash
+# Code quality (MUST pass)
+ruff check shared/
+
 # Unit tests
 pytest services/market-regime/tests/ --cov=src --cov-fail-under=80
 
@@ -88,6 +111,7 @@ pytest --cov --cov-fail-under=80
 **Tests MUST pass in CI before merge.**
 
 All PRs require:
+- [ ] `ruff check` passing (no lint errors)
 - [ ] Unit tests passing
 - [ ] Coverage ≥ 80%
 - [ ] Integration tests passing
