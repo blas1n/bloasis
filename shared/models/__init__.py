@@ -11,11 +11,14 @@ to ensure service independence. Only enumerations and simple value
 objects that directly map to proto fields are shared.
 
 Exports:
+    MarketRegime: Enum for market regime classification (Tier 1, 6-hour cache).
     RiskProfile: Enum for user risk profile types (conservative, moderate, aggressive).
 """
 
+from shared.models.market_regime import MarketRegime
 from shared.models.risk_profile import RiskProfile
 
 __all__ = [
+    "MarketRegime",
     "RiskProfile",
 ]
