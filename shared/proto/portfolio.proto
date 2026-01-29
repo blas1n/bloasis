@@ -1,0 +1,116 @@
+// Portfolio Service - Manages user portfolio data and positions
+// This is an independent service with no dependencies on other services
+// User-specific data with 1-hour cache TTL
+// Reads from trading.portfolios and trading.positions tables
+
+syntax = "proto3";
+
+package bloasis.portfolio;
+
+import "google/api/annotations.proto";
+import "common.proto";
+
+// PortfolioService provides portfolio and position management
+// User-specific data is cached for 1 hour to balance freshness with performance
+service PortfolioService {
+  // GetPortfolio returns the current portfolio summary for a user
+  // Includes total value, cash balance, invested value, and returns
+  rpc GetPortfolio(GetPortfolioRequest) returns (GetPortfolioResponse) {
+    option (google.api.http) = {
+      get: "/v1/portfolio/{user_id}"
+    };
+  }
+
+  // GetPositions returns all positions for a user's portfolio
+  // Each position includes symbol, quantity, cost basis, and P&L
+  rpc GetPositions(GetPositionsRequest) returns (GetPositionsResponse) {
+    option (google.api.http) = {
+      get: "/v1/portfolio/{user_id}/positions"
+    };
+  }
+}
+
+// GetPortfolioRequest - Request for user's portfolio summary
+message GetPortfolioRequest {
+  // User identifier for portfolio lookup
+  string user_id = 1;
+}
+
+// GetPortfolioResponse - User's portfolio summary
+message GetPortfolioResponse {
+  // User identifier
+  string user_id = 1;
+
+  // Total portfolio value (cash + invested)
+  // Uses Money type for Decimal precision
+  bloasis.common.Money total_value = 2;
+
+  // Available cash balance
+  // Uses Money type for Decimal precision
+  bloasis.common.Money cash_balance = 3;
+
+  // Total value invested in positions
+  // Uses Money type for Decimal precision
+  bloasis.common.Money invested_value = 4;
+
+  // Total return as percentage (e.g., 15.5 means 15.5%)
+  // Positive values indicate profit, negative indicate loss
+  double total_return = 5;
+
+  // Total return in monetary amount
+  // Uses Money type for Decimal precision
+  bloasis.common.Money total_return_amount = 6;
+
+  // ISO 8601 timestamp of when portfolio was last updated
+  // Example: "2025-01-26T14:30:00Z"
+  string timestamp = 7;
+}
+
+// GetPositionsRequest - Request for user's positions
+message GetPositionsRequest {
+  // User identifier for positions lookup
+  string user_id = 1;
+}
+
+// GetPositionsResponse - User's positions list
+message GetPositionsResponse {
+  // User identifier
+  string user_id = 1;
+
+  // List of positions in the user's portfolio
+  repeated Position positions = 2;
+
+  // ISO 8601 timestamp of when positions were last updated
+  // Example: "2025-01-26T14:30:00Z"
+  string timestamp = 3;
+}
+
+// Position - Represents a single position in the portfolio
+message Position {
+  // Stock ticker symbol (e.g., "AAPL", "GOOGL")
+  string symbol = 1;
+
+  // Number of shares held
+  int32 quantity = 2;
+
+  // Average cost per share
+  // Uses Money type for Decimal precision
+  bloasis.common.Money avg_cost = 3;
+
+  // Current market price per share
+  // Uses Money type for Decimal precision
+  bloasis.common.Money current_price = 4;
+
+  // Current total value of position (quantity * current_price)
+  // Uses Money type for Decimal precision
+  bloasis.common.Money current_value = 5;
+
+  // Unrealized profit/loss in monetary amount
+  // Positive values indicate profit, negative indicate loss
+  // Uses Money type for Decimal precision
+  bloasis.common.Money unrealized_pnl = 6;
+
+  // Unrealized profit/loss as percentage (e.g., 10.5 means 10.5%)
+  // Calculated as ((current_price - avg_cost) / avg_cost) * 100
+  double unrealized_pnl_percent = 7;
+}
