@@ -7,8 +7,6 @@ Tests cover JSONFormatter and setup_logger functionality.
 import json
 import logging
 import os
-from datetime import datetime, timezone
-from typing import Any, Dict
 from unittest.mock import patch
 
 import pytest
@@ -315,12 +313,12 @@ class TestSetupLogger:
 
     def test_clears_existing_handlers(self) -> None:
         """Test that existing handlers are cleared to prevent duplicates."""
-        # Set up logger twice
-        logger1 = setup_logger("test-service-14")
-        logger2 = setup_logger("test-service-14")  # Same name
+        # Set up logger twice with same name
+        _ = setup_logger("test-service-14")  # First setup
+        logger = setup_logger("test-service-14")  # Second setup, same name
 
-        # Should have only one handler
-        assert len(logger2.handlers) == 1
+        # Should have only one handler (not accumulated)
+        assert len(logger.handlers) == 1
 
 
 class TestJSONFormatterIntegration:
