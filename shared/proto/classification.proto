@@ -1,0 +1,115 @@
+// Sector Classification Service - Provides sector-specific investment strategies
+// Part of BLOASIS Tier 2 (depends on Market Regime Service, cached per regime)
+//
+// This service uses the current market regime from Tier 1 to determine optimal
+// sector strategies. Strategies are recalculated when the market regime changes.
+//
+// Dependency: Market Regime Service (Tier 1)
+// - Uses regime classification to adjust sector allocations
+// - When regime changes, sector strategies are invalidated and recalculated
+
+syntax = "proto3";
+
+package bloasis.classification;
+
+import "google/api/annotations.proto";
+import "common.proto";
+
+// ClassificationService provides sector-specific investment strategies
+// Strategies are computed based on the current market regime (from Tier 1)
+// and cached until the regime changes
+service ClassificationService {
+  // GetSectorStrategies returns investment strategies for each sector
+  // based on the current market regime
+  //
+  // Strategy types:
+  // - "aggressive_growth": High-risk/high-reward, suitable for euphoria/bull regimes
+  // - "moderate_growth": Balanced approach, suitable for normal_bull regime
+  // - "defensive": Focus on stability and income, suitable for high_volatility
+  // - "rotate_out": Exit or underweight the sector, suitable for crisis/bear
+  // - "value_opportunity": Contrarian play in oversold sectors
+  // - "quality_focus": Prefer high-quality, low-debt companies
+  rpc GetSectorStrategies(GetSectorStrategiesRequest) returns (GetSectorStrategiesResponse) {
+    option (google.api.http) = {
+      get: "/v1/classification/sector-strategies"
+    };
+  }
+
+  // GetTopSymbols returns the top-performing or most-recommended symbols
+  // within a specific sector based on current market conditions
+  rpc GetTopSymbols(GetTopSymbolsRequest) returns (GetTopSymbolsResponse) {
+    option (google.api.http) = {
+      get: "/v1/classification/top-symbols"
+    };
+  }
+}
+
+// GetSectorStrategiesRequest - Request for sector-specific strategies
+message GetSectorStrategiesRequest {
+  // Current market regime from Market Regime Service (Tier 1)
+  // Valid values: "crisis", "normal_bear", "normal_bull", "euphoria",
+  //               "high_volatility", "low_volatility"
+  string regime = 1;
+
+  // Optional: specific sectors to analyze
+  // If empty, returns strategies for all sectors
+  // Examples: "Technology", "Healthcare", "Financials", "Energy"
+  repeated string sectors = 2;
+}
+
+// GetSectorStrategiesResponse - Sector strategies based on current regime
+message GetSectorStrategiesResponse {
+  // The market regime used for this analysis
+  string regime = 1;
+
+  // Investment strategies for each sector
+  repeated SectorStrategy strategies = 2;
+
+  // ISO 8601 timestamp when strategies were calculated
+  // Example: "2025-01-26T14:30:00Z"
+  string timestamp = 3;
+}
+
+// SectorStrategy - Investment recommendation for a specific sector
+message SectorStrategy {
+  // Sector name (e.g., "Technology", "Healthcare", "Financials")
+  string sector = 1;
+
+  // Recommended strategy for this sector:
+  // - "aggressive_growth": High-risk/high-reward positions
+  // - "moderate_growth": Balanced growth approach
+  // - "defensive": Focus on stability, dividends, low beta
+  // - "rotate_out": Reduce or exit positions
+  // - "value_opportunity": Look for undervalued plays
+  // - "quality_focus": Prefer high-quality companies
+  string strategy = 2;
+
+  // Confidence score for this recommendation (0.0 to 1.0)
+  // Higher values indicate stronger conviction from FinGPT analysis
+  double confidence = 3;
+
+  // Top recommended symbols within this sector
+  // Ordered by recommendation strength (best first)
+  repeated string top_symbols = 4;
+}
+
+// GetTopSymbolsRequest - Request for top symbols within a sector
+message GetTopSymbolsRequest {
+  // Sector to query (e.g., "Technology", "Healthcare")
+  string sector = 1;
+
+  // Maximum number of symbols to return
+  // Recommended: 5-20 for portfolio construction
+  int32 limit = 2;
+}
+
+// GetTopSymbolsResponse - Top symbols within a sector
+message GetTopSymbolsResponse {
+  // List of top symbols with full details
+  // Uses bloasis.common.Symbol for consistent symbol representation
+  repeated bloasis.common.Symbol symbols = 1;
+
+  // ISO 8601 timestamp when this list was generated
+  // Example: "2025-01-26T14:30:00Z"
+  string timestamp = 2;
+}
