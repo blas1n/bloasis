@@ -12,6 +12,7 @@ import "common.proto";
 
 // PortfolioService provides portfolio and position management
 // User-specific data is cached for 1 hour to balance freshness with performance
+// MSA: Other services (e.g., Order Service) MUST use these APIs to modify portfolio data
 service PortfolioService {
   // GetPortfolio returns the current portfolio summary for a user
   // Includes total value, cash balance, invested value, and returns
@@ -28,6 +29,27 @@ service PortfolioService {
       get: "/v1/portfolio/{user_id}/positions"
     };
   }
+
+  // ============================================================================
+  // Internal Write Operations (gRPC only - no HTTP/REST exposure)
+  // These are called by other internal services (e.g., Order Service)
+  // ============================================================================
+
+  // UpdateCashBalance updates the cash balance for a user's portfolio
+  // Used by Order Service after trade execution
+  rpc UpdateCashBalance(UpdateCashBalanceRequest) returns (UpdateCashBalanceResponse);
+
+  // CreatePosition creates a new position in the user's portfolio
+  // Used by Order Service when opening a new position
+  rpc CreatePosition(CreatePositionRequest) returns (CreatePositionResponse);
+
+  // UpdatePosition updates an existing position in the user's portfolio
+  // Used by Order Service after partial fills or price updates
+  rpc UpdatePosition(UpdatePositionRequest) returns (UpdatePositionResponse);
+
+  // DeletePosition removes a position from the user's portfolio
+  // Used by Order Service when a position is fully closed
+  rpc DeletePosition(DeletePositionRequest) returns (DeletePositionResponse);
 }
 
 // GetPortfolioRequest - Request for user's portfolio summary
@@ -113,4 +135,116 @@ message Position {
   // Unrealized profit/loss as percentage (e.g., 10.5 means 10.5%)
   // Calculated as ((current_price - avg_cost) / avg_cost) * 100
   double unrealized_pnl_percent = 7;
+}
+
+// ============================================================================
+// Write Operation Messages (MSA: Used by other services to modify portfolio)
+// ============================================================================
+
+// UpdateCashBalanceRequest - Request to update user's cash balance
+message UpdateCashBalanceRequest {
+  // User identifier
+  string user_id = 1;
+
+  // New cash balance amount
+  // Uses Money type for Decimal precision
+  bloasis.common.Money amount = 2;
+
+  // Operation type: "set" (absolute) or "delta" (relative change)
+  // "set": Sets cash_balance to the specified amount
+  // "delta": Adds/subtracts the amount from current balance (negative for deduction)
+  string operation = 3;
+}
+
+// UpdateCashBalanceResponse - Response after updating cash balance
+message UpdateCashBalanceResponse {
+  // Whether the operation was successful
+  bool success = 1;
+
+  // Updated cash balance after the operation
+  bloasis.common.Money new_balance = 2;
+
+  // ISO 8601 timestamp of the update
+  string timestamp = 3;
+}
+
+// CreatePositionRequest - Request to create a new position
+message CreatePositionRequest {
+  // User identifier
+  string user_id = 1;
+
+  // Stock ticker symbol (e.g., "AAPL", "GOOGL")
+  string symbol = 2;
+
+  // Number of shares to add
+  int32 quantity = 3;
+
+  // Cost per share for this purchase
+  // Uses Money type for Decimal precision
+  bloasis.common.Money cost_per_share = 4;
+
+  // Currency code (default: "USD")
+  string currency = 5;
+}
+
+// CreatePositionResponse - Response after creating a position
+message CreatePositionResponse {
+  // Whether the operation was successful
+  bool success = 1;
+
+  // The created position
+  Position position = 2;
+
+  // ISO 8601 timestamp of creation
+  string timestamp = 3;
+}
+
+// UpdatePositionRequest - Request to update an existing position
+message UpdatePositionRequest {
+  // User identifier
+  string user_id = 1;
+
+  // Stock ticker symbol to update
+  string symbol = 2;
+
+  // Quantity change (positive to add, negative to reduce)
+  // If operation is "set", this is the new absolute quantity
+  int32 quantity_delta = 3;
+
+  // New average cost (only used when adding shares)
+  // When adding: new_avg = ((old_qty * old_avg) + (delta * cost)) / new_qty
+  bloasis.common.Money cost_per_share = 4;
+
+  // Current market price for the symbol
+  bloasis.common.Money current_price = 5;
+}
+
+// UpdatePositionResponse - Response after updating a position
+message UpdatePositionResponse {
+  // Whether the operation was successful
+  bool success = 1;
+
+  // The updated position
+  Position position = 2;
+
+  // ISO 8601 timestamp of update
+  string timestamp = 3;
+}
+
+// DeletePositionRequest - Request to delete a position
+message DeletePositionRequest {
+  // User identifier
+  string user_id = 1;
+
+  // Stock ticker symbol to delete
+  string symbol = 2;
+}
+
+// DeletePositionResponse - Response after deleting a position
+message DeletePositionResponse {
+  // Whether the operation was successful
+  bool success = 1;
+
+  // ISO 8601 timestamp of deletion
+  string timestamp = 2;
 }
