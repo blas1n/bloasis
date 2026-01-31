@@ -4,6 +4,85 @@ Practical guide for implementing microservices in BLOASIS.
 
 ---
 
+## Service Structure Standard
+
+Each service follows this structure:
+
+```
+services/<service-name>/
+├── src/
+│   ├── __init__.py
+│   ├── main.py           # gRPC server only (no HTTP)
+│   ├── service.py        # gRPC Servicer implementation
+│   ├── config.py         # Pydantic-based configuration
+│   ├── models.py         # Business logic
+│   └── clients/          # External API clients
+├── tests/
+│   ├── __init__.py
+│   ├── conftest.py
+│   └── test_*.py
+├── pyproject.toml        # Dependencies managed here (uv)
+├── .env.example
+└── README.md
+```
+
+**What NOT to include:**
+- Dockerfile (managed at root level)
+- requirements.txt (use pyproject.toml + uv only)
+- proto symlink (access via PYTHONPATH)
+- shared code copies
+- FastAPI or HTTP endpoints (Kong handles HTTP-to-gRPC transcoding)
+
+---
+
+## Import Rules
+
+PYTHONPATH is set to `/workspace`, so:
+
+```python
+# Correct
+from shared.generated import market_regime_pb2
+from shared.utils import PostgresClient, setup_logger
+
+# Wrong (sys.path manipulation forbidden)
+import sys
+sys.path.insert(0, ...)
+```
+
+---
+
+## Environment Configuration (config.py)
+
+All services MUST include a Pydantic-based configuration class in `src/config.py`:
+
+```python
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+class ServiceConfig(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    # Service identity (no http_port - Kong handles HTTP)
+    service_name: str = "market-regime"
+    grpc_port: int = 50051
+
+    # Infrastructure
+    redis_host: str = "localhost"
+    redis_port: int = 6379
+    redpanda_brokers: str = "localhost:9092"
+    database_url: str = ""
+
+    # Optional API keys
+    fingpt_api_key: str = ""
+```
+
+**Note**: Services expose only gRPC. Kong Gateway handles HTTP-to-gRPC transcoding.
+
+---
+
 ## Creating a New Service
 
 ### 1. Service Setup
@@ -13,13 +92,10 @@ Practical guide for implementing microservices in BLOASIS.
 mkdir -p services/market-regime/{src,tests}
 cd services/market-regime
 
-# Create proto symlink
-ln -s ../../shared/proto proto
-
 # Create base files
-touch src/__init__.py src/main.py src/service.py src/models.py
-touch tests/__init__.py tests/test_service.py
-touch Dockerfile requirements.txt README.md
+touch src/__init__.py src/main.py src/service.py src/config.py src/models.py
+touch tests/__init__.py tests/conftest.py tests/test_service.py
+touch pyproject.toml .env.example README.md
 ```
 
 ### 2. Proto Definition (shared/proto/)
@@ -52,80 +128,90 @@ message RegimeResponse {
 
 ### 3. Service Implementation (src/)
 
-**src/main.py** - Server Entry Point:
+**src/main.py** - Server Entry Point (gRPC only):
 ```python
+"""
+Service - gRPC only.
+
+Kong Gateway handles HTTP-to-gRPC transcoding.
+"""
+
 import asyncio
+from typing import Optional
+
 import grpc
-import logging
-from concurrent import futures
-from fastapi import FastAPI
-from contextlib import asynccontextmanager
+from grpc_health.v1 import health, health_pb2, health_pb2_grpc
 
-from shared.proto import market_regime_pb2_grpc
-from .service import MarketRegimeService
-from shared.utils.logging import setup_logging
+from shared.generated import market_regime_pb2_grpc
+from shared.utils import PostgresClient, RedisClient, RedpandaClient, setup_logger
 
-# Setup logging
-setup_logging()
-logger = logging.getLogger(__name__)
+from .config import config
+from .service import MarketRegimeServicer
+
+logger = setup_logger(__name__)
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """FastAPI lifespan for startup/shutdown."""
-    logger.info("Service starting up")
-    # Startup: Initialize clients
-    service = MarketRegimeService()
-    await service.initialize()
+async def serve() -> None:
+    """Start and run the gRPC server."""
+    logger.info(f"Starting {config.service_name} service...")
 
-    yield
+    # Initialize clients
+    redis_client = RedisClient()
+    await redis_client.connect()
 
-    # Shutdown: Close connections
-    logger.info("Service shutting down")
-    await service.shutdown()
+    redpanda_client = RedpandaClient()
+    await redpanda_client.start()
 
+    postgres_client = PostgresClient()
+    await postgres_client.connect()
 
-app = FastAPI(lifespan=lifespan)
+    # Create gRPC server
+    server = grpc.aio.server()
 
-
-@app.get("/health")
-async def health():
-    """Health check endpoint."""
-    return {"status": "healthy", "service": "market-regime"}
-
-
-@app.get("/ready")
-async def ready():
-    """Readiness check endpoint."""
-    # Check dependencies (DB, Redis, etc.)
-    return {"status": "ready"}
-
-
-async def serve_grpc():
-    """Start gRPC server."""
-    server = grpc.aio.server(
-        futures.ThreadPoolExecutor(max_workers=10),
-        options=[
-            ('grpc.max_send_message_length', 50 * 1024 * 1024),
-            ('grpc.max_receive_message_length', 50 * 1024 * 1024),
-        ]
+    # Add service
+    servicer = MarketRegimeServicer(
+        redis_client=redis_client,
+        redpanda_client=redpanda_client,
+        postgres_client=postgres_client,
     )
+    market_regime_pb2_grpc.add_MarketRegimeServiceServicer_to_server(servicer, server)
 
-    service = MarketRegimeService()
-    market_regime_pb2_grpc.add_MarketRegimeServiceServicer_to_server(
-        service, server
+    # Add gRPC health check service
+    health_servicer = health.HealthServicer()
+    health_servicer.set("", health_pb2.HealthCheckResponse.SERVING)
+    health_servicer.set(
+        "bloasis.market_regime.MarketRegimeService",
+        health_pb2.HealthCheckResponse.SERVING
     )
+    health_pb2_grpc.add_HealthServicer_to_server(health_servicer, server)
 
-    port = 50051
-    server.add_insecure_port(f'[::]:{port}')
-    logger.info(f"gRPC server starting on port {port}")
-
+    # Start server
+    listen_addr = f"[::]:{config.grpc_port}"
+    server.add_insecure_port(listen_addr)
     await server.start()
-    await server.wait_for_termination()
+    logger.info(f"gRPC server started on {listen_addr}")
+
+    # Handle shutdown
+    async def shutdown() -> None:
+        logger.info("Shutting down...")
+        await server.stop(grace=5)
+        await postgres_client.close()
+        await redpanda_client.stop()
+        await redis_client.close()
+
+    try:
+        await server.wait_for_termination()
+    except asyncio.CancelledError:
+        await shutdown()
 
 
-if __name__ == '__main__':
-    asyncio.run(serve_grpc())
+def main() -> None:
+    """Main entry point."""
+    asyncio.run(serve())
+
+
+if __name__ == "__main__":
+    main()
 ```
 
 **src/service.py** - Business Logic:
@@ -227,10 +313,9 @@ class RegimeClassifier:
 
 **services/market-regime/.env.example**:
 ```bash
-# Service config
+# Service config (no HTTP_PORT - Kong handles HTTP)
 SERVICE_NAME=market-regime
 GRPC_PORT=50051
-HTTP_PORT=8080
 
 # Redis
 REDIS_HOST=redis
@@ -239,27 +324,24 @@ REDIS_PORT=6379
 # Redpanda
 REDPANDA_BROKERS=redpanda:9092
 
+# Database
+DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/bloasis
+
 # External APIs
 FINGPT_API_KEY=your_api_key_here
-ALPHA_VANTAGE_KEY=your_api_key_here
 
 # Logging
 LOG_LEVEL=INFO
 ```
 
-**Loading environment**:
+**Loading environment via Pydantic**:
 ```python
-import os
-from dotenv import load_dotenv
+from .config import config
 
-load_dotenv()
-
-GRPC_PORT = int(os.getenv('GRPC_PORT', 50051))
-REDIS_HOST = os.getenv('REDIS_HOST', 'localhost')
-FINGPT_API_KEY = os.getenv('FINGPT_API_KEY')
-
-if not FINGPT_API_KEY:
-    raise ValueError("FINGPT_API_KEY not set")
+# Access configuration - validated at import time
+grpc_port = config.grpc_port
+redis_host = config.redis_host
+fingpt_api_key = config.fingpt_api_key
 ```
 
 ---
@@ -595,37 +677,15 @@ signal.signal(signal.SIGTERM, handle_sigterm)
 
 ---
 
-## Dockerfile
-
-```dockerfile
-FROM python:3.11-slim
-
-WORKDIR /app
-
-# Install dependencies
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Copy service code
-COPY src/ ./src/
-COPY proto/ ./proto/
-
-# Copy shared code
-COPY --from=shared /app/shared /app/shared
-
-# Run
-CMD ["python", "-m", "src.main"]
-```
-
----
-
 ## Service Deployment Checklist
 
 ### Before Implementation Complete
 
 - [ ] gRPC service implemented (src/service.py)
 - [ ] Proto HTTP annotations verified
-- [ ] Health/Ready endpoints implemented
+- [ ] gRPC Health Check implemented (grpc.health.v1)
+- [ ] No HTTP endpoints (Kong handles HTTP-to-gRPC transcoding)
+- [ ] Pydantic config.py created and validated (no http_port)
 - [ ] Environment variables validated (.env.example)
 - [ ] Logging configured (structured logging)
 - [ ] Graceful shutdown implemented
@@ -639,8 +699,7 @@ CMD ["python", "-m", "src.main"]
 
 ### Deployment Ready
 
-- [ ] Dockerfile created
-- [ ] Added to docker-compose.yml
+- [ ] Added to root docker-compose.yml
 - [ ] Consul service registration
 - [ ] Kong routing configured (if external)
 

@@ -17,6 +17,10 @@ plugins:
   - remote: buf.build/grpc/python
     out: ../generated
 
+  # Python type stubs (.pyi) for IDE support
+  - remote: buf.build/community/nipunn1313-mypy
+    out: ../generated
+
 # Input proto files
 inputs:
   - directory: .

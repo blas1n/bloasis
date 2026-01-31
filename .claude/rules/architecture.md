@@ -129,6 +129,123 @@ service MarketRegimeService {
 }
 ```
 
+### 8.1. gRPC-Only Services
+
+**Services MUST expose gRPC only. NO HTTP endpoints.**
+
+**Why**: Kong Gateway handles HTTP-to-gRPC transcoding. Services don't need HTTP.
+
+```python
+# Correct - gRPC only with gRPC Health Check
+import grpc
+from grpc_health.v1 import health, health_pb2, health_pb2_grpc
+
+server = grpc.aio.server()
+market_regime_pb2_grpc.add_MarketRegimeServiceServicer_to_server(servicer, server)
+
+# Add gRPC health check
+health_servicer = health.HealthServicer()
+health_servicer.set("", health_pb2.HealthCheckResponse.SERVING)
+health_pb2_grpc.add_HealthServicer_to_server(health_servicer, server)
+
+# Wrong - Do NOT use FastAPI/HTTP
+from fastapi import FastAPI
+app = FastAPI()  # NO!
+
+@app.get("/health")  # NO! Use gRPC health check instead
+async def health():
+    return {"status": "healthy"}
+```
+
+**Health checks use gRPC Health Checking Protocol (grpc.health.v1)**:
+- Kubernetes/Docker can use `grpc_health_probe`
+- No HTTP /health or /ready endpoints needed
+
+### 9. Python Path Configuration
+
+**NEVER use sys.path.insert() for imports.**
+
+**ALWAYS use PYTHONPATH environment variable or editable install.**
+
+Why: sys.path manipulation breaks depending on execution location, and IDE auto-completion becomes unstable.
+
+```python
+# Wrong - sys.path manipulation (NO!)
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "shared"))
+
+# Correct - PYTHONPATH is already set
+from shared.generated import market_regime_pb2
+from shared.utils import PostgresClient
+```
+
+**PYTHONPATH configuration locations:**
+- Development: `.devcontainer/Dockerfile` or `devcontainer.json`
+- Testing: `pyproject.toml` `[tool.pytest.ini_options]`
+- Production: During Docker image build
+
+### 10. Dockerfile Management
+
+**NEVER create service-level Dockerfiles.**
+
+**Docker configuration is managed at root level only:**
+- `.devcontainer/docker-compose.yml` (development)
+- `docker-compose.yml` (production, to be added)
+
+Why: Centralized management ensures consistency, optimizes build context.
+
+### 10.1. Dependency Management
+
+**NEVER create requirements.txt in services.**
+
+**Use pyproject.toml + uv only:**
+
+```toml
+# services/market-regime/pyproject.toml
+[project]
+dependencies = [
+    "fastapi>=0.100.0",
+    "grpcio>=1.60.0",
+    "pydantic-settings>=2.0.0",
+]
+```
+
+Why: Single source of truth for dependencies, uv is faster and more reliable.
+
+### 11. Environment Variable Validation
+
+**ALWAYS validate required environment variables at startup.**
+
+```python
+# Correct - Pydantic-based validation
+from pydantic_settings import BaseSettings
+
+class ServiceConfig(BaseSettings):
+    service_name: str
+    grpc_port: int = 50051
+    redis_host: str
+    database_url: str
+
+    class Config:
+        env_file = ".env"
+
+config = ServiceConfig()  # Auto-validation at startup
+```
+
+### 12. Proto Generated Files Management
+
+**NEVER commit generated proto files to git.**
+
+**Proto generated files are auto-generated at build time:**
+- `shared/generated/` directory is included in `.gitignore`
+- CI/CD runs `buf generate`
+- Local development runs `make proto-generate`
+
+```gitignore
+# .gitignore
+shared/generated/
+```
+
 ## Verification Checklist
 
 Before implementing ANY service:
@@ -140,3 +257,10 @@ Before implementing ANY service:
 - [ ] Decimal for money
 - [ ] Proto HTTP annotations
 - [ ] Follows Tier 1-2 caching strategy
+- [ ] No sys.path.insert() (use PYTHONPATH)
+- [ ] No service-level Dockerfile
+- [ ] No requirements.txt (use pyproject.toml + uv)
+- [ ] Pydantic config.py for env validation (no http_port)
+- [ ] gRPC-only (no FastAPI/HTTP endpoints)
+- [ ] gRPC Health Check implemented (grpc.health.v1)
+- [ ] Proto generated files not committed

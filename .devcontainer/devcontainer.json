@@ -7,6 +7,10 @@
   "waitFor": "onCreateCommand",
   // Lifecycle scripts
   "postStartCommand": "bash .devcontainer/scripts/post-start.sh",
+  // Remote environment variables
+  "remoteEnv": {
+    "PYTHONPATH": "/workspace:/workspace/shared/generated"
+  },
   // VS Code customization
   "customizations": {
     "vscode": {
