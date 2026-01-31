@@ -51,7 +51,59 @@ service MarketRegimeService {
 
   // Get historical regime classifications
   rpc GetRegimeHistory(GetRegimeHistoryRequest) returns (GetRegimeHistoryResponse);
+
+  // Save a regime classification (internal-only, no HTTP annotation)
+  rpc SaveRegime(SaveRegimeRequest) returns (SaveRegimeResponse);
 }
+```
+
+#### SaveRegime (Internal-Only)
+
+The `SaveRegime` RPC is an internal-only endpoint used by schedulers and backend services to persist regime classifications. It is **not exposed via REST** (no HTTP annotation in the proto).
+
+**Request:**
+```protobuf
+message SaveRegimeRequest {
+  string regime = 1;      // Required: crisis, normal_bear, normal_bull, euphoria, high_volatility, low_volatility
+  double confidence = 2;  // Required: 0.0 to 1.0
+  string trigger = 3;     // Optional: baseline (default), fomc, circuit_breaker, earnings_season, geopolitical
+  string timestamp = 4;   // Optional: ISO 8601. Uses current UTC time if not provided.
+}
+```
+
+**Response:**
+```protobuf
+message SaveRegimeResponse {
+  bool success = 1;                    // Whether the save was successful
+  GetCurrentRegimeResponse regime = 2; // The saved regime data
+}
+```
+
+**Behavior:**
+- Validates regime value against allowed values
+- Validates confidence is between 0.0 and 1.0
+- Persists to PostgreSQL via repository
+- Updates Redis cache with new regime
+- Publishes `regime_saved` event to Redpanda
+
+**Example usage (gRPC client):**
+```python
+import grpc
+from shared.generated import market_regime_pb2, market_regime_pb2_grpc
+
+async def save_regime():
+    channel = grpc.aio.insecure_channel('localhost:50051')
+    stub = market_regime_pb2_grpc.MarketRegimeServiceStub(channel)
+
+    request = market_regime_pb2.SaveRegimeRequest(
+        regime="crisis",
+        confidence=0.95,
+        trigger="circuit_breaker",
+    )
+    response = await stub.SaveRegime(request)
+
+    if response.success:
+        print(f"Saved regime: {response.regime.regime}")
 ```
 
 ### gRPC Health Check

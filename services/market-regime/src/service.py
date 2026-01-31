@@ -8,7 +8,7 @@ Implements the MarketRegimeService gRPC interface with:
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 import grpc
@@ -26,6 +26,16 @@ CACHE_TTL = 21600  # 6 hours in seconds
 
 # Redpanda topic
 REGIME_CHANGE_TOPIC = "regime-change"
+
+# Valid regime values
+VALID_REGIMES = {
+    "crisis",
+    "normal_bear",
+    "normal_bull",
+    "euphoria",
+    "high_volatility",
+    "low_volatility",
+}
 
 
 class MarketRegimeServicer(market_regime_pb2_grpc.MarketRegimeServiceServicer):
@@ -219,3 +229,117 @@ class MarketRegimeServicer(market_regime_pb2_grpc.MarketRegimeServiceServicer):
         except Exception as e:
             # Log but don't fail the request if persistence fails
             logger.warning(f"Failed to persist regime to database: {e}")
+
+    async def SaveRegime(
+        self,
+        request: market_regime_pb2.SaveRegimeRequest,
+        context: grpc.aio.ServicerContext,
+    ) -> market_regime_pb2.SaveRegimeResponse:
+        """
+        Save a regime classification to the database.
+
+        Used by schedulers or external services to record regime changes.
+        Also updates cache and publishes event to Redpanda.
+
+        Args:
+            request: The gRPC request containing regime data.
+            context: The gRPC servicer context.
+
+        Returns:
+            SaveRegimeResponse with success status and saved regime data.
+        """
+        try:
+            # Validate regime value
+            if request.regime not in VALID_REGIMES:
+                context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
+                context.set_details(
+                    f"Invalid regime value: {request.regime}. "
+                    f"Must be one of: {', '.join(sorted(VALID_REGIMES))}"
+                )
+                return market_regime_pb2.SaveRegimeResponse(success=False)
+
+            # Validate confidence score
+            if not (0.0 <= request.confidence <= 1.0):
+                context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
+                context.set_details(
+                    f"Invalid confidence value: {request.confidence}. "
+                    "Must be between 0.0 and 1.0"
+                )
+                return market_regime_pb2.SaveRegimeResponse(success=False)
+
+            # Use provided timestamp or current UTC time
+            if request.timestamp:
+                timestamp_str = request.timestamp
+                try:
+                    # Validate timestamp format
+                    timestamp_dt = datetime.fromisoformat(
+                        timestamp_str.replace("Z", "+00:00")
+                    )
+                except ValueError:
+                    context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
+                    context.set_details(
+                        f"Invalid timestamp format: {request.timestamp}. "
+                        "Must be ISO 8601 format."
+                    )
+                    return market_regime_pb2.SaveRegimeResponse(success=False)
+            else:
+                timestamp_dt = datetime.now(timezone.utc)
+                timestamp_str = timestamp_dt.isoformat()
+
+            # Create RegimeData
+            regime_data = RegimeData(
+                regime=request.regime,
+                confidence=request.confidence,
+                timestamp=timestamp_str,
+                trigger=request.trigger or "baseline",
+            )
+
+            # Persist to database via repository
+            await self._persist_regime(regime_data)
+
+            # Update Redis cache with new regime
+            if self.redis:
+                cache_data = {
+                    "regime": regime_data.regime,
+                    "confidence": regime_data.confidence,
+                    "timestamp": regime_data.timestamp,
+                    "trigger": regime_data.trigger,
+                }
+                await self.redis.setex(CACHE_KEY, CACHE_TTL, cache_data)
+                logger.info(f"Updated cache with new regime: {regime_data.regime}")
+
+            # Publish regime-change event to Redpanda
+            if self.redpanda:
+                event_data = {
+                    "event_type": "regime_saved",
+                    "regime": regime_data.regime,
+                    "confidence": regime_data.confidence,
+                    "timestamp": regime_data.timestamp,
+                    "trigger": regime_data.trigger,
+                }
+                await self.redpanda.publish(REGIME_CHANGE_TOPIC, event_data)
+                logger.info(f"Published regime-saved event to {REGIME_CHANGE_TOPIC}")
+
+            # Build response
+            regime_response = market_regime_pb2.GetCurrentRegimeResponse(
+                regime=regime_data.regime,
+                confidence=regime_data.confidence,
+                timestamp=regime_data.timestamp,
+                trigger=regime_data.trigger,
+            )
+
+            logger.info(
+                f"Successfully saved regime: {regime_data.regime} "
+                f"(confidence: {regime_data.confidence})"
+            )
+
+            return market_regime_pb2.SaveRegimeResponse(
+                success=True,
+                regime=regime_response,
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to save regime: {e}")
+            context.set_code(grpc.StatusCode.INTERNAL)
+            context.set_details(f"Failed to save regime: {str(e)}")
+            return market_regime_pb2.SaveRegimeResponse(success=False)

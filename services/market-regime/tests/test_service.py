@@ -585,6 +585,440 @@ class TestMainModule:
             mock_health_servicer.set.assert_called()
 
 
+class TestSaveRegime:
+    """Tests for SaveRegime gRPC method."""
+
+    @pytest.fixture
+    def mock_redis(self) -> AsyncMock:
+        """Create mock Redis client."""
+        mock = AsyncMock()
+        mock.get = AsyncMock(return_value=None)
+        mock.setex = AsyncMock()
+        mock.client = MagicMock()
+        return mock
+
+    @pytest.fixture
+    def mock_redpanda(self) -> AsyncMock:
+        """Create mock Redpanda client."""
+        mock = AsyncMock()
+        mock.publish = AsyncMock()
+        mock.producer = MagicMock()
+        return mock
+
+    @pytest.fixture
+    def mock_postgres(self) -> MagicMock:
+        """Create mock PostgreSQL client."""
+        mock = MagicMock()
+        mock.engine = MagicMock()
+        return mock
+
+    @pytest.fixture
+    def mock_repository(self) -> AsyncMock:
+        """Create mock Repository for database operations."""
+        mock = AsyncMock()
+        mock.save = AsyncMock()
+        mock.get_history = AsyncMock(return_value=[])
+        return mock
+
+    @pytest.fixture
+    def mock_context(self) -> MagicMock:
+        """Create mock gRPC context."""
+        context = MagicMock()
+        context.set_code = MagicMock()
+        context.set_details = MagicMock()
+        return context
+
+    @pytest.mark.asyncio
+    async def test_save_regime_success(
+        self, mock_redis: AsyncMock, mock_redpanda: AsyncMock,
+        mock_postgres: MagicMock, mock_repository: AsyncMock, mock_context: MagicMock
+    ) -> None:
+        """Should save valid regime successfully."""
+        from shared.generated import market_regime_pb2
+
+        from src.service import MarketRegimeServicer
+
+        servicer = MarketRegimeServicer(
+            redis_client=mock_redis,
+            redpanda_client=mock_redpanda,
+            postgres_client=mock_postgres,
+            repository=mock_repository,
+        )
+
+        request = market_regime_pb2.SaveRegimeRequest(
+            regime="crisis",
+            confidence=0.95,
+            trigger="circuit_breaker",
+            timestamp="2025-01-26T14:30:00Z",
+        )
+        response = await servicer.SaveRegime(request, mock_context)
+
+        assert response.success is True
+        assert response.regime.regime == "crisis"
+        assert response.regime.confidence == 0.95
+        assert response.regime.trigger == "circuit_breaker"
+        assert response.regime.timestamp == "2025-01-26T14:30:00Z"
+
+        # Verify repository.save was called
+        mock_repository.save.assert_called_once()
+
+        # Verify cache was updated
+        mock_redis.setex.assert_called_once()
+        call_args = mock_redis.setex.call_args[0]
+        assert call_args[0] == "market:regime:current"
+        assert call_args[1] == 21600  # 6 hours
+
+        # Verify event was published
+        mock_redpanda.publish.assert_called_once()
+        publish_args = mock_redpanda.publish.call_args[0]
+        assert publish_args[0] == "regime-change"
+        assert publish_args[1]["event_type"] == "regime_saved"
+        assert publish_args[1]["regime"] == "crisis"
+
+    @pytest.mark.asyncio
+    async def test_save_regime_invalid_regime(
+        self, mock_redis: AsyncMock, mock_redpanda: AsyncMock,
+        mock_postgres: MagicMock, mock_repository: AsyncMock, mock_context: MagicMock
+    ) -> None:
+        """Should return error for invalid regime value."""
+        import grpc
+        from shared.generated import market_regime_pb2
+
+        from src.service import MarketRegimeServicer
+
+        servicer = MarketRegimeServicer(
+            redis_client=mock_redis,
+            redpanda_client=mock_redpanda,
+            postgres_client=mock_postgres,
+            repository=mock_repository,
+        )
+
+        request = market_regime_pb2.SaveRegimeRequest(
+            regime="invalid_regime",
+            confidence=0.95,
+            trigger="baseline",
+        )
+        response = await servicer.SaveRegime(request, mock_context)
+
+        assert response.success is False
+        mock_context.set_code.assert_called_once_with(grpc.StatusCode.INVALID_ARGUMENT)
+        mock_context.set_details.assert_called_once()
+        assert "invalid_regime" in mock_context.set_details.call_args[0][0]
+
+        # Verify nothing was saved
+        mock_repository.save.assert_not_called()
+        mock_redis.setex.assert_not_called()
+        mock_redpanda.publish.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_save_regime_invalid_confidence_too_high(
+        self, mock_redis: AsyncMock, mock_redpanda: AsyncMock,
+        mock_postgres: MagicMock, mock_repository: AsyncMock, mock_context: MagicMock
+    ) -> None:
+        """Should return error for confidence > 1.0."""
+        import grpc
+        from shared.generated import market_regime_pb2
+
+        from src.service import MarketRegimeServicer
+
+        servicer = MarketRegimeServicer(
+            redis_client=mock_redis,
+            redpanda_client=mock_redpanda,
+            postgres_client=mock_postgres,
+            repository=mock_repository,
+        )
+
+        request = market_regime_pb2.SaveRegimeRequest(
+            regime="normal_bull",
+            confidence=1.5,  # Invalid
+            trigger="baseline",
+        )
+        response = await servicer.SaveRegime(request, mock_context)
+
+        assert response.success is False
+        mock_context.set_code.assert_called_once_with(grpc.StatusCode.INVALID_ARGUMENT)
+
+    @pytest.mark.asyncio
+    async def test_save_regime_invalid_confidence_negative(
+        self, mock_redis: AsyncMock, mock_redpanda: AsyncMock,
+        mock_postgres: MagicMock, mock_repository: AsyncMock, mock_context: MagicMock
+    ) -> None:
+        """Should return error for confidence < 0.0."""
+        import grpc
+        from shared.generated import market_regime_pb2
+
+        from src.service import MarketRegimeServicer
+
+        servicer = MarketRegimeServicer(
+            redis_client=mock_redis,
+            redpanda_client=mock_redpanda,
+            postgres_client=mock_postgres,
+            repository=mock_repository,
+        )
+
+        request = market_regime_pb2.SaveRegimeRequest(
+            regime="normal_bull",
+            confidence=-0.5,  # Invalid
+            trigger="baseline",
+        )
+        response = await servicer.SaveRegime(request, mock_context)
+
+        assert response.success is False
+        mock_context.set_code.assert_called_once_with(grpc.StatusCode.INVALID_ARGUMENT)
+
+    @pytest.mark.asyncio
+    async def test_save_regime_updates_cache(
+        self, mock_redis: AsyncMock, mock_redpanda: AsyncMock,
+        mock_postgres: MagicMock, mock_repository: AsyncMock, mock_context: MagicMock
+    ) -> None:
+        """Should update cache after saving regime."""
+        from shared.generated import market_regime_pb2
+
+        from src.service import MarketRegimeServicer
+
+        servicer = MarketRegimeServicer(
+            redis_client=mock_redis,
+            redpanda_client=mock_redpanda,
+            postgres_client=mock_postgres,
+            repository=mock_repository,
+        )
+
+        request = market_regime_pb2.SaveRegimeRequest(
+            regime="euphoria",
+            confidence=0.88,
+            trigger="fomc",
+            timestamp="2025-01-26T14:30:00Z",
+        )
+        response = await servicer.SaveRegime(request, mock_context)
+
+        assert response.success is True
+
+        # Verify cache was updated with correct data
+        mock_redis.setex.assert_called_once()
+        call_args = mock_redis.setex.call_args[0]
+        assert call_args[0] == "market:regime:current"
+        assert call_args[1] == 21600
+        cache_data = call_args[2]
+        assert cache_data["regime"] == "euphoria"
+        assert cache_data["confidence"] == 0.88
+        assert cache_data["trigger"] == "fomc"
+
+    @pytest.mark.asyncio
+    async def test_save_regime_publishes_event(
+        self, mock_redis: AsyncMock, mock_redpanda: AsyncMock,
+        mock_postgres: MagicMock, mock_repository: AsyncMock, mock_context: MagicMock
+    ) -> None:
+        """Should publish event to Redpanda after saving regime."""
+        from shared.generated import market_regime_pb2
+
+        from src.service import MarketRegimeServicer
+
+        servicer = MarketRegimeServicer(
+            redis_client=mock_redis,
+            redpanda_client=mock_redpanda,
+            postgres_client=mock_postgres,
+            repository=mock_repository,
+        )
+
+        request = market_regime_pb2.SaveRegimeRequest(
+            regime="low_volatility",
+            confidence=0.75,
+            trigger="earnings_season",
+            timestamp="2025-01-26T14:30:00Z",
+        )
+        response = await servicer.SaveRegime(request, mock_context)
+
+        assert response.success is True
+
+        # Verify event was published
+        mock_redpanda.publish.assert_called_once()
+        publish_args = mock_redpanda.publish.call_args[0]
+        assert publish_args[0] == "regime-change"
+        event_data = publish_args[1]
+        assert event_data["event_type"] == "regime_saved"
+        assert event_data["regime"] == "low_volatility"
+        assert event_data["confidence"] == 0.75
+        assert event_data["trigger"] == "earnings_season"
+
+    @pytest.mark.asyncio
+    async def test_save_regime_without_timestamp(
+        self, mock_redis: AsyncMock, mock_redpanda: AsyncMock,
+        mock_postgres: MagicMock, mock_repository: AsyncMock, mock_context: MagicMock
+    ) -> None:
+        """Should use current time when timestamp not provided."""
+        from shared.generated import market_regime_pb2
+
+        from src.service import MarketRegimeServicer
+
+        servicer = MarketRegimeServicer(
+            redis_client=mock_redis,
+            redpanda_client=mock_redpanda,
+            postgres_client=mock_postgres,
+            repository=mock_repository,
+        )
+
+        request = market_regime_pb2.SaveRegimeRequest(
+            regime="normal_bear",
+            confidence=0.80,
+            trigger="geopolitical",
+            # No timestamp provided
+        )
+        response = await servicer.SaveRegime(request, mock_context)
+
+        assert response.success is True
+        assert response.regime.regime == "normal_bear"
+        # Timestamp should be set to current time (ISO 8601 format)
+        assert "T" in response.regime.timestamp
+        assert response.regime.timestamp.endswith("+00:00")
+
+    @pytest.mark.asyncio
+    async def test_save_regime_invalid_timestamp_format(
+        self, mock_redis: AsyncMock, mock_redpanda: AsyncMock,
+        mock_postgres: MagicMock, mock_repository: AsyncMock, mock_context: MagicMock
+    ) -> None:
+        """Should return error for invalid timestamp format."""
+        import grpc
+        from shared.generated import market_regime_pb2
+
+        from src.service import MarketRegimeServicer
+
+        servicer = MarketRegimeServicer(
+            redis_client=mock_redis,
+            redpanda_client=mock_redpanda,
+            postgres_client=mock_postgres,
+            repository=mock_repository,
+        )
+
+        request = market_regime_pb2.SaveRegimeRequest(
+            regime="normal_bull",
+            confidence=0.85,
+            trigger="baseline",
+            timestamp="not-a-valid-timestamp",
+        )
+        response = await servicer.SaveRegime(request, mock_context)
+
+        assert response.success is False
+        mock_context.set_code.assert_called_once_with(grpc.StatusCode.INVALID_ARGUMENT)
+        assert "timestamp" in mock_context.set_details.call_args[0][0].lower()
+
+    @pytest.mark.asyncio
+    async def test_save_regime_default_trigger(
+        self, mock_redis: AsyncMock, mock_redpanda: AsyncMock,
+        mock_postgres: MagicMock, mock_repository: AsyncMock, mock_context: MagicMock
+    ) -> None:
+        """Should use 'baseline' as default trigger when not provided."""
+        from shared.generated import market_regime_pb2
+
+        from src.service import MarketRegimeServicer
+
+        servicer = MarketRegimeServicer(
+            redis_client=mock_redis,
+            redpanda_client=mock_redpanda,
+            postgres_client=mock_postgres,
+            repository=mock_repository,
+        )
+
+        request = market_regime_pb2.SaveRegimeRequest(
+            regime="high_volatility",
+            confidence=0.90,
+            # No trigger provided
+        )
+        response = await servicer.SaveRegime(request, mock_context)
+
+        assert response.success is True
+        assert response.regime.trigger == "baseline"
+
+    @pytest.mark.asyncio
+    async def test_save_regime_no_redis(
+        self, mock_redpanda: AsyncMock,
+        mock_postgres: MagicMock, mock_repository: AsyncMock, mock_context: MagicMock
+    ) -> None:
+        """Should work without Redis client."""
+        from shared.generated import market_regime_pb2
+
+        from src.service import MarketRegimeServicer
+
+        servicer = MarketRegimeServicer(
+            redis_client=None,
+            redpanda_client=mock_redpanda,
+            postgres_client=mock_postgres,
+            repository=mock_repository,
+        )
+
+        request = market_regime_pb2.SaveRegimeRequest(
+            regime="normal_bull",
+            confidence=0.85,
+            trigger="baseline",
+        )
+        response = await servicer.SaveRegime(request, mock_context)
+
+        assert response.success is True
+        # Verify event still published
+        mock_redpanda.publish.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_save_regime_no_redpanda(
+        self, mock_redis: AsyncMock,
+        mock_postgres: MagicMock, mock_repository: AsyncMock, mock_context: MagicMock
+    ) -> None:
+        """Should work without Redpanda client."""
+        from shared.generated import market_regime_pb2
+
+        from src.service import MarketRegimeServicer
+
+        servicer = MarketRegimeServicer(
+            redis_client=mock_redis,
+            redpanda_client=None,
+            postgres_client=mock_postgres,
+            repository=mock_repository,
+        )
+
+        request = market_regime_pb2.SaveRegimeRequest(
+            regime="normal_bull",
+            confidence=0.85,
+            trigger="baseline",
+        )
+        response = await servicer.SaveRegime(request, mock_context)
+
+        assert response.success is True
+        # Verify cache still updated
+        mock_redis.setex.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_save_regime_all_valid_regimes(
+        self, mock_redis: AsyncMock, mock_redpanda: AsyncMock,
+        mock_postgres: MagicMock, mock_repository: AsyncMock, mock_context: MagicMock
+    ) -> None:
+        """Should accept all valid regime values."""
+        from shared.generated import market_regime_pb2
+
+        from src.service import VALID_REGIMES, MarketRegimeServicer
+
+        servicer = MarketRegimeServicer(
+            redis_client=mock_redis,
+            redpanda_client=mock_redpanda,
+            postgres_client=mock_postgres,
+            repository=mock_repository,
+        )
+
+        for regime in VALID_REGIMES:
+            # Reset mocks for each iteration
+            mock_redis.reset_mock()
+            mock_redpanda.reset_mock()
+            mock_repository.reset_mock()
+            mock_context.reset_mock()
+
+            request = market_regime_pb2.SaveRegimeRequest(
+                regime=regime,
+                confidence=0.85,
+                trigger="baseline",
+            )
+            response = await servicer.SaveRegime(request, mock_context)
+
+            assert response.success is True, f"Failed for regime: {regime}"
+            assert response.regime.regime == regime
+
+
 class TestServicerErrors:
     """Test error handling in servicer."""
 
@@ -656,3 +1090,39 @@ class TestServicerErrors:
         # Should set error code
         mock_context.set_code.assert_called()
         assert len(response.regimes) == 0
+
+    @pytest.mark.asyncio
+    async def test_save_regime_exception(
+        self, mock_context: MagicMock
+    ) -> None:
+        """Should handle unexpected exceptions in SaveRegime gracefully."""
+        import grpc
+        from shared.generated import market_regime_pb2
+
+        from src.service import MarketRegimeServicer
+
+        # Create a mock redis that raises an unexpected exception
+        mock_redis = AsyncMock()
+        mock_redis.setex = AsyncMock(side_effect=Exception("Unexpected Redis error"))
+
+        # Create a mock repository that works fine
+        mock_repository = AsyncMock()
+        mock_repository.save = AsyncMock()
+
+        servicer = MarketRegimeServicer(
+            redis_client=mock_redis,
+            redpanda_client=None,
+            postgres_client=None,
+            repository=mock_repository,
+        )
+
+        request = market_regime_pb2.SaveRegimeRequest(
+            regime="normal_bull",
+            confidence=0.85,
+            trigger="baseline",
+        )
+        response = await servicer.SaveRegime(request, mock_context)
+
+        # Should set error code
+        mock_context.set_code.assert_called_once_with(grpc.StatusCode.INTERNAL)
+        assert response.success is False

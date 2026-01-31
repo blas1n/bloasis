@@ -26,6 +26,11 @@ service MarketRegimeService {
       get: "/v1/market-regime/history"
     };
   }
+
+  // SaveRegime saves a new regime classification to the database
+  // Internal use only: Called by schedulers or other backend services
+  // No HTTP annotation - not exposed via REST
+  rpc SaveRegime(SaveRegimeRequest) returns (SaveRegimeResponse);
 }
 
 // GetCurrentRegimeRequest - Request for current market regime
@@ -75,4 +80,28 @@ message GetRegimeHistoryResponse {
   // List of regime classifications within the requested time range
   // Ordered chronologically (oldest first)
   repeated GetCurrentRegimeResponse regimes = 1;
+}
+
+// SaveRegimeRequest - Request to save a regime classification
+message SaveRegimeRequest {
+  // Market regime classification (crisis, normal_bear, normal_bull, euphoria, etc.)
+  string regime = 1;
+
+  // Confidence score (0.0 to 1.0)
+  double confidence = 2;
+
+  // What triggered this classification (baseline, fomc, circuit_breaker, etc.)
+  string trigger = 3;
+
+  // Optional: ISO 8601 timestamp. If not provided, current time is used.
+  string timestamp = 4;
+}
+
+// SaveRegimeResponse - Response after saving regime
+message SaveRegimeResponse {
+  // Whether the operation was successful
+  bool success = 1;
+
+  // The saved regime data
+  GetCurrentRegimeResponse regime = 2;
 }
