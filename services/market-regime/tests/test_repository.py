@@ -50,7 +50,7 @@ class TestMarketRegimeRepository:
         repository = MarketRegimeRepository(postgres_client=mock_postgres)
 
         regime_data = RegimeData(
-            regime="normal_bull",
+            regime="bull",
             confidence=0.92,
             timestamp="2025-01-26T14:30:00Z",
             trigger="baseline",
@@ -62,7 +62,7 @@ class TestMarketRegimeRepository:
         # Verify session.add was called with a MarketRegimeRecord
         mock_postgres._session.add.assert_called_once()
         added_record = mock_postgres._session.add.call_args[0][0]
-        assert added_record.regime == "normal_bull"
+        assert added_record.regime == "bull"
         assert added_record.confidence == 0.92
         assert added_record.trigger == "baseline"
 
@@ -72,7 +72,7 @@ class TestMarketRegimeRepository:
         repository = MarketRegimeRepository(postgres_client=None)
 
         regime_data = RegimeData(
-            regime="normal_bull",
+            regime="bull",
             confidence=0.92,
             timestamp="2025-01-26T14:30:00Z",
             trigger="baseline",
@@ -89,7 +89,7 @@ class TestMarketRegimeRepository:
         """Should return regime history from database."""
         # Create mock ORM records
         mock_record1 = MagicMock(spec=MarketRegimeRecord)
-        mock_record1.regime = "normal_bull"
+        mock_record1.regime = "bull"
         mock_record1.confidence = 0.9
         mock_record1.timestamp = datetime(2025, 1, 25, 10, 0, 0, tzinfo=timezone.utc)
         mock_record1.trigger = "baseline"
@@ -113,7 +113,7 @@ class TestMarketRegimeRepository:
         records = await repository.get_history(start_time, end_time)
 
         assert len(records) == 2
-        assert records[0].regime == "normal_bull"
+        assert records[0].regime == "bull"
         assert records[1].regime == "crisis"
         mock_postgres._session.execute.assert_called_once()
 

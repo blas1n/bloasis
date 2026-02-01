@@ -1,0 +1,74 @@
+# Market Regime Classification Prompts
+# Managed separately from code for easier maintenance
+
+system: |
+  You are a financial market analyst specializing in market regime classification.
+  Analyze market conditions and classify the current market regime based on provided data.
+  Always respond with valid JSON matching the specified schema.
+
+classification:
+  template: |
+    Analyze the current market conditions and classify the market regime.
+
+    ## Market Data
+    - VIX (Volatility Index): {vix}
+    - S&P 500 Change (1 Month): {sp500_1m_change}%
+    - 52-Week High/Low Ratio: {high_low_ratio}
+
+    ## Macro Economic Indicators
+    - Federal Funds Rate: {fed_funds_rate}%
+    - 10Y-2Y Treasury Yield Spread: {yield_curve_10y_2y} bps
+    - CPI Year-over-Year: {cpi_yoy}%
+    - Unemployment Rate: {unemployment_rate}%
+    - Credit Spread (High Yield - Investment Grade): {credit_spread} bps
+
+    ## Classification Guidelines
+    Based on the data above, classify into ONE of these regimes:
+    - crisis: High volatility, risk-off environment. VIX > 30, major market drawdowns, flight to safety.
+    - bear: Declining market with moderate volatility. Negative momentum, risk reduction recommended.
+    - bull: Rising market with low-moderate volatility. Positive momentum, risk-on environment.
+    - sideways: Range-bound market with no clear direction. Mixed signals, neutral positioning.
+    - recovery: Transition from crisis/bear to bull. Improving conditions, gradual risk increase.
+
+    Provide your analysis as JSON with regime, confidence (0.0-1.0), reasoning, and key_indicators.
+
+  # JSON Schema for structured output
+  response_schema:
+    type: object
+    properties:
+      regime:
+        type: string
+        enum: ["crisis", "bear", "bull", "sideways", "recovery"]
+        description: "Market regime classification"
+      confidence:
+        type: number
+        minimum: 0.0
+        maximum: 1.0
+        description: "Confidence score for the classification"
+      reasoning:
+        type: string
+        description: "Brief explanation for the classification"
+      key_indicators:
+        type: array
+        items:
+          type: string
+        description: "Key indicators that influenced the classification"
+    required: ["regime", "confidence", "reasoning", "key_indicators"]
+
+  # Default values for missing indicators
+  defaults:
+    vix: "N/A"
+    sp500_1m_change: "N/A"
+    high_low_ratio: "N/A"
+    fed_funds_rate: "N/A"
+    yield_curve_10y_2y: "N/A"
+    cpi_yoy: "N/A"
+    unemployment_rate: "N/A"
+    credit_spread: "N/A"
+
+# Model parameters
+parameters:
+  max_new_tokens: 500
+  temperature: 0.1
+  top_p: 0.9
+  do_sample: false  # Deterministic output for consistency

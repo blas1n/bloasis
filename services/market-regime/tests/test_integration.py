@@ -83,9 +83,9 @@ class TestServiceIntegration:
         request = market_regime_pb2.GetCurrentRegimeRequest(force_refresh=False)
         response = await servicer.GetCurrentRegime(request, mock_context)
 
-        # Verify classification
-        assert response.regime == "normal_bull"
-        assert response.confidence == 0.92
+        # Verify classification (rule-based fallback with default VIX=20)
+        assert response.regime == "sideways"
+        assert response.confidence == 0.65
 
         # Verify cache was set
         redis.setex.assert_called_once()
@@ -99,7 +99,7 @@ class TestServiceIntegration:
         # Verify database insert via ORM session.add
         postgres._session.add.assert_called_once()
         added_record = postgres._session.add.call_args[0][0]
-        assert added_record.regime == "normal_bull"
+        assert added_record.regime == "sideways"
 
     @pytest.mark.asyncio
     async def test_cache_and_refresh_cycle(
@@ -126,7 +126,7 @@ class TestServiceIntegration:
 
         # Second request - simulate cache hit
         redis.get.return_value = {
-            "regime": "normal_bull",
+            "regime": "bull",
             "confidence": 0.92,
             "timestamp": "2025-01-26T14:30:00Z",
             "trigger": "baseline",
@@ -136,7 +136,7 @@ class TestServiceIntegration:
         response2 = await servicer.GetCurrentRegime(request2, mock_context)
 
         # Should use cached data
-        assert response2.regime == "normal_bull"
+        assert response2.regime == "bull"
         # Cache set should only be called once (from first request)
         assert redis.setex.call_count == 1
 
@@ -168,13 +168,13 @@ class TestServiceIntegration:
 
         # Create mock ORM records
         mock_record1 = MagicMock(spec=MarketRegimeRecord)
-        mock_record1.regime = "normal_bull"
+        mock_record1.regime = "bull"
         mock_record1.confidence = 0.85
         mock_record1.timestamp = datetime(2025, 1, 24, 10, 0, 0, tzinfo=timezone.utc)
         mock_record1.trigger = "baseline"
 
         mock_record2 = MagicMock(spec=MarketRegimeRecord)
-        mock_record2.regime = "high_volatility"
+        mock_record2.regime = "crisis"
         mock_record2.confidence = 0.78
         mock_record2.timestamp = datetime(2025, 1, 25, 10, 0, 0, tzinfo=timezone.utc)
         mock_record2.trigger = "fomc"
@@ -206,8 +206,8 @@ class TestServiceIntegration:
         response = await servicer.GetRegimeHistory(request, mock_context)
 
         assert len(response.regimes) == 3
-        assert response.regimes[0].regime == "normal_bull"
-        assert response.regimes[1].regime == "high_volatility"
+        assert response.regimes[0].regime == "bull"
+        assert response.regimes[1].regime == "crisis"
         assert response.regimes[2].regime == "crisis"
 
         # Verify session.execute was called
@@ -235,8 +235,8 @@ class TestServiceIntegration:
         request = market_regime_pb2.GetCurrentRegimeRequest(force_refresh=False)
         response = await servicer.GetCurrentRegime(request, mock_context)
 
-        # Should still work
-        assert response.regime == "normal_bull"
+        # Should still work (rule-based fallback)
+        assert response.regime == "sideways"
         # Event should still be published
         redpanda.publish.assert_called_once()
 
@@ -262,7 +262,7 @@ class TestServiceIntegration:
         request = market_regime_pb2.GetCurrentRegimeRequest(force_refresh=False)
         response = await servicer.GetCurrentRegime(request, mock_context)
 
-        # Should still work
-        assert response.regime == "normal_bull"
+        # Should still work (rule-based fallback)
+        assert response.regime == "sideways"
         # Cache should still be set
         redis.setex.assert_called_once()

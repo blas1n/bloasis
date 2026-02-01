@@ -30,11 +30,10 @@ REGIME_CHANGE_TOPIC = "regime-change"
 # Valid regime values
 VALID_REGIMES = {
     "crisis",
-    "normal_bear",
-    "normal_bull",
-    "euphoria",
-    "high_volatility",
-    "low_volatility",
+    "bear",
+    "bull",
+    "sideways",
+    "recovery",
 }
 
 
@@ -52,6 +51,7 @@ class MarketRegimeServicer(market_regime_pb2_grpc.MarketRegimeServiceServicer):
         redpanda_client: Optional[RedpandaClient] = None,
         postgres_client: Optional[PostgresClient] = None,
         repository: Optional[MarketRegimeRepository] = None,
+        classifier: Optional[RegimeClassifier] = None,
     ) -> None:
         """
         Initialize the servicer with required clients.
@@ -61,12 +61,13 @@ class MarketRegimeServicer(market_regime_pb2_grpc.MarketRegimeServiceServicer):
             redpanda_client: Redpanda client for event publishing.
             postgres_client: PostgreSQL client for persistence.
             repository: Repository for database operations.
+            classifier: RegimeClassifier with FinGPT integration.
         """
         self.redis = redis_client
         self.redpanda = redpanda_client
         self.postgres = postgres_client
         self.repository = repository or MarketRegimeRepository(postgres_client)
-        self.classifier = RegimeClassifier()
+        self.classifier = classifier or RegimeClassifier()
 
     async def GetCurrentRegime(
         self,

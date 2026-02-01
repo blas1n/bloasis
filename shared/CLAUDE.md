@@ -61,7 +61,7 @@ from shared.proto import market_regime_pb2, market_regime_pb2_grpc
 class MarketRegimeService(market_regime_pb2_grpc.MarketRegimeServiceServicer):
     async def GetCurrentRegime(self, request, context):
         # Implementation...
-        return market_regime_pb2.RegimeResponse(regime="normal_bull")
+        return market_regime_pb2.RegimeResponse(regime="bull")
 ```
 
 ### 2. Use Proto Messages (inter-service communication)
@@ -177,7 +177,7 @@ from shared.proto import market_regime_pb2
 
 async def GetCurrentRegime(self, request, context):
     # Use internal model
-    regime = MarketRegime(regime="normal_bull", confidence=0.92)
+    regime = MarketRegime(regime="bull", confidence=0.92)
 
     # Convert to Proto message and return
     return market_regime_pb2.RegimeResponse(

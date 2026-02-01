@@ -44,11 +44,10 @@ message GetCurrentRegimeRequest {
 message GetCurrentRegimeResponse {
   // Market regime classification:
   // - "crisis": High volatility, risk-off (VIX > 30, major drawdowns)
-  // - "normal_bear": Declining market, moderate volatility
-  // - "normal_bull": Rising market, low-moderate volatility
-  // - "euphoria": Extreme optimism, potential bubble conditions
-  // - "high_volatility": Elevated VIX without clear direction
-  // - "low_volatility": Unusually calm markets, potential complacency
+  // - "bear": Declining market, moderate volatility
+  // - "bull": Rising market, low-moderate volatility
+  // - "sideways": Range-bound, no clear direction
+  // - "recovery": Transition from crisis/bear to bull
   string regime = 1;
 
   // Confidence score from FinGPT classification (0.0 to 1.0)
@@ -84,7 +83,7 @@ message GetRegimeHistoryResponse {
 
 // SaveRegimeRequest - Request to save a regime classification
 message SaveRegimeRequest {
-  // Market regime classification (crisis, normal_bear, normal_bull, euphoria, etc.)
+  // Market regime classification (crisis, bear, bull, sideways, recovery)
   string regime = 1;
 
   // Confidence score (0.0 to 1.0)

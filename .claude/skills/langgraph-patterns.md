@@ -118,7 +118,7 @@ def route_by_regime(state: AnalysisState) -> str:
 
     if regime == "crisis":
         return "defensive"
-    elif regime in ["normal_bull", "euphoria"]:
+    elif regime == "bull":
         return "aggressive"
     else:
         return "balanced"

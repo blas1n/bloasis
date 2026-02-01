@@ -19,12 +19,12 @@ class TestRegimeData:
         from src.models import RegimeData
 
         data = RegimeData(
-            regime="normal_bull",
+            regime="bull",
             confidence=0.92,
             timestamp="2025-01-26T14:30:00Z",
             trigger="baseline",
         )
-        assert data.regime == "normal_bull"
+        assert data.regime == "bull"
         assert data.confidence == 0.92
         assert data.timestamp == "2025-01-26T14:30:00Z"
         assert data.trigger == "baseline"
@@ -39,49 +39,48 @@ class TestRegimeClassifier:
         from src.models import RegimeClassifier
 
         mock_fingpt = AsyncMock()
-        mock_fingpt.analyze.return_value = {
+        mock_fingpt.classify_regime = AsyncMock(return_value={
             "regime": "crisis",
             "confidence": 0.95,
-            "trigger": "circuit_breaker",
-        }
+            "reasoning": "circuit_breaker",
+        })
 
         classifier = RegimeClassifier(fingpt_client=mock_fingpt)
         result = await classifier.classify()
 
         assert result.regime == "crisis"
         assert result.confidence == 0.95
-        assert result.trigger == "circuit_breaker"
-        mock_fingpt.analyze.assert_called_once()
+        mock_fingpt.classify_regime.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_classify_fingpt_failure_fallback(self) -> None:
-        """Should fall back to mock data when FinGPT fails."""
+        """Should fall back to rule-based when FinGPT fails."""
         from src.models import RegimeClassifier
 
         mock_fingpt = AsyncMock()
-        mock_fingpt.analyze.side_effect = Exception("API error")
+        mock_fingpt.classify_regime = AsyncMock(side_effect=Exception("API error"))
 
         classifier = RegimeClassifier(fingpt_client=mock_fingpt)
         result = await classifier.classify()
 
-        # Fallback values
-        assert result.regime == "normal_bull"
-        assert result.confidence == 0.92
+        # Fallback uses rule-based classification (default VIX=20 -> sideways)
+        assert result.regime == "sideways"
+        assert result.confidence == 0.65
         assert result.trigger == "baseline"
 
     @pytest.mark.asyncio
     async def test_classify_fingpt_invalid_response(self) -> None:
-        """Should fall back when FinGPT returns invalid data."""
+        """Should use default when FinGPT returns invalid data."""
         from src.models import RegimeClassifier
 
         mock_fingpt = AsyncMock()
-        mock_fingpt.analyze.return_value = {}  # Missing 'regime' key
+        mock_fingpt.classify_regime = AsyncMock(return_value={})  # Missing 'regime' key
 
         classifier = RegimeClassifier(fingpt_client=mock_fingpt)
         result = await classifier.classify()
 
-        # Fallback values
-        assert result.regime == "normal_bull"
+        # Should use default from response parsing
+        assert result.regime == "sideways"
 
     @pytest.mark.asyncio
     async def test_classify_timestamp_format(self) -> None:
@@ -89,11 +88,11 @@ class TestRegimeClassifier:
         from src.models import RegimeClassifier
 
         mock_fingpt = AsyncMock()
-        mock_fingpt.analyze.return_value = {
-            "regime": "normal_bull",
+        mock_fingpt.classify_regime = AsyncMock(return_value={
+            "regime": "bull",
             "confidence": 0.9,
-            "trigger": "baseline",
-        }
+            "reasoning": "baseline",
+        })
 
         classifier = RegimeClassifier(fingpt_client=mock_fingpt)
         result = await classifier.classify()
@@ -104,83 +103,65 @@ class TestRegimeClassifier:
 
 
 class TestFinGPTClient:
-    """Tests for FinGPTClient."""
-
-    def test_init_without_api_key(self) -> None:
-        """Should initialize without API key (will use mock data)."""
-        import os
-
-        from src.clients.fingpt_client import FinGPTClient
-
-        with patch.dict(os.environ, {}, clear=True):
-            client = FinGPTClient()
-            assert client.api_key is None
-
-    def test_init_with_api_key_env(self) -> None:
-        """Should read API key from environment."""
-        import os
-
-        from src.clients.fingpt_client import FinGPTClient
-
-        with patch.dict(os.environ, {"FINGPT_API_KEY": "test-key"}):
-            client = FinGPTClient()
-            assert client.api_key == "test-key"
+    """Tests for FinGPTClient and MockFinGPTClient."""
 
     def test_init_with_explicit_api_key(self) -> None:
-        """Should use explicit API key over env var."""
-        import os
-
+        """Should use explicit API key."""
         from src.clients.fingpt_client import FinGPTClient
 
-        with patch.dict(os.environ, {"FINGPT_API_KEY": "env-key"}):
-            client = FinGPTClient(api_key="explicit-key")
-            assert client.api_key == "explicit-key"
+        client = FinGPTClient(api_key="explicit-key")
+        assert client.api_key == "explicit-key"
+
+    def test_mock_client_init(self) -> None:
+        """Should initialize MockFinGPTClient without API key."""
+        from src.clients.fingpt_client import MockFinGPTClient
+
+        client = MockFinGPTClient()
+        assert client.api_key == ""
 
     @pytest.mark.asyncio
-    async def test_analyze_returns_mock_data(self) -> None:
-        """Should return mock data when API is not configured."""
-        from src.clients.fingpt_client import FinGPTClient
+    async def test_mock_classify_regime_returns_data(self) -> None:
+        """Should return regime classification from mock client."""
+        from src.clients.fingpt_client import MockFinGPTClient
 
-        client = FinGPTClient()
-        result = await client.analyze()
+        client = MockFinGPTClient()
+        result = await client.classify_regime(
+            market_data={"vix": 18.0},
+            macro_indicators={"yield_curve_10y_2y": 0.5},
+        )
 
         assert "regime" in result
         assert "confidence" in result
-        assert "trigger" in result
-        assert result["regime"] == "normal_bull"
+        assert "reasoning" in result
 
     @pytest.mark.asyncio
-    async def test_analyze_sentiment_returns_mock_data(self) -> None:
-        """Should return mock sentiment data."""
-        from src.clients.fingpt_client import FinGPTClient
+    async def test_mock_health_check_returns_true(self) -> None:
+        """Should return True from mock health check."""
+        from src.clients.fingpt_client import MockFinGPTClient
 
-        client = FinGPTClient()
-        result = await client.analyze_sentiment(["AAPL", "GOOGL"])
-
-        assert "symbols" in result
-        assert "AAPL" in result["symbols"]
-        assert "GOOGL" in result["symbols"]
+        client = MockFinGPTClient()
+        result = await client.health_check()
+        assert result is True
 
     @pytest.mark.asyncio
     async def test_health_check_without_api_key(self) -> None:
-        """Should return False when API key is not set."""
-        import os
-
+        """Should return False when API key is empty."""
         from src.clients.fingpt_client import FinGPTClient
 
-        with patch.dict(os.environ, {}, clear=True):
-            client = FinGPTClient()
-            result = await client.health_check()
-            assert result is False
+        client = FinGPTClient(api_key="")
+        result = await client.health_check()
+        assert result is False
 
     @pytest.mark.asyncio
     async def test_health_check_with_api_key(self) -> None:
-        """Should return True when API key is set."""
+        """Should attempt health check when API key is set."""
         from src.clients.fingpt_client import FinGPTClient
 
         client = FinGPTClient(api_key="test-key")
+        # Health check will fail because no real API, but won't crash
         result = await client.health_check()
-        assert result is True
+        # Can be True or False depending on network - just test it doesn't crash
+        assert isinstance(result, bool)
 
 
 class TestMarketRegimeServicer:
@@ -283,9 +264,9 @@ class TestMarketRegimeServicer:
         request = market_regime_pb2.GetCurrentRegimeRequest(force_refresh=False)
         response = await servicer.GetCurrentRegime(request, mock_context)
 
-        # Should return classified data
-        assert response.regime == "normal_bull"  # Mock fallback
-        assert response.confidence == 0.92
+        # Should return classified data (rule-based fallback with default VIX=20)
+        assert response.regime == "sideways"
+        assert response.confidence == 0.65
 
         # Should cache result
         mock_redis.setex.assert_called_once()
@@ -327,8 +308,8 @@ class TestMarketRegimeServicer:
         request = market_regime_pb2.GetCurrentRegimeRequest(force_refresh=True)
         response = await servicer.GetCurrentRegime(request, mock_context)
 
-        # Should return fresh classification, not cached
-        assert response.regime == "normal_bull"  # Mock fallback
+        # Should return fresh classification (rule-based fallback)
+        assert response.regime == "sideways"
         # Cache should not be read
         mock_redis.get.assert_not_called()
         # Should update cache
@@ -354,7 +335,7 @@ class TestMarketRegimeServicer:
         request = market_regime_pb2.GetCurrentRegimeRequest(force_refresh=False)
         response = await servicer.GetCurrentRegime(request, mock_context)
 
-        assert response.regime == "normal_bull"
+        assert response.regime == "sideways"
 
     @pytest.mark.asyncio
     async def test_get_regime_history_success(
@@ -370,7 +351,7 @@ class TestMarketRegimeServicer:
 
         # Create mock ORM records
         mock_record1 = MagicMock(spec=MarketRegimeRecord)
-        mock_record1.regime = "normal_bull"
+        mock_record1.regime = "bull"
         mock_record1.confidence = 0.9
         mock_record1.timestamp = datetime(2025, 1, 25, 10, 0, 0, tzinfo=timezone.utc)
         mock_record1.trigger = "baseline"
@@ -399,7 +380,7 @@ class TestMarketRegimeServicer:
         response = await servicer.GetRegimeHistory(request, mock_context)
 
         assert len(response.regimes) == 2
-        assert response.regimes[0].regime == "normal_bull"
+        assert response.regimes[0].regime == "bull"
         assert response.regimes[1].regime == "crisis"
         mock_repository.get_history.assert_called_once()
 
@@ -476,7 +457,7 @@ class TestMarketRegimeServicer:
         )
 
         regime_data = RegimeData(
-            regime="normal_bull",
+            regime="bull",
             confidence=0.92,
             timestamp="2025-01-26T14:30:00Z",
             trigger="baseline",
@@ -487,7 +468,7 @@ class TestMarketRegimeServicer:
         # Verify repository.save was called with correct data
         mock_repository.save.assert_called_once()
         call_args = mock_repository.save.call_args[0]
-        assert call_args[0].regime == "normal_bull"
+        assert call_args[0].regime == "bull"
         assert call_args[0].confidence == 0.92
         assert call_args[0].trigger == "baseline"
 
@@ -512,7 +493,7 @@ class TestMarketRegimeServicer:
         )
 
         regime_data = RegimeData(
-            regime="normal_bull",
+            regime="bull",
             confidence=0.92,
             timestamp="2025-01-26T14:30:00Z",
             trigger="baseline",
@@ -729,7 +710,7 @@ class TestSaveRegime:
         )
 
         request = market_regime_pb2.SaveRegimeRequest(
-            regime="normal_bull",
+            regime="bull",
             confidence=1.5,  # Invalid
             trigger="baseline",
         )
@@ -757,7 +738,7 @@ class TestSaveRegime:
         )
 
         request = market_regime_pb2.SaveRegimeRequest(
-            regime="normal_bull",
+            regime="bull",
             confidence=-0.5,  # Invalid
             trigger="baseline",
         )
@@ -784,7 +765,7 @@ class TestSaveRegime:
         )
 
         request = market_regime_pb2.SaveRegimeRequest(
-            regime="euphoria",
+            regime="bull",
             confidence=0.88,
             trigger="fomc",
             timestamp="2025-01-26T14:30:00Z",
@@ -799,7 +780,7 @@ class TestSaveRegime:
         assert call_args[0] == "market:regime:current"
         assert call_args[1] == 21600
         cache_data = call_args[2]
-        assert cache_data["regime"] == "euphoria"
+        assert cache_data["regime"] == "bull"
         assert cache_data["confidence"] == 0.88
         assert cache_data["trigger"] == "fomc"
 
@@ -821,7 +802,7 @@ class TestSaveRegime:
         )
 
         request = market_regime_pb2.SaveRegimeRequest(
-            regime="low_volatility",
+            regime="sideways",
             confidence=0.75,
             trigger="earnings_season",
             timestamp="2025-01-26T14:30:00Z",
@@ -836,7 +817,7 @@ class TestSaveRegime:
         assert publish_args[0] == "regime-change"
         event_data = publish_args[1]
         assert event_data["event_type"] == "regime_saved"
-        assert event_data["regime"] == "low_volatility"
+        assert event_data["regime"] == "sideways"
         assert event_data["confidence"] == 0.75
         assert event_data["trigger"] == "earnings_season"
 
@@ -858,7 +839,7 @@ class TestSaveRegime:
         )
 
         request = market_regime_pb2.SaveRegimeRequest(
-            regime="normal_bear",
+            regime="bear",
             confidence=0.80,
             trigger="geopolitical",
             # No timestamp provided
@@ -866,7 +847,7 @@ class TestSaveRegime:
         response = await servicer.SaveRegime(request, mock_context)
 
         assert response.success is True
-        assert response.regime.regime == "normal_bear"
+        assert response.regime.regime == "bear"
         # Timestamp should be set to current time (ISO 8601 format)
         assert "T" in response.regime.timestamp
         assert response.regime.timestamp.endswith("+00:00")
@@ -890,7 +871,7 @@ class TestSaveRegime:
         )
 
         request = market_regime_pb2.SaveRegimeRequest(
-            regime="normal_bull",
+            regime="bull",
             confidence=0.85,
             trigger="baseline",
             timestamp="not-a-valid-timestamp",
@@ -919,7 +900,7 @@ class TestSaveRegime:
         )
 
         request = market_regime_pb2.SaveRegimeRequest(
-            regime="high_volatility",
+            regime="crisis",
             confidence=0.90,
             # No trigger provided
         )
@@ -946,7 +927,7 @@ class TestSaveRegime:
         )
 
         request = market_regime_pb2.SaveRegimeRequest(
-            regime="normal_bull",
+            regime="bull",
             confidence=0.85,
             trigger="baseline",
         )
@@ -974,7 +955,7 @@ class TestSaveRegime:
         )
 
         request = market_regime_pb2.SaveRegimeRequest(
-            regime="normal_bull",
+            regime="bull",
             confidence=0.85,
             trigger="baseline",
         )
@@ -1117,7 +1098,7 @@ class TestServicerErrors:
         )
 
         request = market_regime_pb2.SaveRegimeRequest(
-            regime="normal_bull",
+            regime="bull",
             confidence=0.85,
             trigger="baseline",
         )

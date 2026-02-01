@@ -60,8 +60,7 @@ message GenerateStrategyRequest {
 
   // Current market regime classification
   // Should be fetched from Market Regime Service (Tier 1) before calling
-  // Valid values: "crisis", "normal_bear", "normal_bull", "euphoria",
-  //               "high_volatility", "low_volatility"
+  // Valid values: "crisis", "bear", "bull", "sideways", "recovery"
   string regime = 4;
 }
 

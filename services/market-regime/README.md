@@ -4,14 +4,13 @@ BLOASIS Tier 1 service for market regime classification using FinGPT AI analysis
 
 ## Overview
 
-The Market Regime Service classifies current market conditions into one of six regimes:
+The Market Regime Service classifies current market conditions into one of five regimes:
 
 - **crisis**: High volatility, risk-off (VIX > 30, major drawdowns)
-- **normal_bear**: Declining market, moderate volatility
-- **normal_bull**: Rising market, low-moderate volatility
-- **euphoria**: Extreme optimism, potential bubble conditions
-- **high_volatility**: Elevated VIX without clear direction
-- **low_volatility**: Unusually calm markets, potential complacency
+- **bear**: Declining market, moderate volatility
+- **bull**: Rising market, low-moderate volatility
+- **sideways**: Range-bound, no clear direction
+- **recovery**: Transition from crisis/bear to bull
 
 This is a **Tier 1 shared service**, meaning:
 - Results are cached for 6 hours
@@ -64,7 +63,7 @@ The `SaveRegime` RPC is an internal-only endpoint used by schedulers and backend
 **Request:**
 ```protobuf
 message SaveRegimeRequest {
-  string regime = 1;      // Required: crisis, normal_bear, normal_bull, euphoria, high_volatility, low_volatility
+  string regime = 1;      // Required: crisis, bear, bull, sideways, recovery
   double confidence = 2;  // Required: 0.0 to 1.0
   string trigger = 3;     // Optional: baseline (default), fomc, circuit_breaker, earnings_season, geopolitical
   string timestamp = 4;   // Optional: ISO 8601. Uses current UTC time if not provided.
@@ -141,7 +140,9 @@ GET /v1/market-regime/history?time_range.start_date=2025-01-25T00:00:00Z&time_ra
 | `REDIS_PORT` | 6379 | Redis server port |
 | `REDPANDA_BROKERS` | redpanda:9092 | Redpanda broker addresses |
 | `DATABASE_URL` | - | PostgreSQL connection URL |
-| `FINGPT_API_KEY` | - | FinGPT API key (required for production) |
+| `HUGGINGFACE_TOKEN` | - | Hugging Face API token (required for production) |
+| `FINGPT_MODEL` | FinGPT/fingpt-sentiment_llama2-13b_lora | Hugging Face model ID |
+| `USE_MOCK_FINGPT` | true | Use mock client (set false for production) |
 | `LOG_LEVEL` | INFO | Logging level |
 
 ## Running Locally
@@ -212,7 +213,7 @@ The service publishes events to the `regime-change` Redpanda topic:
 ```json
 {
   "event_type": "regime_classified",
-  "regime": "normal_bull",
+  "regime": "bull",
   "confidence": 0.92,
   "timestamp": "2025-01-26T14:30:00Z",
   "trigger": "baseline"

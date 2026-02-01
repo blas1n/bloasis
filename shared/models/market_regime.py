@@ -26,11 +26,10 @@ class MarketRegime(Enum):
 
     Maps directly to the GetCurrentRegimeResponse.regime values in market_regime.proto:
     - "crisis": High volatility, risk-off (VIX > 30, major drawdowns)
-    - "normal_bear": Declining market, moderate volatility
-    - "normal_bull": Rising market, low-moderate volatility
-    - "euphoria": Extreme optimism, potential bubble conditions
-    - "high_volatility": Elevated VIX without clear direction
-    - "low_volatility": Unusually calm markets, potential complacency
+    - "bear": Declining market, moderate volatility
+    - "bull": Rising market, low-moderate volatility
+    - "sideways": Range-bound, no clear direction
+    - "recovery": Transition from crisis/bear to bull
 
     Tier 1 Classification:
         Market regime classification is shared across ALL users and cached for 6 hours
@@ -46,24 +45,23 @@ class MarketRegime(Enum):
 
     Sector Strategy Influence:
         Each regime maps to a sector bias that influences Tier 2 strategy generation:
-        - Crisis/High Volatility -> Defensive sectors (utilities, healthcare, consumer staples)
-        - Bear markets -> Balanced defensive with some value plays
-        - Bull markets -> Balanced growth with cyclical exposure
-        - Euphoria -> Speculative with momentum and growth focus
-        - Low Volatility -> Growth-oriented with higher risk tolerance
+        - Crisis -> Defensive sectors (utilities, healthcare, consumer staples)
+        - Bear -> Balanced defensive with some value plays
+        - Bull -> Balanced growth with cyclical exposure
+        - Sideways -> Neutral, balanced allocation
+        - Recovery -> Growth-oriented with moderate risk
 
     Attributes:
         CRISIS: Crisis regime - High volatility, risk-off conditions.
-        NORMAL_BEAR: Normal bear regime - Declining market with moderate volatility.
-        NORMAL_BULL: Normal bull regime - Rising market with low-moderate volatility.
-        EUPHORIA: Euphoria regime - Extreme optimism, potential bubble.
-        HIGH_VOLATILITY: High volatility regime - Elevated VIX without clear direction.
-        LOW_VOLATILITY: Low volatility regime - Unusually calm markets.
+        BEAR: Bear regime - Declining market with moderate volatility.
+        BULL: Bull regime - Rising market with low-moderate volatility.
+        SIDEWAYS: Sideways regime - Range-bound, no clear direction.
+        RECOVERY: Recovery regime - Transition from crisis/bear to bull.
 
     Example:
-        >>> regime = MarketRegime.NORMAL_BULL
+        >>> regime = MarketRegime.BULL
         >>> regime.value
-        'normal_bull'
+        'bull'
         >>> bias = regime.get_sector_bias()
         >>> bias
         'balanced_growth'
@@ -72,11 +70,10 @@ class MarketRegime(Enum):
     """
 
     CRISIS = "crisis"
-    NORMAL_BEAR = "normal_bear"
-    NORMAL_BULL = "normal_bull"
-    EUPHORIA = "euphoria"
-    HIGH_VOLATILITY = "high_volatility"
-    LOW_VOLATILITY = "low_volatility"
+    BEAR = "bear"
+    BULL = "bull"
+    SIDEWAYS = "sideways"
+    RECOVERY = "recovery"
 
     def get_sector_bias(self) -> str:
         """
@@ -84,11 +81,10 @@ class MarketRegime(Enum):
 
         Maps each market regime to a recommended sector allocation strategy:
         - CRISIS -> "defensive": Focus on utilities, healthcare, consumer staples
-        - NORMAL_BEAR -> "balanced_defensive": Mix of defensive with value opportunities
-        - NORMAL_BULL -> "balanced_growth": Blend of growth and cyclical sectors
-        - EUPHORIA -> "speculative": Momentum-driven, growth-heavy allocation
-        - HIGH_VOLATILITY -> "defensive": Similar to crisis, reduce risk exposure
-        - LOW_VOLATILITY -> "growth": Favor growth and technology sectors
+        - BEAR -> "balanced_defensive": Mix of defensive with value opportunities
+        - BULL -> "balanced_growth": Blend of growth and cyclical sectors
+        - SIDEWAYS -> "neutral": Balanced allocation across sectors
+        - RECOVERY -> "growth": Favor growth and technology sectors
 
         Returns:
             str: Sector bias string for Tier 2 strategy generation.
@@ -96,24 +92,21 @@ class MarketRegime(Enum):
         Example:
             >>> MarketRegime.CRISIS.get_sector_bias()
             'defensive'
-            >>> MarketRegime.NORMAL_BEAR.get_sector_bias()
+            >>> MarketRegime.BEAR.get_sector_bias()
             'balanced_defensive'
-            >>> MarketRegime.NORMAL_BULL.get_sector_bias()
+            >>> MarketRegime.BULL.get_sector_bias()
             'balanced_growth'
-            >>> MarketRegime.EUPHORIA.get_sector_bias()
-            'speculative'
-            >>> MarketRegime.HIGH_VOLATILITY.get_sector_bias()
-            'defensive'
-            >>> MarketRegime.LOW_VOLATILITY.get_sector_bias()
+            >>> MarketRegime.SIDEWAYS.get_sector_bias()
+            'neutral'
+            >>> MarketRegime.RECOVERY.get_sector_bias()
             'growth'
         """
         bias_map: dict[MarketRegime, str] = {
             MarketRegime.CRISIS: "defensive",
-            MarketRegime.NORMAL_BEAR: "balanced_defensive",
-            MarketRegime.NORMAL_BULL: "balanced_growth",
-            MarketRegime.EUPHORIA: "speculative",
-            MarketRegime.HIGH_VOLATILITY: "defensive",
-            MarketRegime.LOW_VOLATILITY: "growth",
+            MarketRegime.BEAR: "balanced_defensive",
+            MarketRegime.BULL: "balanced_growth",
+            MarketRegime.SIDEWAYS: "neutral",
+            MarketRegime.RECOVERY: "growth",
         }
         return bias_map[self]
 
@@ -127,8 +120,7 @@ class MarketRegime(Enum):
 
         Args:
             regime: A string value matching one of the enum values
-                   ("crisis", "normal_bear", "normal_bull", "euphoria",
-                    "high_volatility", "low_volatility").
+                   ("crisis", "bear", "bull", "sideways", "recovery").
 
         Returns:
             MarketRegime: The corresponding market regime enum.
@@ -139,10 +131,10 @@ class MarketRegime(Enum):
         Example:
             >>> MarketRegime.from_string("crisis")
             <MarketRegime.CRISIS: 'crisis'>
-            >>> MarketRegime.from_string("normal_bull")
-            <MarketRegime.NORMAL_BULL: 'normal_bull'>
-            >>> MarketRegime.from_string("EUPHORIA")
-            <MarketRegime.EUPHORIA: 'euphoria'>
+            >>> MarketRegime.from_string("bull")
+            <MarketRegime.BULL: 'bull'>
+            >>> MarketRegime.from_string("RECOVERY")
+            <MarketRegime.RECOVERY: 'recovery'>
         """
         try:
             return cls(regime.lower())

@@ -22,33 +22,29 @@ class TestMarketRegimeEnum:
         """MarketRegime must inherit from enum.Enum."""
         assert issubclass(MarketRegime, Enum)
 
-    def test_has_six_values(self) -> None:
-        """MarketRegime must have exactly six values."""
-        assert len(MarketRegime) == 6
+    def test_has_five_values(self) -> None:
+        """MarketRegime must have exactly five values."""
+        assert len(MarketRegime) == 5
 
     def test_crisis_value(self) -> None:
         """CRISIS must have value 'crisis' matching proto."""
         assert MarketRegime.CRISIS.value == "crisis"
 
-    def test_normal_bear_value(self) -> None:
-        """NORMAL_BEAR must have value 'normal_bear' matching proto."""
-        assert MarketRegime.NORMAL_BEAR.value == "normal_bear"
+    def test_bear_value(self) -> None:
+        """BEAR must have value 'bear' matching proto."""
+        assert MarketRegime.BEAR.value == "bear"
 
-    def test_normal_bull_value(self) -> None:
-        """NORMAL_BULL must have value 'normal_bull' matching proto."""
-        assert MarketRegime.NORMAL_BULL.value == "normal_bull"
+    def test_bull_value(self) -> None:
+        """BULL must have value 'bull' matching proto."""
+        assert MarketRegime.BULL.value == "bull"
 
-    def test_euphoria_value(self) -> None:
-        """EUPHORIA must have value 'euphoria' matching proto."""
-        assert MarketRegime.EUPHORIA.value == "euphoria"
+    def test_sideways_value(self) -> None:
+        """SIDEWAYS must have value 'sideways' matching proto."""
+        assert MarketRegime.SIDEWAYS.value == "sideways"
 
-    def test_high_volatility_value(self) -> None:
-        """HIGH_VOLATILITY must have value 'high_volatility' matching proto."""
-        assert MarketRegime.HIGH_VOLATILITY.value == "high_volatility"
-
-    def test_low_volatility_value(self) -> None:
-        """LOW_VOLATILITY must have value 'low_volatility' matching proto."""
-        assert MarketRegime.LOW_VOLATILITY.value == "low_volatility"
+    def test_recovery_value(self) -> None:
+        """RECOVERY must have value 'recovery' matching proto."""
+        assert MarketRegime.RECOVERY.value == "recovery"
 
 
 class TestGetSectorBias:
@@ -60,33 +56,27 @@ class TestGetSectorBias:
         assert result == "defensive"
         assert isinstance(result, str)
 
-    def test_normal_bear_returns_balanced_defensive(self) -> None:
-        """NORMAL_BEAR.get_sector_bias() must return 'balanced_defensive'."""
-        result = MarketRegime.NORMAL_BEAR.get_sector_bias()
+    def test_bear_returns_balanced_defensive(self) -> None:
+        """BEAR.get_sector_bias() must return 'balanced_defensive'."""
+        result = MarketRegime.BEAR.get_sector_bias()
         assert result == "balanced_defensive"
         assert isinstance(result, str)
 
-    def test_normal_bull_returns_balanced_growth(self) -> None:
-        """NORMAL_BULL.get_sector_bias() must return 'balanced_growth'."""
-        result = MarketRegime.NORMAL_BULL.get_sector_bias()
+    def test_bull_returns_balanced_growth(self) -> None:
+        """BULL.get_sector_bias() must return 'balanced_growth'."""
+        result = MarketRegime.BULL.get_sector_bias()
         assert result == "balanced_growth"
         assert isinstance(result, str)
 
-    def test_euphoria_returns_speculative(self) -> None:
-        """EUPHORIA.get_sector_bias() must return 'speculative'."""
-        result = MarketRegime.EUPHORIA.get_sector_bias()
-        assert result == "speculative"
+    def test_sideways_returns_neutral(self) -> None:
+        """SIDEWAYS.get_sector_bias() must return 'neutral'."""
+        result = MarketRegime.SIDEWAYS.get_sector_bias()
+        assert result == "neutral"
         assert isinstance(result, str)
 
-    def test_high_volatility_returns_defensive(self) -> None:
-        """HIGH_VOLATILITY.get_sector_bias() must return 'defensive'."""
-        result = MarketRegime.HIGH_VOLATILITY.get_sector_bias()
-        assert result == "defensive"
-        assert isinstance(result, str)
-
-    def test_low_volatility_returns_growth(self) -> None:
-        """LOW_VOLATILITY.get_sector_bias() must return 'growth'."""
-        result = MarketRegime.LOW_VOLATILITY.get_sector_bias()
+    def test_recovery_returns_growth(self) -> None:
+        """RECOVERY.get_sector_bias() must return 'growth'."""
+        result = MarketRegime.RECOVERY.get_sector_bias()
         assert result == "growth"
         assert isinstance(result, str)
 
@@ -96,7 +86,7 @@ class TestGetSectorBias:
             "defensive",
             "balanced_defensive",
             "balanced_growth",
-            "speculative",
+            "neutral",
             "growth",
         }
         for regime in MarketRegime:
@@ -112,48 +102,41 @@ class TestFromString:
         result = MarketRegime.from_string("crisis")
         assert result == MarketRegime.CRISIS
 
-    def test_normal_bear_string(self) -> None:
-        """'normal_bear' string must return NORMAL_BEAR."""
-        result = MarketRegime.from_string("normal_bear")
-        assert result == MarketRegime.NORMAL_BEAR
+    def test_bear_string(self) -> None:
+        """'bear' string must return BEAR."""
+        result = MarketRegime.from_string("bear")
+        assert result == MarketRegime.BEAR
 
-    def test_normal_bull_string(self) -> None:
-        """'normal_bull' string must return NORMAL_BULL."""
-        result = MarketRegime.from_string("normal_bull")
-        assert result == MarketRegime.NORMAL_BULL
+    def test_bull_string(self) -> None:
+        """'bull' string must return BULL."""
+        result = MarketRegime.from_string("bull")
+        assert result == MarketRegime.BULL
 
-    def test_euphoria_string(self) -> None:
-        """'euphoria' string must return EUPHORIA."""
-        result = MarketRegime.from_string("euphoria")
-        assert result == MarketRegime.EUPHORIA
+    def test_sideways_string(self) -> None:
+        """'sideways' string must return SIDEWAYS."""
+        result = MarketRegime.from_string("sideways")
+        assert result == MarketRegime.SIDEWAYS
 
-    def test_high_volatility_string(self) -> None:
-        """'high_volatility' string must return HIGH_VOLATILITY."""
-        result = MarketRegime.from_string("high_volatility")
-        assert result == MarketRegime.HIGH_VOLATILITY
-
-    def test_low_volatility_string(self) -> None:
-        """'low_volatility' string must return LOW_VOLATILITY."""
-        result = MarketRegime.from_string("low_volatility")
-        assert result == MarketRegime.LOW_VOLATILITY
+    def test_recovery_string(self) -> None:
+        """'recovery' string must return RECOVERY."""
+        result = MarketRegime.from_string("recovery")
+        assert result == MarketRegime.RECOVERY
 
     def test_case_insensitive_uppercase(self) -> None:
         """Uppercase input must work (case insensitive)."""
         assert MarketRegime.from_string("CRISIS") == MarketRegime.CRISIS
-        assert MarketRegime.from_string("NORMAL_BEAR") == MarketRegime.NORMAL_BEAR
-        assert MarketRegime.from_string("NORMAL_BULL") == MarketRegime.NORMAL_BULL
-        assert MarketRegime.from_string("EUPHORIA") == MarketRegime.EUPHORIA
-        assert MarketRegime.from_string("HIGH_VOLATILITY") == MarketRegime.HIGH_VOLATILITY
-        assert MarketRegime.from_string("LOW_VOLATILITY") == MarketRegime.LOW_VOLATILITY
+        assert MarketRegime.from_string("BEAR") == MarketRegime.BEAR
+        assert MarketRegime.from_string("BULL") == MarketRegime.BULL
+        assert MarketRegime.from_string("SIDEWAYS") == MarketRegime.SIDEWAYS
+        assert MarketRegime.from_string("RECOVERY") == MarketRegime.RECOVERY
 
     def test_case_insensitive_mixed(self) -> None:
         """Mixed case input must work (case insensitive)."""
         assert MarketRegime.from_string("Crisis") == MarketRegime.CRISIS
-        assert MarketRegime.from_string("Normal_Bear") == MarketRegime.NORMAL_BEAR
-        assert MarketRegime.from_string("Normal_Bull") == MarketRegime.NORMAL_BULL
-        assert MarketRegime.from_string("Euphoria") == MarketRegime.EUPHORIA
-        assert MarketRegime.from_string("High_Volatility") == MarketRegime.HIGH_VOLATILITY
-        assert MarketRegime.from_string("Low_Volatility") == MarketRegime.LOW_VOLATILITY
+        assert MarketRegime.from_string("Bear") == MarketRegime.BEAR
+        assert MarketRegime.from_string("Bull") == MarketRegime.BULL
+        assert MarketRegime.from_string("Sideways") == MarketRegime.SIDEWAYS
+        assert MarketRegime.from_string("Recovery") == MarketRegime.RECOVERY
 
     def test_raises_on_invalid_string(self) -> None:
         """Invalid string must raise ValueError with helpful message."""
@@ -169,14 +152,12 @@ class TestFromString:
             MarketRegime.from_string("")
         assert "Invalid regime" in str(excinfo.value)
 
-    def test_raises_on_partial_match(self) -> None:
-        """Partial match must raise ValueError."""
-        with pytest.raises(ValueError):
-            MarketRegime.from_string("bull")
-        with pytest.raises(ValueError):
-            MarketRegime.from_string("bear")
-        with pytest.raises(ValueError):
-            MarketRegime.from_string("volatility")
+    def test_raises_on_legacy_values(self) -> None:
+        """Legacy regime values must raise ValueError."""
+        legacy_values = ["normal_bull", "normal_bear", "euphoria", "high_volatility", "low_volatility"]
+        for legacy in legacy_values:
+            with pytest.raises(ValueError):
+                MarketRegime.from_string(legacy)
 
 
 class TestProtoCompatibility:
@@ -186,15 +167,13 @@ class TestProtoCompatibility:
         """All enum values must exactly match proto regime values."""
         # From market_regime.proto GetCurrentRegimeResponse:
         # string regime = 1;
-        # Documented values: "crisis", "normal_bear", "normal_bull",
-        #                    "euphoria", "high_volatility", "low_volatility"
+        # Documented values: "crisis", "bear", "bull", "sideways", "recovery"
         expected_values = {
             "crisis",
-            "normal_bear",
-            "normal_bull",
-            "euphoria",
-            "high_volatility",
-            "low_volatility",
+            "bear",
+            "bull",
+            "sideways",
+            "recovery",
         }
         actual_values = {r.value for r in MarketRegime}
         assert actual_values == expected_values
@@ -203,27 +182,25 @@ class TestProtoCompatibility:
 class TestTierSystem:
     """Tests related to the Tier 1-2-3 system."""
 
-    def test_defensive_regimes_have_defensive_bias(self) -> None:
-        """Crisis and high volatility regimes should have defensive bias."""
-        defensive_regimes = [MarketRegime.CRISIS, MarketRegime.HIGH_VOLATILITY]
-        for regime in defensive_regimes:
-            assert regime.get_sector_bias() == "defensive"
+    def test_crisis_regime_has_defensive_bias(self) -> None:
+        """Crisis regime should have defensive bias."""
+        assert MarketRegime.CRISIS.get_sector_bias() == "defensive"
 
     def test_bear_regime_has_balanced_defensive_bias(self) -> None:
-        """Normal bear regime should have balanced_defensive bias."""
-        assert MarketRegime.NORMAL_BEAR.get_sector_bias() == "balanced_defensive"
+        """Bear regime should have balanced_defensive bias."""
+        assert MarketRegime.BEAR.get_sector_bias() == "balanced_defensive"
 
     def test_bull_regime_has_balanced_growth_bias(self) -> None:
-        """Normal bull regime should have balanced_growth bias."""
-        assert MarketRegime.NORMAL_BULL.get_sector_bias() == "balanced_growth"
+        """Bull regime should have balanced_growth bias."""
+        assert MarketRegime.BULL.get_sector_bias() == "balanced_growth"
 
-    def test_euphoria_has_speculative_bias(self) -> None:
-        """Euphoria regime should have speculative bias."""
-        assert MarketRegime.EUPHORIA.get_sector_bias() == "speculative"
+    def test_sideways_has_neutral_bias(self) -> None:
+        """Sideways regime should have neutral bias."""
+        assert MarketRegime.SIDEWAYS.get_sector_bias() == "neutral"
 
-    def test_low_volatility_has_growth_bias(self) -> None:
-        """Low volatility regime should have growth bias."""
-        assert MarketRegime.LOW_VOLATILITY.get_sector_bias() == "growth"
+    def test_recovery_has_growth_bias(self) -> None:
+        """Recovery regime should have growth bias."""
+        assert MarketRegime.RECOVERY.get_sector_bias() == "growth"
 
 
 class TestTypeHints:
@@ -237,14 +214,7 @@ class TestTypeHints:
 
     def test_from_string_returns_market_regime(self) -> None:
         """from_string() must return a MarketRegime."""
-        for value in [
-            "crisis",
-            "normal_bear",
-            "normal_bull",
-            "euphoria",
-            "high_volatility",
-            "low_volatility",
-        ]:
+        for value in ["crisis", "bear", "bull", "sideways", "recovery"]:
             result = MarketRegime.from_string(value)
             assert isinstance(result, MarketRegime)
 

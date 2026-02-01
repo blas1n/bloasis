@@ -59,7 +59,7 @@ def upgrade() -> None:
     # Table 1: market_data.market_regimes (TimescaleDB Hypertable)
     # =========================================================================
     # Purpose: Store market regime classifications from Tier 1 analysis
-    # - Regime: Current market state (crisis, normal_bull, normal_bear, etc.)
+    # - Regime: Current market state (crisis, bear, bull, sideways, recovery)
     # - Confidence: ML model confidence score (0.0 to 1.0)
     # - Trigger: What triggered the regime classification (scheduled, event, manual)
     # - Timestamp: When the regime was classified

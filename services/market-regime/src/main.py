@@ -2,6 +2,7 @@
 Market Regime Service - gRPC only.
 
 Kong Gateway handles HTTP-to-gRPC transcoding.
+Integrates FinGPT for AI-powered market regime classification.
 """
 
 import asyncio
@@ -20,7 +21,10 @@ from shared.utils import (
     setup_logger,
 )
 
+from .clients.fingpt_client import FinGPTClient, MockFinGPTClient
 from .config import config
+from .macro_data import MacroDataFetcher
+from .models import RegimeClassifier
 from .service import MarketRegimeServicer
 
 logger = setup_logger(__name__)
@@ -72,6 +76,29 @@ async def serve() -> None:
                 "Consul service registration failed - service will continue without Consul"
             )
 
+    # Initialize FinGPT client
+    if config.use_mock_fingpt or not config.fingpt_api_key:
+        fingpt_client = MockFinGPTClient()
+        logger.warning("Using mock FinGPT client (set FINGPT_API_KEY to use real API)")
+    else:
+        fingpt_client = FinGPTClient(
+            api_key=config.fingpt_api_key,
+            base_url=config.fingpt_base_url,
+            timeout=config.fingpt_timeout,
+        )
+        await fingpt_client.connect()
+        logger.info("FinGPT client connected")
+
+    # Initialize macro data fetcher
+    macro_fetcher = MacroDataFetcher(fred_api_key=config.fred_api_key or None)
+    logger.info("Macro data fetcher initialized")
+
+    # Initialize regime classifier with FinGPT integration
+    classifier = RegimeClassifier(
+        fingpt_client=fingpt_client,
+        macro_fetcher=macro_fetcher,
+    )
+
     # Create gRPC server
     server = grpc.aio.server()
 
@@ -80,6 +107,7 @@ async def serve() -> None:
         redis_client=redis_client,
         redpanda_client=redpanda_client,
         postgres_client=postgres_client,
+        classifier=classifier,
     )
     market_regime_pb2_grpc.add_MarketRegimeServiceServicer_to_server(servicer, server)
 
@@ -106,6 +134,10 @@ async def serve() -> None:
             await consul_client.deregister_all()
             logger.info("Consul services deregistered")
         await server.stop(grace=5)
+        # Close FinGPT client
+        if fingpt_client:
+            await fingpt_client.close()
+            logger.info("FinGPT client disconnected")
         if postgres_client:
             await postgres_client.close()
             logger.info("PostgreSQL client disconnected")

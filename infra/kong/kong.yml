@@ -7,7 +7,7 @@ _transform: true
 
 services:
   # Market Regime Service (Tier 1 - shared data)
-  # Provides market regime classification (crisis, normal_bear, normal_bull, euphoria, etc.)
+  # Provides market regime classification (crisis, bear, bull, sideways, recovery)
   # Cached for 6 hours, shared across ALL users
   - name: market-regime-service
     url: grpc://market-regime:50051

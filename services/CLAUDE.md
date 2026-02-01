@@ -120,7 +120,7 @@ message RegimeRequest {
 }
 
 message RegimeResponse {
-  string regime = 1;          // "crisis", "normal_bull", etc.
+  string regime = 1;          // "crisis", "bear", "bull", "sideways", "recovery"
   double confidence = 2;       // 0.0 - 1.0
   string timestamp = 3;        // ISO 8601
 }

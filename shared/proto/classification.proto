@@ -23,9 +23,9 @@ service ClassificationService {
   // based on the current market regime
   //
   // Strategy types:
-  // - "aggressive_growth": High-risk/high-reward, suitable for euphoria/bull regimes
-  // - "moderate_growth": Balanced approach, suitable for normal_bull regime
-  // - "defensive": Focus on stability and income, suitable for high_volatility
+  // - "aggressive_growth": High-risk/high-reward, suitable for bull regimes
+  // - "moderate_growth": Balanced approach, suitable for recovery regime
+  // - "defensive": Focus on stability and income, suitable for sideways
   // - "rotate_out": Exit or underweight the sector, suitable for crisis/bear
   // - "value_opportunity": Contrarian play in oversold sectors
   // - "quality_focus": Prefer high-quality, low-debt companies
@@ -47,8 +47,7 @@ service ClassificationService {
 // GetSectorStrategiesRequest - Request for sector-specific strategies
 message GetSectorStrategiesRequest {
   // Current market regime from Market Regime Service (Tier 1)
-  // Valid values: "crisis", "normal_bear", "normal_bull", "euphoria",
-  //               "high_volatility", "low_volatility"
+  // Valid values: "crisis", "bear", "bull", "sideways", "recovery"
   string regime = 1;
 
   // Optional: specific sectors to analyze

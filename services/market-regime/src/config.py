@@ -33,8 +33,17 @@ class ServiceConfig(BaseSettings):
     # Database configuration
     database_url: str = ""
 
-    # External API keys (optional)
-    fingpt_api_key: str = ""
+    # FinGPT configuration (via Hugging Face)
+    huggingface_token: str = ""  # Hugging Face API token
+    fingpt_model: str = "FinGPT/fingpt-sentiment_llama2-13b_lora"  # HF model ID
+    fingpt_timeout: float = 60.0
+    use_mock_fingpt: bool = True  # Use mock in development (set False for production)
+
+    # FRED API (for macro data)
+    fred_api_key: str = ""
+
+    # Cache TTL
+    regime_cache_ttl: int = 21600  # 6 hours (Tier 1 shared)
 
     # Consul configuration
     consul_host: str = "consul"
