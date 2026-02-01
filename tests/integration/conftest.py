@@ -52,7 +52,7 @@ def wait_for_services(timeout: int = 60) -> bool:
     client = consul.Consul(host=CONSUL_HOST, port=CONSUL_PORT)
     start = time.time()
 
-    required_services = ["market-regime", "portfolio"]
+    required_services = ["market-regime", "portfolio", "market-data"]
 
     while time.time() - start < timeout:
         try:
