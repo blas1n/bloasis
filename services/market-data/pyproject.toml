@@ -1,0 +1,44 @@
+[project]
+name = "market-data"
+version = "0.1.0"
+description = "Market Data Service for BLOASIS - provides stock market data via yfinance"
+requires-python = ">=3.11"
+dependencies = [
+    "grpcio>=1.60.0",
+    "grpcio-health-checking>=1.60.0",
+    "pydantic-settings>=2.0.0",
+    "yfinance>=0.2.36",
+    "pandas>=2.0.0",
+    "redis>=5.0.0",
+    "python-consul>=1.1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-cov>=4.1.0",
+    "ruff>=0.2.0",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+pythonpath = ["/workspace", "/workspace/shared", "/workspace/shared/generated"]
+
+[tool.coverage.run]
+source = ["src"]
+omit = ["tests/*", "*/__pycache__/*", "src/main.py", "src/service.py"]
+
+[tool.coverage.report]
+fail_under = 80
+show_missing = true
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+ignore = ["E501"]

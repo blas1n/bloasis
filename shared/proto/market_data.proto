@@ -1,0 +1,214 @@
+// Market Data Service - Provides stock market data (OHLCV, metadata)
+// Uses yfinance for data fetching with Redis caching (5 min TTL)
+// Tier 1 shared data - used by all services for price information
+
+syntax = "proto3";
+
+package bloasis.market_data;
+
+import "google/api/annotations.proto";
+
+// MarketDataService provides stock market data
+// Data is cached for 5 minutes to balance freshness with API rate limits
+service MarketDataService {
+  // Get OHLCV data for a single symbol
+  rpc GetOHLCV(GetOHLCVRequest) returns (GetOHLCVResponse) {
+    option (google.api.http) = {
+      get: "/v1/market-data/{symbol}/ohlcv"
+    };
+  }
+
+  // Get stock info/metadata for a symbol
+  rpc GetStockInfo(GetStockInfoRequest) returns (GetStockInfoResponse) {
+    option (google.api.http) = {
+      get: "/v1/market-data/{symbol}/info"
+    };
+  }
+
+  // Get OHLCV data for multiple symbols (batch)
+  rpc GetBatchOHLCV(GetBatchOHLCVRequest) returns (GetBatchOHLCVResponse) {
+    option (google.api.http) = {
+      post: "/v1/market-data/batch/ohlcv"
+      body: "*"
+    };
+  }
+
+  // Sync symbol data from yfinance to TimescaleDB (admin)
+  rpc SyncSymbol(SyncSymbolRequest) returns (SyncSymbolResponse) {
+    option (google.api.http) = {
+      post: "/v1/market-data/{symbol}/sync"
+      body: "*"
+    };
+  }
+
+  // List stored symbols
+  rpc ListSymbols(ListSymbolsRequest) returns (ListSymbolsResponse) {
+    option (google.api.http) = {
+      get: "/v1/market-data/symbols"
+    };
+  }
+}
+
+// GetOHLCVRequest - Request for OHLCV data
+message GetOHLCVRequest {
+  // Stock ticker symbol (e.g., "AAPL", "MSFT")
+  string symbol = 1;
+
+  // Data interval: "1m", "5m", "15m", "30m", "1h", "1d", "1wk", "1mo"
+  string interval = 2;
+
+  // Data period: "1d", "5d", "1mo", "3mo", "6mo", "1y", "2y", "5y", "10y", "ytd", "max"
+  // Used when start_date/end_date not provided
+  string period = 3;
+
+  // Optional: Start date (ISO format: "2024-01-01")
+  // Overrides period when provided with end_date
+  optional string start_date = 4;
+
+  // Optional: End date (ISO format: "2024-12-31")
+  optional string end_date = 5;
+}
+
+// OHLCVBar - Single OHLCV bar/candle
+message OHLCVBar {
+  // ISO 8601 timestamp of the bar
+  string timestamp = 1;
+
+  // Open price
+  double open = 2;
+
+  // High price
+  double high = 3;
+
+  // Low price
+  double low = 4;
+
+  // Close price
+  double close = 5;
+
+  // Trading volume
+  int64 volume = 6;
+
+  // Adjusted close price (optional, for splits/dividends)
+  optional double adj_close = 7;
+}
+
+// GetOHLCVResponse - OHLCV data response
+message GetOHLCVResponse {
+  // Stock ticker symbol
+  string symbol = 1;
+
+  // Data interval used
+  string interval = 2;
+
+  // OHLCV bars in chronological order
+  repeated OHLCVBar bars = 3;
+
+  // Total number of bars returned
+  int32 total_bars = 4;
+}
+
+// GetStockInfoRequest - Request for stock metadata
+message GetStockInfoRequest {
+  // Stock ticker symbol
+  string symbol = 1;
+}
+
+// GetStockInfoResponse - Stock metadata response
+message GetStockInfoResponse {
+  // Stock ticker symbol
+  string symbol = 1;
+
+  // Company name
+  string name = 2;
+
+  // Business sector (e.g., "Technology", "Healthcare")
+  string sector = 3;
+
+  // Industry (e.g., "Consumer Electronics", "Biotechnology")
+  string industry = 4;
+
+  // Stock exchange (e.g., "NASDAQ", "NYSE")
+  string exchange = 5;
+
+  // Trading currency (e.g., "USD")
+  string currency = 6;
+
+  // Market capitalization
+  double market_cap = 7;
+
+  // Price-to-earnings ratio (optional)
+  optional double pe_ratio = 8;
+
+  // Dividend yield as percentage (optional)
+  optional double dividend_yield = 9;
+
+  // 52-week high price (optional)
+  optional double fifty_two_week_high = 10;
+
+  // 52-week low price (optional)
+  optional double fifty_two_week_low = 11;
+}
+
+// GetBatchOHLCVRequest - Request for multiple symbols
+message GetBatchOHLCVRequest {
+  // List of stock ticker symbols
+  repeated string symbols = 1;
+
+  // Data interval
+  string interval = 2;
+
+  // Data period
+  string period = 3;
+}
+
+// GetBatchOHLCVResponse - Batch OHLCV response
+message GetBatchOHLCVResponse {
+  // Map of symbol to OHLCV data
+  map<string, GetOHLCVResponse> data = 1;
+
+  // List of symbols that failed to fetch
+  repeated string failed_symbols = 2;
+}
+
+// SyncSymbolRequest - Request to sync symbol data to database
+message SyncSymbolRequest {
+  // Stock ticker symbol
+  string symbol = 1;
+
+  // Data interval ("1d", "1h", etc.)
+  string interval = 2;
+
+  // Whether to perform full refresh (re-fetch all data)
+  bool full_refresh = 3;
+}
+
+// SyncSymbolResponse - Response from symbol sync
+message SyncSymbolResponse {
+  // Stock ticker symbol
+  string symbol = 1;
+
+  // Number of OHLCV bars synced
+  int32 bars_synced = 2;
+
+  // Whether stock info was updated
+  bool stock_info_updated = 3;
+}
+
+// ListSymbolsRequest - Request to list stored symbols
+message ListSymbolsRequest {
+  // Optional: Filter by sector
+  optional string sector = 1;
+
+  // Optional: Maximum symbols to return
+  optional int32 limit = 2;
+}
+
+// ListSymbolsResponse - List of stored symbols
+message ListSymbolsResponse {
+  // List of symbol tickers
+  repeated string symbols = 1;
+
+  // Total count of symbols (before limit)
+  int32 total = 2;
+}
