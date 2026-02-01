@@ -264,3 +264,23 @@ Before implementing ANY service:
 - [ ] gRPC-only (no FastAPI/HTTP endpoints)
 - [ ] gRPC Health Check implemented (grpc.health.v1)
 - [ ] Proto generated files not committed
+
+### 13. Git Commit Rules
+
+**NEVER include Co-Authored-By in commit messages.**
+
+Commit message format:
+```
+type(scope): short description
+
+- bullet points for details
+- no Co-Authored-By line
+```
+
+Example:
+```bash
+git commit -m "feat(market-data): add OHLCV caching
+
+- Add Redis caching with 5min TTL
+- Implement cache invalidation on sync"
+```
