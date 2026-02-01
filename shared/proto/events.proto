@@ -1,0 +1,74 @@
+// Event message types for Redpanda-based event streaming
+// Used for priority-based event routing across BLOASIS services
+
+syntax = "proto3";
+
+package bloasis.events;
+
+option go_package = "bloasis/events";
+
+// EventPriority - Priority levels for event routing
+// Higher priority events are processed first by consumers
+enum EventPriority {
+  EVENT_PRIORITY_UNSPECIFIED = 0;  // Default/unspecified (treated as LOW)
+  EVENT_PRIORITY_LOW = 1;          // Background tasks, analytics
+  EVENT_PRIORITY_MEDIUM = 2;       // Strategy updates, notifications
+  EVENT_PRIORITY_HIGH = 3;         // Regime changes, important signals
+  EVENT_PRIORITY_CRITICAL = 4;     // Crisis alerts, risk warnings
+}
+
+// RegimeChangeEvent - Published when market regime changes
+// Topic: regime-events
+// Consumers: Risk Committee, Strategy Service, Portfolio Service
+message RegimeChangeEvent {
+  string event_id = 1;           // UUID for event tracking
+  string timestamp = 2;          // ISO 8601 format
+  string previous_regime = 3;    // Previous regime: crisis, bear, bull, sideways, recovery
+  string new_regime = 4;         // New regime
+  double confidence = 5;         // Classification confidence (0.0-1.0)
+  string reasoning = 6;          // FinGPT reasoning for the change
+  EventPriority priority = 7;    // Event priority for routing
+  map<string, string> metadata = 8;  // Additional context
+}
+
+// MarketAlertEvent - Published for market anomalies and warnings
+// Topic: alert-events
+// Consumers: Risk Committee, Notification Service
+message MarketAlertEvent {
+  string event_id = 1;           // UUID for event tracking
+  string timestamp = 2;          // ISO 8601 format
+  string alert_type = 3;         // Type: vix_spike, yield_curve_inversion, flash_crash, etc.
+  string severity = 4;           // Severity: info, warning, critical
+  string message = 5;            // Human-readable alert message
+  EventPriority priority = 6;    // Event priority for routing
+  map<string, string> indicators = 7;  // Related indicator values
+}
+
+// StrategySignalEvent - Published when strategy generates a signal
+// Topic: strategy-events
+// Consumers: Executor Service, Portfolio Service
+message StrategySignalEvent {
+  string event_id = 1;           // UUID for event tracking
+  string timestamp = 2;          // ISO 8601 format
+  string strategy_id = 3;        // Strategy identifier
+  string signal_type = 4;        // Type: entry, exit, adjust
+  string symbol = 5;             // Ticker symbol
+  string action = 6;             // Action: buy, sell, hold
+  double confidence = 7;         // Signal confidence (0.0-1.0)
+  EventPriority priority = 8;    // Event priority for routing
+  map<string, string> parameters = 9;  // Strategy-specific parameters
+}
+
+// RiskAlertEvent - Published by Risk Committee for risk warnings
+// Topic: risk-events
+// Consumers: Executor Service, Notification Service
+message RiskAlertEvent {
+  string event_id = 1;           // UUID for event tracking
+  string timestamp = 2;          // ISO 8601 format
+  string risk_type = 3;          // Type: drawdown, correlation, exposure, black_swan
+  string severity = 4;           // Severity: warning, critical, emergency
+  string message = 5;            // Human-readable risk message
+  string affected_portfolio = 6; // Portfolio ID if applicable
+  EventPriority priority = 7;    // Event priority for routing
+  map<string, string> metrics = 8;  // Risk metrics
+}

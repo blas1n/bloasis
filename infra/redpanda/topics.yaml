@@ -1,0 +1,103 @@
+# Redpanda Topics Configuration for BLOASIS
+#
+# Topics are organized by event type with appropriate partitioning
+# for priority-based routing and consumer load balancing.
+#
+# Usage:
+#   rpk topic create -c retention.ms=604800000 regime-events
+#   Or use the script: ./scripts/create-topics.sh
+
+topics:
+  # Regime Events - Published by Market Regime Service
+  # Consumers: Risk Committee (CRITICAL), Strategy Service (HIGH+), Portfolio Service (ALL)
+  - name: regime-events
+    partitions: 3          # Partition by priority (0-2 maps to partitions)
+    replication_factor: 1  # Single replica for development
+    config:
+      retention.ms: 604800000    # 7 days retention
+      cleanup.policy: delete     # Delete old messages after retention
+
+  # Market Alert Events - Published by Market Regime Service
+  # Consumers: Risk Committee, Notification Service
+  - name: alert-events
+    partitions: 3          # Partition by priority
+    replication_factor: 1
+    config:
+      retention.ms: 604800000    # 7 days retention
+      cleanup.policy: delete
+
+  # Strategy Signal Events - Published by AI Analysis Service
+  # Consumers: Executor Service, Portfolio Service
+  - name: strategy-events
+    partitions: 6          # More partitions for high throughput
+    replication_factor: 1
+    config:
+      retention.ms: 2592000000   # 30 days retention (for backtesting)
+      cleanup.policy: delete
+
+  # Risk Alert Events - Published by Risk Committee
+  # Consumers: Executor Service, Notification Service
+  - name: risk-events
+    partitions: 3
+    replication_factor: 1
+    config:
+      retention.ms: 2592000000   # 30 days retention (audit trail)
+      cleanup.policy: delete
+
+  # Execution Events - Published by Executor Service
+  # Consumers: Portfolio Service, Notification Service
+  - name: execution-events
+    partitions: 6
+    replication_factor: 1
+    config:
+      retention.ms: 7776000000   # 90 days retention (compliance)
+      cleanup.policy: delete
+
+  # Portfolio Events - Published by Portfolio Service
+  # Consumers: Notification Service, Analytics Service
+  - name: portfolio-events
+    partitions: 3
+    replication_factor: 1
+    config:
+      retention.ms: 2592000000   # 30 days retention
+      cleanup.policy: delete
+
+# Consumer Groups Configuration
+consumer_groups:
+  # Risk Committee - Highest priority, processes CRITICAL events first
+  - group_id: risk-committee
+    topics:
+      - regime-events
+      - alert-events
+      - risk-events
+    min_priority: 2  # HIGH and CRITICAL only
+
+  # Strategy Service - Processes regime changes for strategy updates
+  - group_id: strategy-service
+    topics:
+      - regime-events
+    min_priority: 1  # MEDIUM and above
+
+  # Executor Service - Processes signals and risk alerts
+  - group_id: executor-service
+    topics:
+      - strategy-events
+      - risk-events
+    min_priority: 1  # MEDIUM and above
+
+  # Portfolio Service - Tracks all relevant events
+  - group_id: portfolio-service
+    topics:
+      - regime-events
+      - strategy-events
+      - execution-events
+    min_priority: 0  # All priorities
+
+  # Notification Service - Broadcasts to users
+  - group_id: notification-service
+    topics:
+      - alert-events
+      - risk-events
+      - execution-events
+      - portfolio-events
+    min_priority: 0  # All priorities

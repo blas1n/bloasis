@@ -90,10 +90,10 @@ class TestServiceIntegration:
         # Verify cache was set
         redis.setex.assert_called_once()
 
-        # Verify event was published
+        # Verify event was published (topic changed to regime-events)
         redpanda.publish.assert_called_once()
         publish_call = redpanda.publish.call_args
-        assert publish_call[0][0] == "regime-change"
+        assert publish_call[0][0] == "regime-events"
         assert publish_call[0][1]["event_type"] == "regime_classified"
 
         # Verify database insert via ORM session.add

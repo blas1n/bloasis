@@ -14,6 +14,7 @@ from grpc_health.v1 import health, health_pb2, health_pb2_grpc
 from shared.generated import market_regime_pb2_grpc
 from shared.utils import (
     ConsulClient,
+    EventPublisher,
     PostgresClient,
     RedisClient,
     RedpandaClient,
@@ -51,6 +52,10 @@ async def serve() -> None:
     await redpanda_client.start()
     logger.info("Redpanda client connected")
 
+    # Initialize EventPublisher for typed event publishing
+    event_publisher = EventPublisher(redpanda_client)
+    logger.info("Event publisher initialized")
+
     postgres_client = PostgresClient()
     await postgres_client.connect()
     logger.info("PostgreSQL client connected")
@@ -76,18 +81,18 @@ async def serve() -> None:
                 "Consul service registration failed - service will continue without Consul"
             )
 
-    # Initialize FinGPT client
-    if config.use_mock_fingpt or not config.fingpt_api_key:
+    # Initialize FinGPT client (via Hugging Face)
+    if config.use_mock_fingpt or not config.huggingface_token:
         fingpt_client = MockFinGPTClient()
-        logger.warning("Using mock FinGPT client (set FINGPT_API_KEY to use real API)")
+        logger.warning("Using mock FinGPT client (set HUGGINGFACE_TOKEN to use real API)")
     else:
         fingpt_client = FinGPTClient(
-            api_key=config.fingpt_api_key,
-            base_url=config.fingpt_base_url,
+            api_key=config.huggingface_token,
+            model=config.fingpt_model,
             timeout=config.fingpt_timeout,
         )
         await fingpt_client.connect()
-        logger.info("FinGPT client connected")
+        logger.info(f"FinGPT client connected (model: {config.fingpt_model})")
 
     # Initialize macro data fetcher
     macro_fetcher = MacroDataFetcher(fred_api_key=config.fred_api_key or None)
@@ -108,6 +113,7 @@ async def serve() -> None:
         redpanda_client=redpanda_client,
         postgres_client=postgres_client,
         classifier=classifier,
+        event_publisher=event_publisher,
     )
     market_regime_pb2_grpc.add_MarketRegimeServiceServicer_to_server(servicer, server)
 

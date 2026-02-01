@@ -3,7 +3,7 @@ Market Regime Service - gRPC Servicer Implementation.
 
 Implements the MarketRegimeService gRPC interface with:
 - Redis caching (6-hour TTL for Tier 1 shared data)
-- Redpanda event publishing
+- Redpanda event publishing with priority support
 - PostgreSQL persistence
 """
 
@@ -13,7 +13,13 @@ from typing import Optional
 
 import grpc
 from shared.generated import market_regime_pb2, market_regime_pb2_grpc
-from shared.utils import PostgresClient, RedisClient, RedpandaClient
+from shared.utils import (
+    EventPriority,
+    EventPublisher,
+    PostgresClient,
+    RedisClient,
+    RedpandaClient,
+)
 
 from .models import RegimeClassifier, RegimeData
 from .repositories import MarketRegimeRepository
@@ -23,9 +29,6 @@ logger = logging.getLogger(__name__)
 # Cache configuration (Tier 1 shared caching)
 CACHE_KEY = "market:regime:current"
 CACHE_TTL = 21600  # 6 hours in seconds
-
-# Redpanda topic
-REGIME_CHANGE_TOPIC = "regime-change"
 
 # Valid regime values
 VALID_REGIMES = {
@@ -52,6 +55,7 @@ class MarketRegimeServicer(market_regime_pb2_grpc.MarketRegimeServiceServicer):
         postgres_client: Optional[PostgresClient] = None,
         repository: Optional[MarketRegimeRepository] = None,
         classifier: Optional[RegimeClassifier] = None,
+        event_publisher: Optional[EventPublisher] = None,
     ) -> None:
         """
         Initialize the servicer with required clients.
@@ -62,12 +66,14 @@ class MarketRegimeServicer(market_regime_pb2_grpc.MarketRegimeServiceServicer):
             postgres_client: PostgreSQL client for persistence.
             repository: Repository for database operations.
             classifier: RegimeClassifier with FinGPT integration.
+            event_publisher: EventPublisher for typed event publishing.
         """
         self.redis = redis_client
         self.redpanda = redpanda_client
         self.postgres = postgres_client
         self.repository = repository or MarketRegimeRepository(postgres_client)
         self.classifier = classifier or RegimeClassifier()
+        self.event_publisher = event_publisher
 
     async def GetCurrentRegime(
         self,
@@ -116,6 +122,13 @@ class MarketRegimeServicer(market_regime_pb2_grpc.MarketRegimeServiceServicer):
                 trigger=regime_data.trigger,
             )
 
+            # Get previous regime for change detection
+            previous_regime: Optional[str] = None
+            if self.redis:
+                previous_cached = await self.redis.get(CACHE_KEY)
+                if previous_cached and isinstance(previous_cached, dict):
+                    previous_regime = previous_cached.get("regime")
+
             # Cache the result
             if self.redis:
                 cache_data = {
@@ -127,17 +140,12 @@ class MarketRegimeServicer(market_regime_pb2_grpc.MarketRegimeServiceServicer):
                 await self.redis.setex(CACHE_KEY, CACHE_TTL, cache_data)
                 logger.info(f"Cached regime data with TTL {CACHE_TTL}s")
 
-            # Publish event to Redpanda
-            if self.redpanda:
-                event_data = {
-                    "event_type": "regime_classified",
-                    "regime": regime_data.regime,
-                    "confidence": regime_data.confidence,
-                    "timestamp": regime_data.timestamp,
-                    "trigger": regime_data.trigger,
-                }
-                await self.redpanda.publish(REGIME_CHANGE_TOPIC, event_data)
-                logger.info(f"Published regime-change event to {REGIME_CHANGE_TOPIC}")
+            # Publish events using EventPublisher (preferred) or direct Redpanda
+            await self._publish_regime_events(
+                regime_data=regime_data,
+                previous_regime=previous_regime,
+                event_type="regime_classified",
+            )
 
             # Persist to database via repository
             await self._persist_regime(regime_data)
@@ -298,6 +306,13 @@ class MarketRegimeServicer(market_regime_pb2_grpc.MarketRegimeServiceServicer):
             # Persist to database via repository
             await self._persist_regime(regime_data)
 
+            # Get previous regime for change detection
+            previous_regime: Optional[str] = None
+            if self.redis:
+                previous_cached = await self.redis.get(CACHE_KEY)
+                if previous_cached and isinstance(previous_cached, dict):
+                    previous_regime = previous_cached.get("regime")
+
             # Update Redis cache with new regime
             if self.redis:
                 cache_data = {
@@ -309,17 +324,12 @@ class MarketRegimeServicer(market_regime_pb2_grpc.MarketRegimeServiceServicer):
                 await self.redis.setex(CACHE_KEY, CACHE_TTL, cache_data)
                 logger.info(f"Updated cache with new regime: {regime_data.regime}")
 
-            # Publish regime-change event to Redpanda
-            if self.redpanda:
-                event_data = {
-                    "event_type": "regime_saved",
-                    "regime": regime_data.regime,
-                    "confidence": regime_data.confidence,
-                    "timestamp": regime_data.timestamp,
-                    "trigger": regime_data.trigger,
-                }
-                await self.redpanda.publish(REGIME_CHANGE_TOPIC, event_data)
-                logger.info(f"Published regime-saved event to {REGIME_CHANGE_TOPIC}")
+            # Publish events using EventPublisher (preferred) or direct Redpanda
+            await self._publish_regime_events(
+                regime_data=regime_data,
+                previous_regime=previous_regime,
+                event_type="regime_saved",
+            )
 
             # Build response
             regime_response = market_regime_pb2.GetCurrentRegimeResponse(
@@ -344,3 +354,64 @@ class MarketRegimeServicer(market_regime_pb2_grpc.MarketRegimeServiceServicer):
             context.set_code(grpc.StatusCode.INTERNAL)
             context.set_details(f"Failed to save regime: {str(e)}")
             return market_regime_pb2.SaveRegimeResponse(success=False)
+
+    async def _publish_regime_events(
+        self,
+        regime_data: RegimeData,
+        previous_regime: Optional[str],
+        event_type: str,
+    ) -> None:
+        """
+        Publish regime events using EventPublisher or direct Redpanda.
+
+        Uses EventPublisher for typed events with priority support.
+        Falls back to direct Redpanda publishing if EventPublisher not available.
+
+        Args:
+            regime_data: The regime classification data.
+            previous_regime: Previous regime (for change detection).
+            event_type: Type of event (regime_classified, regime_saved).
+        """
+        # Check if regime actually changed
+        regime_changed = previous_regime and previous_regime != regime_data.regime
+
+        # Use EventPublisher if available (preferred)
+        if self.event_publisher:
+            if regime_changed:
+                # Publish regime change event with HIGH priority
+                await self.event_publisher.publish_regime_change(
+                    previous_regime=previous_regime or "unknown",
+                    new_regime=regime_data.regime,
+                    confidence=regime_data.confidence,
+                    reasoning=regime_data.trigger,
+                    priority=EventPriority.HIGH,
+                    metadata={"event_type": event_type},
+                )
+
+                # If crisis, also publish a CRITICAL market alert
+                if regime_data.regime == "crisis":
+                    await self.event_publisher.publish_market_alert(
+                        alert_type="regime_crisis",
+                        severity="critical",
+                        message=f"Market regime changed to CRISIS (confidence: {regime_data.confidence:.2f})",
+                        priority=EventPriority.CRITICAL,
+                        indicators={"previous_regime": previous_regime or "unknown"},
+                    )
+
+            logger.info(
+                f"Published regime events via EventPublisher "
+                f"(changed: {regime_changed}, regime: {regime_data.regime})"
+            )
+
+        # Fall back to direct Redpanda if no EventPublisher
+        elif self.redpanda:
+            event_data = {
+                "event_type": event_type,
+                "regime": regime_data.regime,
+                "confidence": regime_data.confidence,
+                "timestamp": regime_data.timestamp,
+                "trigger": regime_data.trigger,
+                "previous_regime": previous_regime,
+            }
+            await self.redpanda.publish("regime-events", event_data)
+            logger.info(f"Published {event_type} event to regime-events topic")

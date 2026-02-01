@@ -310,8 +310,9 @@ class TestMarketRegimeServicer:
 
         # Should return fresh classification (rule-based fallback)
         assert response.regime == "sideways"
-        # Cache should not be read
-        mock_redis.get.assert_not_called()
+        # Redis.get is called to get previous regime for change detection
+        # (even with force_refresh, we need previous value for event publishing)
+        mock_redis.get.assert_called()
         # Should update cache
         mock_redis.setex.assert_called_once()
 
@@ -649,10 +650,10 @@ class TestSaveRegime:
         assert call_args[0] == "market:regime:current"
         assert call_args[1] == 21600  # 6 hours
 
-        # Verify event was published
+        # Verify event was published (topic changed to regime-events)
         mock_redpanda.publish.assert_called_once()
         publish_args = mock_redpanda.publish.call_args[0]
-        assert publish_args[0] == "regime-change"
+        assert publish_args[0] == "regime-events"
         assert publish_args[1]["event_type"] == "regime_saved"
         assert publish_args[1]["regime"] == "crisis"
 
@@ -811,10 +812,10 @@ class TestSaveRegime:
 
         assert response.success is True
 
-        # Verify event was published
+        # Verify event was published (topic changed to regime-events)
         mock_redpanda.publish.assert_called_once()
         publish_args = mock_redpanda.publish.call_args[0]
-        assert publish_args[0] == "regime-change"
+        assert publish_args[0] == "regime-events"
         event_data = publish_args[1]
         assert event_data["event_type"] == "regime_saved"
         assert event_data["regime"] == "sideways"
