@@ -41,5 +41,22 @@ services:
         config:
           proto: /kong/proto/portfolio.proto
 
+  # Market Data Service (Tier 1 - shared data)
+  # Provides stock market data (OHLCV, metadata) via yfinance
+  # Cached for 5 minutes to balance freshness with API rate limits
+  - name: market-data-service
+    url: grpc://market-data:50053
+    routes:
+      - name: market-data-route
+        paths:
+          - /v1/market-data
+        protocols:
+          - http
+          - https
+    plugins:
+      - name: grpc-gateway
+        config:
+          proto: /kong/proto/market_data.proto
+
 # Add services as they are implemented
 # See services/CLAUDE.md for gRPC service setup
