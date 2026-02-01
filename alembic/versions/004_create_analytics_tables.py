@@ -99,11 +99,15 @@ def upgrade() -> None:
     # Note: Using PRIMARY KEY without DEFAULT because UUID is provided by app
     # to maintain referential integrity with other tables
     # =========================================================================
+    # For TimescaleDB hypertables, the partitioning column must be part of any unique constraint
+    # Using composite primary key (id, timestamp) to satisfy this requirement
+    # Note: Foreign key to ai_strategies is removed because TimescaleDB hypertables
+    # have limitations with foreign key references
     op.execute(
         """
         CREATE TABLE IF NOT EXISTS analytics.backtest_results (
-            id UUID PRIMARY KEY,
-            strategy_id UUID NOT NULL REFERENCES analytics.ai_strategies(id) ON DELETE CASCADE,
+            id UUID NOT NULL,
+            strategy_id UUID NOT NULL,
             user_id UUID NOT NULL,
             engine VARCHAR(20) NOT NULL CHECK (engine IN ('vectorbt', 'finrl', 'ensemble')),
             total_return NUMERIC(10, 4),
@@ -112,7 +116,8 @@ def upgrade() -> None:
             win_rate NUMERIC(5, 4),
             total_trades INTEGER,
             final_value NUMERIC(15, 2),
-            timestamp TIMESTAMPTZ NOT NULL
+            timestamp TIMESTAMPTZ NOT NULL,
+            PRIMARY KEY (id, timestamp)
         );
         """
     )
@@ -144,11 +149,13 @@ def upgrade() -> None:
     # - Queried by backtest_id, not by time range
     # - Small number of metrics per backtest
     # =========================================================================
+    # Note: Foreign key to backtest_results is removed because it's a hypertable
+    # Referential integrity should be handled at the application level
     op.execute(
         """
         CREATE TABLE IF NOT EXISTS analytics.backtest_metrics (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-            backtest_id UUID REFERENCES analytics.backtest_results(id),
+            backtest_id UUID NOT NULL,
             metric_name VARCHAR(50) NOT NULL,
             metric_value NUMERIC(15, 4),
             created_at TIMESTAMPTZ DEFAULT NOW()

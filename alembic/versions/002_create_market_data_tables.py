@@ -66,14 +66,18 @@ def upgrade() -> None:
     #
     # This is Tier 1 shared data - cached for 6 hours across all users
     # =========================================================================
+    # For TimescaleDB hypertables, the partitioning column must be part of any unique constraint
+    # Using composite primary key (id, timestamp) to satisfy this requirement
     op.execute(
         """
         CREATE TABLE IF NOT EXISTS market_data.market_regimes (
-            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            id UUID DEFAULT gen_random_uuid(),
             regime VARCHAR(50) NOT NULL,
             confidence NUMERIC(5, 4) NOT NULL CHECK (confidence >= 0 AND confidence <= 1),
             trigger VARCHAR(50) NOT NULL,
-            timestamp TIMESTAMPTZ NOT NULL
+            analysis TEXT,
+            timestamp TIMESTAMPTZ NOT NULL,
+            PRIMARY KEY (id, timestamp)
         );
         """
     )
@@ -103,17 +107,19 @@ def upgrade() -> None:
     # NUMERIC(15, 2) allows prices up to 9,999,999,999,999.99
     # Sufficient for any stock price including BRK.A (~$600,000+)
     # =========================================================================
+    # For TimescaleDB hypertables, the partitioning column must be part of any unique constraint
     op.execute(
         """
         CREATE TABLE IF NOT EXISTS market_data.ohlcv_data (
-            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            id UUID DEFAULT gen_random_uuid(),
             symbol VARCHAR(10) NOT NULL,
             open NUMERIC(15, 2) NOT NULL,
             high NUMERIC(15, 2) NOT NULL,
             low NUMERIC(15, 2) NOT NULL,
             close NUMERIC(15, 2) NOT NULL,
             volume BIGINT NOT NULL,
-            timestamp TIMESTAMPTZ NOT NULL
+            timestamp TIMESTAMPTZ NOT NULL,
+            PRIMARY KEY (id, timestamp)
         );
         """
     )
