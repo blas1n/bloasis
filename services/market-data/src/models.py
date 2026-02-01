@@ -43,7 +43,7 @@ class OHLCVRecord(Base):
     low: Mapped[Decimal] = mapped_column(Numeric(18, 8), nullable=False)
     close: Mapped[Decimal] = mapped_column(Numeric(18, 8), nullable=False)
     volume: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    adj_close: Mapped[Optional[Decimal]] = mapped_column(Numeric(15, 2), nullable=True)
+    adj_close: Mapped[Optional[Decimal]] = mapped_column(Numeric(18, 8), nullable=True)
 
 
 class StockInfoRecord(Base):
