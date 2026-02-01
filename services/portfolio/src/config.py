@@ -40,7 +40,6 @@ class ServiceConfig(BaseSettings):
     consul_host: str = "consul"
     consul_port: int = 8500
     consul_enabled: bool = True
-    service_host: str = "portfolio"  # Hostname for Consul registration
 
 
 # Global config instance - validated at import time

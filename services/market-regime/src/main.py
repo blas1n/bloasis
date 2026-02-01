@@ -16,6 +16,7 @@ from shared.utils import (
     PostgresClient,
     RedisClient,
     RedpandaClient,
+    get_local_ip,
     setup_logger,
 )
 
@@ -56,10 +57,11 @@ async def serve() -> None:
             host=config.consul_host,
             port=config.consul_port,
         )
+        service_host = get_local_ip(config.consul_host, config.consul_port)
         registered = await consul_client.register_grpc_service(
             service_name=config.service_name,
             service_id=f"{config.service_name}-{socket.gethostname()}",
-            host=config.service_host,
+            host=service_host,
             port=config.grpc_port,
             tags=["grpc", "tier1"],
         )

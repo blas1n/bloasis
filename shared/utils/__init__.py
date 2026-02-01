@@ -10,7 +10,7 @@ Contents:
 - setup_logger: Logger configuration utility
 """
 
-from .consul_client import ConsulClient
+from .consul_client import ConsulClient, get_local_ip
 from .logging import JSONFormatter, setup_logger
 from .postgres_client import PostgresClient
 from .redis_client import RedisClient
@@ -22,5 +22,6 @@ __all__ = [
     "PostgresClient",
     "RedisClient",
     "RedpandaClient",
+    "get_local_ip",
     "setup_logger",
 ]

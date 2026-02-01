@@ -6,11 +6,47 @@ and discovery. It supports gRPC health checks using the grpc.health.v1 protocol.
 
 import logging
 import os
+import socket
 from typing import Any, Optional
 
 import consul
 
 logger = logging.getLogger(__name__)
+
+
+def get_local_ip(target_host: str = "consul", target_port: int = 8500) -> str:
+    """Get the local IP address that can reach the target host.
+
+    This is useful for Consul service registration where Consul needs to
+    perform health checks on the service. Returns the IP address of the
+    network interface that can reach Consul.
+
+    Args:
+        target_host: Target hostname to determine route (default: "consul").
+        target_port: Target port (default: 8500).
+
+    Returns:
+        Local IP address string. Falls back to "localhost" on error.
+
+    Example:
+        ```python
+        ip = get_local_ip()
+        await consul_client.register_grpc_service(
+            service_name="market-regime",
+            service_id="market-regime-1",
+            host=ip,  # Use detected IP
+            port=50051,
+        )
+        ```
+    """
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect((target_host, target_port))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "localhost"
 
 
 class ConsulClient:

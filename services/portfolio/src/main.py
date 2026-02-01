@@ -11,7 +11,13 @@ from typing import Optional
 import grpc
 from grpc_health.v1 import health, health_pb2, health_pb2_grpc
 from shared.generated import portfolio_pb2_grpc
-from shared.utils import ConsulClient, PostgresClient, RedisClient, setup_logger
+from shared.utils import (
+    ConsulClient,
+    PostgresClient,
+    RedisClient,
+    get_local_ip,
+    setup_logger,
+)
 
 from .config import config
 from .service import PortfolioServicer
@@ -45,10 +51,11 @@ async def serve() -> None:
             host=config.consul_host,
             port=config.consul_port,
         )
+        service_host = get_local_ip(config.consul_host, config.consul_port)
         registered = await consul_client.register_grpc_service(
             service_name=config.service_name,
             service_id=f"{config.service_name}-{socket.gethostname()}",
-            host=config.service_host,
+            host=service_host,
             port=config.grpc_port,
             tags=["grpc", "tier3"],
         )
