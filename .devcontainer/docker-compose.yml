@@ -136,6 +136,7 @@ services:
       KONG_ADMIN_ERROR_LOG: /dev/stderr
     volumes:
       - ../infra/kong:/kong
+      - ../shared/proto:/kong/proto
     ports:
       - "8001:8001"  # Admin API
     healthcheck:
