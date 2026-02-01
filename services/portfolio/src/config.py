@@ -36,6 +36,12 @@ class ServiceConfig(BaseSettings):
     # Cache TTL (user-specific data - 1 hour)
     cache_ttl: int = 3600
 
+    # Consul configuration
+    consul_host: str = "consul"
+    consul_port: int = 8500
+    consul_enabled: bool = True
+    service_host: str = "portfolio"  # Hostname for Consul registration
+
 
 # Global config instance - validated at import time
 config = ServiceConfig()

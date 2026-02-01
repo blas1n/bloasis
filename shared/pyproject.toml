@@ -26,8 +26,8 @@ dependencies = [
     # Configuration
     "python-dotenv>=1.0.0",
 
-    # Async support
-    "aiohttp>=3.9.1",
+    # Service Discovery - Consul
+    "python-consul>=1.1.0",
 ]
 
 [project.optional-dependencies]

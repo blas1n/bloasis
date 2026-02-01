@@ -36,6 +36,12 @@ class ServiceConfig(BaseSettings):
     # External API keys (optional)
     fingpt_api_key: str = ""
 
+    # Consul configuration
+    consul_host: str = "consul"
+    consul_port: int = 8500
+    consul_enabled: bool = True
+    service_host: str = "market-regime"  # Hostname for Consul registration
+
 
 # Global config instance - validated at import time
 config = ServiceConfig()

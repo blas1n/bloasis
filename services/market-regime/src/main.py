@@ -5,12 +5,19 @@ Kong Gateway handles HTTP-to-gRPC transcoding.
 """
 
 import asyncio
+import socket
 from typing import Optional
 
 import grpc
 from grpc_health.v1 import health, health_pb2, health_pb2_grpc
 from shared.generated import market_regime_pb2_grpc
-from shared.utils import PostgresClient, RedisClient, RedpandaClient, setup_logger
+from shared.utils import (
+    ConsulClient,
+    PostgresClient,
+    RedisClient,
+    RedpandaClient,
+    setup_logger,
+)
 
 from .config import config
 from .service import MarketRegimeServicer
@@ -21,11 +28,12 @@ logger = setup_logger(__name__)
 redis_client: Optional[RedisClient] = None
 redpanda_client: Optional[RedpandaClient] = None
 postgres_client: Optional[PostgresClient] = None
+consul_client: Optional[ConsulClient] = None
 
 
 async def serve() -> None:
     """Start and run the gRPC server."""
-    global redis_client, redpanda_client, postgres_client
+    global redis_client, redpanda_client, postgres_client, consul_client
 
     logger.info(f"Starting {config.service_name} service...")
 
@@ -41,6 +49,26 @@ async def serve() -> None:
     postgres_client = PostgresClient()
     await postgres_client.connect()
     logger.info("PostgreSQL client connected")
+
+    # Initialize Consul client if enabled
+    if config.consul_enabled:
+        consul_client = ConsulClient(
+            host=config.consul_host,
+            port=config.consul_port,
+        )
+        registered = await consul_client.register_grpc_service(
+            service_name=config.service_name,
+            service_id=f"{config.service_name}-{socket.gethostname()}",
+            host=config.service_host,
+            port=config.grpc_port,
+            tags=["grpc", "tier1"],
+        )
+        if registered:
+            logger.info("Consul service registration successful")
+        else:
+            logger.warning(
+                "Consul service registration failed - service will continue without Consul"
+            )
 
     # Create gRPC server
     server = grpc.aio.server()
@@ -71,6 +99,10 @@ async def serve() -> None:
     # Handle shutdown
     async def shutdown() -> None:
         logger.info("Shutting down...")
+        # Deregister from Consul first (so traffic stops coming)
+        if consul_client:
+            await consul_client.deregister_all()
+            logger.info("Consul services deregistered")
         await server.stop(grace=5)
         if postgres_client:
             await postgres_client.close()
