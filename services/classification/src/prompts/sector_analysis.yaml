@@ -1,0 +1,70 @@
+# Sector Analysis Prompts
+# Managed separately from code for easier maintenance
+
+system_prompt: |
+  You are a financial analyst specializing in sector analysis for algorithmic trading.
+  Your task is to analyze market sectors based on the current market regime.
+  Always respond with valid JSON matching the specified schema.
+
+user_prompt_template: |
+  Current Market Regime: {regime}
+
+  Task: Analyze all 11 GICS sectors and provide:
+  1. Score (0-100) for each sector based on expected performance
+  2. Rationale for each score considering the current regime
+  3. Select the top 3-7 sectors most suitable for the current regime
+
+  The 11 GICS sectors are:
+  - Technology
+  - Healthcare
+  - Financials
+  - Consumer Discretionary
+  - Industrials
+  - Communication Services
+  - Consumer Staples
+  - Energy
+  - Utilities
+  - Real Estate
+  - Materials
+
+  Consider:
+  - Historical sector performance in this regime
+  - Current market conditions and trends
+  - Sector correlations and diversification benefits
+  - Risk-adjusted return potential
+
+  Output your analysis in the specified JSON format with all 11 sectors.
+
+response_schema:
+  type: object
+  properties:
+    sectors:
+      type: array
+      items:
+        type: object
+        properties:
+          sector:
+            type: string
+            description: GICS sector name
+          score:
+            type: number
+            minimum: 0
+            maximum: 100
+            description: Sector performance score
+          rationale:
+            type: string
+            description: Reasoning for the score
+          selected:
+            type: boolean
+            description: Whether this sector is in the top 3-7
+        required: [sector, score, rationale, selected]
+  required: [sectors]
+
+model_parameters:
+  max_new_tokens: 1000
+  temperature: 0.7
+  top_p: 0.9
+  return_full_text: false
+
+default_values:
+  regime: "unknown"

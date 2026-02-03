@@ -1,0 +1,70 @@
+# Theme Analysis Prompts
+# Managed separately from code for easier maintenance
+
+system_prompt: |
+  You are a financial analyst specializing in investment theme identification.
+  Your task is to analyze investment themes within selected sectors.
+  Always respond with valid JSON matching the specified schema.
+
+user_prompt_template: |
+  Selected Sectors: {sectors}
+  Current Market Regime: {regime}
+
+  Task: Identify and rank investment themes within the selected sectors:
+  1. Score (0-100) for each theme based on potential
+  2. Rationale for each theme considering current market conditions
+  3. Representative symbols (3-5 stocks) for each theme
+
+  Identify 10-15 relevant investment themes that:
+  - Have strong momentum in the current regime
+  - Show growth potential and sustainability
+  - Have clear representative stocks with good liquidity
+  - Offer diversification across the selected sectors
+
+  Consider:
+  - Current market trends and momentum
+  - Sector-specific catalysts
+  - Theme sustainability and growth potential
+  - Risk factors specific to each theme
+
+  Output your analysis in the specified JSON format.
+
+response_schema:
+  type: object
+  properties:
+    themes:
+      type: array
+      items:
+        type: object
+        properties:
+          theme:
+            type: string
+            description: Investment theme name
+          sector:
+            type: string
+            description: Primary sector for this theme
+          score:
+            type: number
+            minimum: 0
+            maximum: 100
+            description: Theme potential score
+          rationale:
+            type: string
+            description: Reasoning for the score
+          representative_symbols:
+            type: array
+            items:
+              type: string
+            description: 3-5 stock symbols representing this theme
+        required: [theme, sector, score, rationale, representative_symbols]
+  required: [themes]
+
+model_parameters:
+  max_new_tokens: 1500
+  temperature: 0.7
+  top_p: 0.9
+  return_full_text: false
+
+default_values:
+  regime: "unknown"
+  sectors: []

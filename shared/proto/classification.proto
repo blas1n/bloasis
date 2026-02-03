@@ -1,114 +1,175 @@
-// Sector Classification Service - Provides sector-specific investment strategies
-// Part of BLOASIS Tier 2 (depends on Market Regime Service, cached per regime)
+// Classification Service - Stock Selection Pipeline Stage 1-2
+// Part of BLOASIS Tier 2 (shared across all users, cached for 6 hours)
+// Provides sector filtering and thematic analysis
 //
-// This service uses the current market regime from Tier 1 to determine optimal
-// sector strategies. Strategies are recalculated when the market regime changes.
-//
-// Dependency: Market Regime Service (Tier 1)
-// - Uses regime classification to adjust sector allocations
-// - When regime changes, sector strategies are invalidated and recalculated
+// Stage 1: Sector Filter - Filters 11 GICS sectors down to 3-7 sectors based on market regime
+// Stage 2: Thematic Filter - Ranks investment themes within selected sectors
 
 syntax = "proto3";
 
 package bloasis.classification;
 
 import "google/api/annotations.proto";
-import "common.proto";
 
-// ClassificationService provides sector-specific investment strategies
-// Strategies are computed based on the current market regime (from Tier 1)
-// and cached until the regime changes
+// ClassificationService provides sector and thematic filtering
+// Results are shared across ALL users (Tier 2) and cached for cost optimization
 service ClassificationService {
-  // GetSectorStrategies returns investment strategies for each sector
-  // based on the current market regime
-  //
-  // Strategy types:
-  // - "aggressive_growth": High-risk/high-reward, suitable for bull regimes
-  // - "moderate_growth": Balanced approach, suitable for recovery regime
-  // - "defensive": Focus on stability and income, suitable for sideways
-  // - "rotate_out": Exit or underweight the sector, suitable for crisis/bear
-  // - "value_opportunity": Contrarian play in oversold sectors
-  // - "quality_focus": Prefer high-quality, low-debt companies
-  rpc GetSectorStrategies(GetSectorStrategiesRequest) returns (GetSectorStrategiesResponse) {
+  // GetSectorAnalysis returns sector analysis based on market regime
+  // Stage 1: Filters 11 GICS sectors down to 3-7 sectors
+  // Uses FinGPT for analysis, cached for 6 hours
+  rpc GetSectorAnalysis(GetSectorAnalysisRequest) returns (GetSectorAnalysisResponse) {
     option (google.api.http) = {
-      get: "/v1/classification/sector-strategies"
+      get: "/v1/classification/sectors"
     };
   }
 
-  // GetTopSymbols returns the top-performing or most-recommended symbols
-  // within a specific sector based on current market conditions
-  rpc GetTopSymbols(GetTopSymbolsRequest) returns (GetTopSymbolsResponse) {
+  // GetThematicAnalysis returns thematic ranking within selected sectors
+  // Stage 2: Ranks investment themes within the filtered sectors
+  // Uses FinGPT for analysis, cached for 6 hours
+  rpc GetThematicAnalysis(GetThematicAnalysisRequest) returns (GetThematicAnalysisResponse) {
     option (google.api.http) = {
-      get: "/v1/classification/top-symbols"
+      post: "/v1/classification/thematic"
+      body: "*"
+    };
+  }
+
+  // GetCandidateSymbols returns candidate symbols from Stage 1+2 pipeline
+  // Combined operation: sector filter + thematic analysis -> candidate list
+  // Returns top candidate symbols for further strategy analysis
+  rpc GetCandidateSymbols(GetCandidateSymbolsRequest) returns (GetCandidateSymbolsResponse) {
+    option (google.api.http) = {
+      get: "/v1/classification/candidates"
     };
   }
 }
 
-// GetSectorStrategiesRequest - Request for sector-specific strategies
-message GetSectorStrategiesRequest {
-  // Current market regime from Market Regime Service (Tier 1)
-  // Valid values: "crisis", "bear", "bull", "sideways", "recovery"
+// GetSectorAnalysisRequest - Request for sector analysis
+message GetSectorAnalysisRequest {
+  // Market regime (from Market Regime Service)
+  // Values: "crisis", "bear", "bull", "sideways", "recovery"
   string regime = 1;
 
-  // Optional: specific sectors to analyze
-  // If empty, returns strategies for all sectors
-  // Examples: "Technology", "Healthcare", "Financials", "Energy"
-  repeated string sectors = 2;
+  // If true, bypass cache and force fresh analysis from FinGPT
+  // Use sparingly to avoid unnecessary API costs
+  bool force_refresh = 2;
 }
 
-// GetSectorStrategiesResponse - Sector strategies based on current regime
-message GetSectorStrategiesResponse {
-  // The market regime used for this analysis
+// GetSectorAnalysisResponse - Sector analysis results
+message GetSectorAnalysisResponse {
+  // List of sector scores (all 11 GICS sectors)
+  // Sorted by score (highest first)
+  repeated SectorScore sectors = 1;
+
+  // Market regime used for analysis
+  string regime = 2;
+
+  // ISO 8601 timestamp of when this analysis was cached
+  string cached_at = 3;
+}
+
+// SectorScore - Individual sector score
+message SectorScore {
+  // GICS sector name
+  // Values: "Technology", "Healthcare", "Financials", "Consumer Discretionary",
+  //         "Industrials", "Communication Services", "Consumer Staples",
+  //         "Energy", "Utilities", "Real Estate", "Materials"
+  string sector = 1;
+
+  // Sector score (0-100)
+  // Higher score = better fit for current market regime
+  double score = 2;
+
+  // Rationale for score (from FinGPT analysis)
+  string rationale = 3;
+
+  // Whether this sector is selected for Stage 2 (top 3-7 sectors)
+  bool selected = 4;
+}
+
+// GetThematicAnalysisRequest - Request for thematic analysis
+message GetThematicAnalysisRequest {
+  // Selected sectors from Stage 1 (typically 3-7 sectors)
+  repeated string sectors = 1;
+
+  // Market regime (for context)
+  string regime = 2;
+
+  // If true, bypass cache and force fresh analysis
+  bool force_refresh = 3;
+}
+
+// GetThematicAnalysisResponse - Thematic analysis results
+message GetThematicAnalysisResponse {
+  // List of investment themes ranked by score
+  // Sorted by score (highest first)
+  repeated ThemeScore themes = 1;
+
+  // ISO 8601 timestamp of when this analysis was cached
+  string cached_at = 2;
+}
+
+// ThemeScore - Individual theme score
+message ThemeScore {
+  // Investment theme name
+  // Examples: "AI Infrastructure", "Clean Energy", "Digital Payments",
+  //           "Biotech Innovation", "Cloud Computing", "Cybersecurity"
+  string theme = 1;
+
+  // Sector this theme belongs to
+  string sector = 2;
+
+  // Theme score (0-100)
+  // Higher score = stronger current relevance
+  double score = 3;
+
+  // Rationale for score (from FinGPT analysis)
+  string rationale = 4;
+
+  // Representative symbols for this theme (3-5 symbols)
+  // Examples: ["NVDA", "AMD", "TSM"] for "AI Infrastructure"
+  repeated string representative_symbols = 5;
+}
+
+// GetCandidateSymbolsRequest - Request for candidate symbols
+message GetCandidateSymbolsRequest {
+  // Market regime (optional - will fetch from Market Regime Service if not provided)
   string regime = 1;
 
-  // Investment strategies for each sector
-  repeated SectorStrategy strategies = 2;
+  // Maximum number of candidate symbols to return (default: 50)
+  int32 max_candidates = 2;
 
-  // ISO 8601 timestamp when strategies were calculated
-  // Example: "2025-01-26T14:30:00Z"
-  string timestamp = 3;
+  // If true, bypass cache and force fresh analysis
+  bool force_refresh = 3;
 }
 
-// SectorStrategy - Investment recommendation for a specific sector
-message SectorStrategy {
-  // Sector name (e.g., "Technology", "Healthcare", "Financials")
-  string sector = 1;
+// GetCandidateSymbolsResponse - Candidate symbols from Stage 1+2
+message GetCandidateSymbolsResponse {
+  // List of candidate symbols with preliminary scoring
+  // Sorted by preliminary_score (highest first)
+  repeated CandidateSymbol candidates = 1;
 
-  // Recommended strategy for this sector:
-  // - "aggressive_growth": High-risk/high-reward positions
-  // - "moderate_growth": Balanced growth approach
-  // - "defensive": Focus on stability, dividends, low beta
-  // - "rotate_out": Reduce or exit positions
-  // - "value_opportunity": Look for undervalued plays
-  // - "quality_focus": Prefer high-quality companies
-  string strategy = 2;
+  // Selected sectors from Stage 1
+  repeated string selected_sectors = 2;
 
-  // Confidence score for this recommendation (0.0 to 1.0)
-  // Higher values indicate stronger conviction from FinGPT analysis
-  double confidence = 3;
+  // Top themes from Stage 2
+  repeated string top_themes = 3;
 
-  // Top recommended symbols within this sector
-  // Ordered by recommendation strength (best first)
-  repeated string top_symbols = 4;
+  // Market regime used for analysis
+  string regime = 4;
 }
 
-// GetTopSymbolsRequest - Request for top symbols within a sector
-message GetTopSymbolsRequest {
-  // Sector to query (e.g., "Technology", "Healthcare")
-  string sector = 1;
+// CandidateSymbol - Individual candidate symbol
+message CandidateSymbol {
+  // Stock symbol (e.g., "AAPL", "MSFT")
+  string symbol = 1;
 
-  // Maximum number of symbols to return
-  // Recommended: 5-20 for portfolio construction
-  int32 limit = 2;
-}
+  // Sector classification
+  string sector = 2;
 
-// GetTopSymbolsResponse - Top symbols within a sector
-message GetTopSymbolsResponse {
-  // List of top symbols with full details
-  // Uses bloasis.common.Symbol for consistent symbol representation
-  repeated bloasis.common.Symbol symbols = 1;
+  // Primary investment theme
+  string theme = 3;
 
-  // ISO 8601 timestamp when this list was generated
-  // Example: "2025-01-26T14:30:00Z"
-  string timestamp = 2;
+  // Preliminary score from Stage 1+2
+  // This score will be refined in Stage 3 (Strategy Service)
+  double preliminary_score = 4;
 }
