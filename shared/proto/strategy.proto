@@ -1,0 +1,231 @@
+// Strategy Service - Stock Selection Pipeline Stage 3
+// Part of BLOASIS Tier 3 (user-specific, cached for 1 hour)
+// Provides factor scoring and user preference management
+//
+// Stage 3: Factor Scoring - Scores candidate symbols using 6 factors
+// User Preferences: Manages risk profiles and sector preferences
+
+syntax = "proto3";
+
+package bloasis.strategy;
+
+import "google/api/annotations.proto";
+
+// StrategyService provides factor scoring and personalized strategy generation
+// Results are user-specific (Tier 3) and cached for 1 hour
+service StrategyService {
+  // GetStockPicks returns stock picks with factor scoring
+  // Stage 3: Applies 6-factor scoring to candidates from Classification Service
+  // Returns top 10-15 picks based on user risk profile
+  rpc GetStockPicks(StockPicksRequest) returns (StockPicksResponse) {
+    option (google.api.http) = {
+      post: "/v1/strategy/picks"
+      body: "*"
+    };
+  }
+
+  // GetPersonalizedStrategy returns complete personalized strategy
+  // Combines: Market Regime (Layer 1) + Sector/Themes (Layer 2) + Stock Picks (Layer 3)
+  // This is the full pipeline from regime to final recommendations
+  rpc GetPersonalizedStrategy(StrategyRequest) returns (StrategyResponse) {
+    option (google.api.http) = {
+      post: "/v1/strategy/personalized"
+      body: "*"
+    };
+  }
+
+  // UpdatePreferences updates user preferences
+  // Invalidates user-specific cache to force fresh strategy generation
+  rpc UpdatePreferences(UpdatePreferencesRequest) returns (UpdatePreferencesResponse) {
+    option (google.api.http) = {
+      put: "/v1/strategy/preferences/{user_id}"
+      body: "*"
+    };
+  }
+
+  // GetPreferences returns current user preferences
+  // Returns default preferences if user has not customized
+  rpc GetPreferences(GetPreferencesRequest) returns (UserPreferences) {
+    option (google.api.http) = {
+      get: "/v1/strategy/preferences/{user_id}"
+    };
+  }
+}
+
+// StockPicksRequest - Request for stock picks
+message StockPicksRequest {
+  // User ID for preference lookup
+  string user_id = 1;
+
+  // Maximum number of picks to return (default: 15)
+  int32 max_picks = 2;
+}
+
+// StockPicksResponse - Stock picks with factor scores
+message StockPicksResponse {
+  // List of stock picks ranked by final score
+  repeated StockPick picks = 1;
+
+  // Market regime used for analysis
+  string regime = 2;
+
+  // User preferences applied to scoring
+  UserPreferences applied_preferences = 3;
+
+  // ISO 8601 timestamp of generation
+  string generated_at = 4;
+}
+
+// StockPick - Individual stock recommendation
+message StockPick {
+  // Stock symbol (e.g., "AAPL", "MSFT")
+  string symbol = 1;
+
+  // Sector classification
+  string sector = 2;
+
+  // Primary investment theme
+  string theme = 3;
+
+  // Factor scores breakdown
+  FactorScores factor_scores = 4;
+
+  // Final weighted score (0-100)
+  double final_score = 5;
+
+  // Ranking position (1 = highest)
+  int32 rank = 6;
+
+  // Investment rationale
+  string rationale = 7;
+}
+
+// FactorScores - 6-factor breakdown
+message FactorScores {
+  // Momentum score (0-100)
+  // Based on price trend vs moving averages
+  double momentum = 1;
+
+  // Value score (0-100)
+  // Based on P/E, P/B ratios
+  double value = 2;
+
+  // Quality score (0-100)
+  // Based on ROE, debt ratios
+  double quality = 3;
+
+  // Volatility score (0-100)
+  // Inverse: lower volatility = higher score
+  double volatility = 4;
+
+  // Liquidity score (0-100)
+  // Based on trading volume
+  double liquidity = 5;
+
+  // Sentiment score (0-100)
+  // Based on news/social sentiment
+  double sentiment = 6;
+}
+
+// StrategyRequest - Request for personalized strategy
+message StrategyRequest {
+  // User ID for personalization
+  string user_id = 1;
+}
+
+// StrategyResponse - Complete personalized strategy
+message StrategyResponse {
+  // User ID
+  string user_id = 1;
+
+  // Current market regime
+  string regime = 2;
+
+  // Selected sectors from Stage 1
+  repeated string selected_sectors = 3;
+
+  // Top investment themes from Stage 2
+  repeated string top_themes = 4;
+
+  // Final stock picks from Stage 3
+  repeated StockPick stock_picks = 5;
+
+  // User preferences used
+  UserPreferences preferences = 6;
+
+  // ISO 8601 timestamp of cache
+  string cached_at = 7;
+
+  // Whether result came from cache
+  bool from_cache = 8;
+}
+
+// UserPreferences - User investment preferences
+message UserPreferences {
+  // User ID
+  string user_id = 1;
+
+  // Risk profile (affects factor weights)
+  RiskProfile risk_profile = 2;
+
+  // Preferred sectors (boost these)
+  repeated string preferred_sectors = 3;
+
+  // Excluded sectors (filter out)
+  repeated string excluded_sectors = 4;
+
+  // Maximum single position size (0.0-1.0)
+  // Example: 0.10 = max 10% of portfolio per stock
+  double max_single_position = 5;
+}
+
+// RiskProfile - Risk tolerance levels
+enum RiskProfile {
+  // Unspecified (treated as MODERATE)
+  RISK_PROFILE_UNSPECIFIED = 0;
+
+  // Conservative: Low volatility, high quality focus
+  // Factor weights: Value 25%, Quality 30%, Volatility 20%
+  CONSERVATIVE = 1;
+
+  // Moderate: Balanced approach
+  // Factor weights: Momentum 20%, Value 20%, Quality 20%, Sentiment 15%
+  MODERATE = 2;
+
+  // Aggressive: High growth, momentum focus
+  // Factor weights: Momentum 30%, Sentiment 30%
+  AGGRESSIVE = 3;
+}
+
+// UpdatePreferencesRequest - Update user preferences
+message UpdatePreferencesRequest {
+  // User ID
+  string user_id = 1;
+
+  // New risk profile
+  RiskProfile risk_profile = 2;
+
+  // New preferred sectors
+  repeated string preferred_sectors = 3;
+
+  // New excluded sectors
+  repeated string excluded_sectors = 4;
+
+  // New max single position size
+  double max_single_position = 5;
+}
+
+// UpdatePreferencesResponse - Update confirmation
+message UpdatePreferencesResponse {
+  // Success status
+  bool success = 1;
+
+  // Updated preferences
+  UserPreferences preferences = 2;
+}
+
+// GetPreferencesRequest - Get user preferences
+message GetPreferencesRequest {
+  // User ID
+  string user_id = 1;
+}
