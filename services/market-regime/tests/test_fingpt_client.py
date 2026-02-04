@@ -2,7 +2,7 @@
 Unit tests for FinGPT client.
 """
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -21,7 +21,8 @@ class TestMockFinGPTClient:
     async def test_connect_is_noop(self, client: MockFinGPTClient) -> None:
         """Test that connect is a no-op."""
         await client.connect()
-        assert client._client is None
+        # Mock wrapper uses shared mock client internally
+        assert client._client is not None
 
     @pytest.mark.asyncio
     async def test_close_is_noop(self, client: MockFinGPTClient) -> None:
@@ -140,10 +141,11 @@ class TestFinGPTClient:
 
     @pytest.mark.asyncio
     async def test_close_clears_client(self, client: FinGPTClient) -> None:
-        """Test that close clears the HTTP client."""
+        """Test that close closes the HTTP client."""
         await client.connect()
         await client.close()
-        assert client._client is None
+        # Wrapper still has reference to shared client
+        assert client._client is not None
 
     def test_build_classification_prompt(self) -> None:
         """Test prompt building from YAML."""
@@ -160,60 +162,48 @@ class TestFinGPTClient:
         assert "crisis" in prompt
         assert "JSON" in prompt
 
-    def test_parse_regime_response_hf_list_format(self, client: FinGPTClient) -> None:
-        """Test parsing Hugging Face list response format."""
-        response = [
-            {
-                "generated_text": '{"regime": "bull", "confidence": 0.85, "reasoning": "Low VIX", "key_indicators": ["vix"]}'
-            }
-        ]
+    def test_parse_regime_response_valid(self, client: FinGPTClient) -> None:
+        """Test parsing valid regime response."""
+        data = {"regime": "bull", "confidence": 0.85, "reasoning": "Low VIX", "key_indicators": ["vix"]}
 
-        result = client._parse_regime_response(response)
+        result = client._parse_regime_response(data)
 
         assert result["regime"] == "bull"
         assert result["confidence"] == 0.85
         assert result["reasoning"] == "Low VIX"
         assert result["indicators"] == ["vix"]
 
-    def test_parse_regime_response_dict_content(self, client: FinGPTClient) -> None:
-        """Test parsing response with dict content."""
-        response = {
-            "generated_text": '{"regime": "bear", "confidence": 0.75, "reasoning": "Elevated VIX", "key_indicators": ["vix", "momentum"]}'
-        }
+    def test_parse_regime_response_invalid_regime(self, client: FinGPTClient) -> None:
+        """Test parsing response with invalid regime."""
+        data = {"regime": "invalid", "confidence": 0.75}
 
-        result = client._parse_regime_response(response)
+        result = client._parse_regime_response(data)
 
-        assert result["regime"] == "bear"
+        assert result["regime"] == "sideways"  # Defaults to sideways
         assert result["confidence"] == 0.75
 
-    def test_parse_regime_response_embedded_json(self, client: FinGPTClient) -> None:
-        """Test parsing response with JSON embedded in text."""
-        response = [
-            {
-                "generated_text": 'Based on the analysis: {"regime": "sideways", "confidence": 0.65, "reasoning": "Mixed", "key_indicators": []}'
-            }
-        ]
+    def test_parse_regime_response_confidence_clamping(self, client: FinGPTClient) -> None:
+        """Test that confidence is clamped to [0, 1]."""
+        data = {"regime": "bull", "confidence": 1.5}  # Above 1.0
 
-        result = client._parse_regime_response(response)
+        result = client._parse_regime_response(data)
 
-        assert result["regime"] == "sideways"
-        assert result["confidence"] == 0.65
+        assert result["confidence"] == 1.0  # Clamped to max
 
-    def test_parse_regime_response_invalid(self, client: FinGPTClient) -> None:
-        """Test parsing invalid response returns defaults."""
-        response = [{"generated_text": "invalid json with no braces"}]
+    def test_parse_regime_response_empty(self, client: FinGPTClient) -> None:
+        """Test parsing empty response returns defaults."""
+        data = {}
 
-        result = client._parse_regime_response(response)
+        result = client._parse_regime_response(data)
 
         assert result["regime"] == "sideways"
         assert result["confidence"] == 0.5
 
     @pytest.mark.asyncio
     async def test_health_check_no_api_key(self) -> None:
-        """Test health check returns False with no API key."""
-        client = FinGPTClient(api_key="")
-        result = await client.health_check()
-        assert result is False
+        """Test creating client with no API key raises error."""
+        with pytest.raises(ValueError, match="Hugging Face API token required"):
+            FinGPTClient(api_key="")
 
     @pytest.mark.asyncio
     async def test_classify_regime_calls_api(self, client: FinGPTClient) -> None:
@@ -221,32 +211,28 @@ class TestFinGPTClient:
         market_data = {"vix": 20.0}
         macro_indicators = {"fed_funds_rate": 5.25}
 
-        with patch.object(client, "_call_api", new_callable=AsyncMock) as mock_call:
-            mock_call.return_value = [
-                {"generated_text": '{"regime": "sideways", "confidence": 0.65, "reasoning": "Mixed signals", "key_indicators": []}'}
-            ]
+        # Mock the shared client's analyze method
+        with patch.object(client._client, "analyze", new_callable=AsyncMock) as mock_analyze:
+            mock_analyze.return_value = {"regime": "sideways", "confidence": 0.65, "reasoning": "Mixed signals", "key_indicators": []}
 
             result = await client.classify_regime(market_data, macro_indicators)
 
-            mock_call.assert_called_once()
+            mock_analyze.assert_called_once()
             assert result["regime"] == "sideways"
 
     @pytest.mark.asyncio
-    async def test_call_api_handles_http_error(self, client: FinGPTClient) -> None:
-        """Test that API errors are handled properly."""
-        import httpx
+    async def test_classify_regime_handles_errors(self, client: FinGPTClient) -> None:
+        """Test that classify_regime handles API errors gracefully."""
+        market_data = {"vix": 20.0}
+        macro_indicators = {"fed_funds_rate": 5.25}
 
-        await client.connect()
+        # Mock the shared client's analyze method to raise error
+        with patch.object(client._client, "analyze", new_callable=AsyncMock) as mock_analyze:
+            mock_analyze.side_effect = RuntimeError("API error")
 
-        mock_response = MagicMock()
-        mock_response.status_code = 500
+            result = await client.classify_regime(market_data, macro_indicators)
 
-        with patch.object(client._client, "post", new_callable=AsyncMock) as mock_post:
-            mock_post.side_effect = httpx.HTTPStatusError(
-                "Server error", request=MagicMock(), response=mock_response
-            )
-
-            with pytest.raises(RuntimeError, match="Hugging Face API error"):
-                await client._call_api("test prompt")
-
-        await client.close()
+            # Should return default values on error
+            assert result["regime"] == "sideways"
+            assert result["confidence"] == 0.5
+            assert "Error" in result["reasoning"]

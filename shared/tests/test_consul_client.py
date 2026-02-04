@@ -95,35 +95,30 @@ class TestConsulClientRegisterGrpcService:
         mock_consul.agent.service.register = MagicMock()
 
         with patch("shared.utils.consul_client.consul.Consul", return_value=mock_consul):
-            with patch("shared.utils.consul_client.consul.Check") as mock_check:
-                mock_check.grpc.return_value = {"grpc": "test:50051"}
+            client = ConsulClient()
+            result = await client.register_grpc_service(
+                service_name="test-service",
+                service_id="test-service-1",
+                host="test-host",
+                port=50051,
+                tags=["grpc", "test"],
+            )
 
-                client = ConsulClient()
-                result = await client.register_grpc_service(
-                    service_name="test-service",
-                    service_id="test-service-1",
-                    host="test-host",
-                    port=50051,
-                    tags=["grpc", "test"],
-                )
+            assert result is True
+            assert "test-service-1" in client.registered_services
 
-                assert result is True
-                assert "test-service-1" in client.registered_services
-
-                mock_check.grpc.assert_called_once_with(
-                    grpc="test-host:50051",
-                    interval="10s",
-                    timeout="5s",
-                    grpc_use_tls=False,
-                )
-
-                mock_consul.agent.service.register.assert_called_once()
-                call_kwargs = mock_consul.agent.service.register.call_args[1]
-                assert call_kwargs["name"] == "test-service"
-                assert call_kwargs["service_id"] == "test-service-1"
-                assert call_kwargs["address"] == "test-host"
-                assert call_kwargs["port"] == 50051
-                assert call_kwargs["tags"] == ["grpc", "test"]
+            mock_consul.agent.service.register.assert_called_once()
+            call_kwargs = mock_consul.agent.service.register.call_args[1]
+            assert call_kwargs["name"] == "test-service"
+            assert call_kwargs["service_id"] == "test-service-1"
+            assert call_kwargs["address"] == "test-host"
+            assert call_kwargs["port"] == 50051
+            assert call_kwargs["tags"] == ["grpc", "test"]
+            # Verify check dictionary is passed correctly
+            assert call_kwargs["check"]["grpc"] == "test-host:50051"
+            assert call_kwargs["check"]["interval"] == "10s"
+            assert call_kwargs["check"]["timeout"] == "5s"
+            assert call_kwargs["check"]["grpc_use_tls"] is False
 
     @pytest.mark.asyncio
     async def test_register_with_custom_intervals(self) -> None:
@@ -132,25 +127,23 @@ class TestConsulClientRegisterGrpcService:
         mock_consul.agent.service.register = MagicMock()
 
         with patch("shared.utils.consul_client.consul.Consul", return_value=mock_consul):
-            with patch("shared.utils.consul_client.consul.Check") as mock_check:
-                mock_check.grpc.return_value = {}
+            client = ConsulClient()
+            await client.register_grpc_service(
+                service_name="test-service",
+                service_id="test-service-1",
+                host="test-host",
+                port=50051,
+                check_interval="30s",
+                check_timeout="10s",
+            )
 
-                client = ConsulClient()
-                await client.register_grpc_service(
-                    service_name="test-service",
-                    service_id="test-service-1",
-                    host="test-host",
-                    port=50051,
-                    check_interval="30s",
-                    check_timeout="10s",
-                )
-
-                mock_check.grpc.assert_called_once_with(
-                    grpc="test-host:50051",
-                    interval="30s",
-                    timeout="10s",
-                    grpc_use_tls=False,
-                )
+            mock_consul.agent.service.register.assert_called_once()
+            call_kwargs = mock_consul.agent.service.register.call_args[1]
+            # Verify custom check intervals are used
+            assert call_kwargs["check"]["grpc"] == "test-host:50051"
+            assert call_kwargs["check"]["interval"] == "30s"
+            assert call_kwargs["check"]["timeout"] == "10s"
+            assert call_kwargs["check"]["grpc_use_tls"] is False
 
     @pytest.mark.asyncio
     async def test_register_with_meta(self) -> None:
@@ -159,20 +152,17 @@ class TestConsulClientRegisterGrpcService:
         mock_consul.agent.service.register = MagicMock()
 
         with patch("shared.utils.consul_client.consul.Consul", return_value=mock_consul):
-            with patch("shared.utils.consul_client.consul.Check") as mock_check:
-                mock_check.grpc.return_value = {}
+            client = ConsulClient()
+            await client.register_grpc_service(
+                service_name="test-service",
+                service_id="test-service-1",
+                host="test-host",
+                port=50051,
+                meta={"version": "1.0.0", "env": "test"},
+            )
 
-                client = ConsulClient()
-                await client.register_grpc_service(
-                    service_name="test-service",
-                    service_id="test-service-1",
-                    host="test-host",
-                    port=50051,
-                    meta={"version": "1.0.0", "env": "test"},
-                )
-
-                call_kwargs = mock_consul.agent.service.register.call_args[1]
-                assert call_kwargs["meta"] == {"version": "1.0.0", "env": "test"}
+            call_kwargs = mock_consul.agent.service.register.call_args[1]
+            assert call_kwargs["meta"] == {"version": "1.0.0", "env": "test"}
 
     @pytest.mark.asyncio
     async def test_register_failure_consul_exception(self) -> None:

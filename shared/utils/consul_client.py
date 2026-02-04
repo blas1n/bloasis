@@ -111,6 +111,7 @@ class ConsulClient:
         tags: Optional[list[str]] = None,
         check_interval: str = "10s",
         check_timeout: str = "5s",
+        meta: Optional[dict[str, str]] = None,
     ) -> bool:
         """Register a gRPC service with Consul.
 
@@ -125,6 +126,7 @@ class ConsulClient:
             tags: Optional list of tags for service discovery.
             check_interval: How often Consul performs health checks (e.g., "10s").
             check_timeout: Timeout for health check (e.g., "5s").
+            meta: Optional metadata dictionary for the service.
 
         Returns:
             True if registration succeeded, False otherwise.
@@ -140,14 +142,18 @@ class ConsulClient:
             }
 
             # Register service with Consul
-            self.consul.agent.service.register(
-                name=service_name,
-                service_id=service_id,
-                address=host,
-                port=port,
-                tags=tags or [],
-                check=check,
-            )
+            register_kwargs = {
+                "name": service_name,
+                "service_id": service_id,
+                "address": host,
+                "port": port,
+                "tags": tags or [],
+                "check": check,
+            }
+            if meta is not None:
+                register_kwargs["meta"] = meta
+
+            self.consul.agent.service.register(**register_kwargs)
 
             self.registered_services.append(service_id)
             logger.info(

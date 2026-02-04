@@ -5,9 +5,18 @@ Provides functions to format prompts with market data and retrieve
 schema/parameter configurations from YAML templates.
 """
 
+from pathlib import Path
 from typing import Any
 
-from .loader import load_prompt
+from shared.prompts import PromptLoader
+
+# Create a loader for this service's prompts directory
+_loader = PromptLoader(Path(__file__).parent)
+
+
+def load_prompt(name: str) -> dict[str, Any]:
+    """Load a prompt configuration from YAML."""
+    return _loader.load(name)
 
 
 def get_classification_prompt() -> dict[str, Any]:

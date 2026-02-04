@@ -1,18 +1,15 @@
 """
-FinGPT Client - Hugging Face API wrapper for FinGPT financial analysis.
+FinGPT Client wrapper for market regime classification.
 
-This module provides a client for interacting with FinGPT models via
-Hugging Face Inference API for market regime classification.
-
-FinGPT models: https://huggingface.co/FinGPT
-Structured outputs: https://huggingface.co/docs/inference-providers/en/guides/structured-output
+This module wraps the shared FinGPT client with Market-regime-specific
+methods for regime classification.
 """
 
-import json
 import logging
-from typing import Any, Optional
+from typing import Any
 
-import httpx
+from shared.ai_clients import FinGPTClient as SharedFinGPTClient
+from shared.ai_clients import MockFinGPTClient as SharedMockFinGPTClient
 
 from ..prompts import (
     format_classification_prompt,
@@ -22,19 +19,12 @@ from ..prompts import (
 
 logger = logging.getLogger(__name__)
 
-# Hugging Face Inference API endpoint
-HF_INFERENCE_API_URL = "https://api-inference.huggingface.co/models"
-
-# Default FinGPT model
-DEFAULT_MODEL = "FinGPT/fingpt-sentiment_llama2-13b_lora"
-
 
 class FinGPTClient:
     """
-    Client for FinGPT financial analysis via Hugging Face.
+    Client wrapper for FinGPT market regime classification.
 
-    Provides market regime analysis using FinGPT's specialized
-    financial language model capabilities hosted on Hugging Face.
+    Wraps the shared FinGPT client with regime-specific methods.
 
     Features:
     - YAML-based prompt management for maintainability
@@ -45,37 +35,28 @@ class FinGPTClient:
     def __init__(
         self,
         api_key: str,
-        model: str = DEFAULT_MODEL,
+        model: str = "FinGPT/fingpt-sentiment_llama2-13b_lora",
         timeout: float = 60.0,
     ) -> None:
         """
-        Initialize the FinGPT client.
+        Initialize the FinGPT client wrapper.
 
         Args:
             api_key: Hugging Face API token for authentication.
             model: FinGPT model ID on Hugging Face.
             timeout: Request timeout in seconds.
         """
-        self.api_key = api_key
-        self.model = model
-        self.base_url = f"{HF_INFERENCE_API_URL}/{model}"
-        self.timeout = timeout
-        self._client: Optional[httpx.AsyncClient] = None
+        self._client = SharedFinGPTClient(api_key=api_key, model=model, timeout=timeout)
+        logger.info(f"FinGPT client wrapper initialized (model: {model})")
 
     async def connect(self) -> None:
-        """Initialize HTTP client."""
-        self._client = httpx.AsyncClient(
-            headers={"Authorization": f"Bearer {self.api_key}"},
-            timeout=self.timeout,
-        )
-        logger.info(f"FinGPT client connected (model: {self.model})")
+        """Initialize HTTP client (no-op, client is auto-initialized)."""
+        logger.info("FinGPT client wrapper connected")
 
     async def close(self) -> None:
         """Close HTTP client."""
-        if self._client:
-            await self._client.aclose()
-            self._client = None
-            logger.info("FinGPT client disconnected")
+        await self._client.close()
+        logger.info("FinGPT client wrapper disconnected")
 
     async def classify_regime(
         self,
@@ -98,108 +79,33 @@ class FinGPTClient:
         """
         # Build prompt from YAML template
         prompt = format_classification_prompt(market_data, macro_indicators)
-        response = await self._call_api(prompt)
-        return self._parse_regime_response(response)
-
-    async def _call_api(self, prompt: str) -> Any:
-        """
-        Call Hugging Face Inference API with structured output support.
-
-        Uses JSON schema grammar for constrained generation when supported.
-        """
-        if not self._client:
-            await self.connect()
-
-        if self._client is None:
-            raise RuntimeError("Failed to initialize HTTP client")
-
-        # Get parameters from YAML config
-        params = get_model_parameters()
         schema = get_response_schema()
+        params = get_model_parameters()
 
         try:
-            # Build request with structured output
-            request_body: dict[str, Any] = {
-                "inputs": prompt,
-                "parameters": {
-                    "max_new_tokens": params.get("max_new_tokens", 500),
-                    "temperature": params.get("temperature", 0.1),
-                    "top_p": params.get("top_p", 0.9),
-                    "do_sample": params.get("do_sample", False),
-                    "return_full_text": False,
-                },
+            # Use shared client's analyze method
+            result = await self._client.analyze(prompt=prompt, schema=schema, params=params)
+            return self._parse_regime_response(result)
+        except Exception as e:
+            logger.error(f"FinGPT regime classification failed: {e}")
+            # Return default on error
+            return {
+                "regime": "sideways",
+                "confidence": 0.5,
+                "reasoning": f"Error: {str(e)}",
+                "indicators": [],
             }
 
-            # Add grammar for structured output (if model supports it)
-            # This uses Outlines-based constrained decoding
-            request_body["parameters"]["grammar"] = {
-                "type": "json",
-                "value": schema,
-            }
+    def _parse_regime_response(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Parse regime classification response.
 
-            response = await self._client.post(
-                self.base_url,
-                json=request_body,
-            )
-            response.raise_for_status()
-            return response.json()
+        Args:
+            data: Parsed JSON from FinGPT
 
-        except httpx.HTTPStatusError as e:
-            # If grammar not supported, retry without it
-            if e.response.status_code == 422:
-                logger.warning("Model doesn't support grammar, retrying without structured output")
-                return await self._call_api_without_grammar(prompt, params)
-            logger.error(f"Hugging Face API error: {e.response.status_code}")
-            raise RuntimeError(f"Hugging Face API error: {e.response.status_code}")
-        except httpx.RequestError as e:
-            logger.error(f"Hugging Face request failed: {e}")
-            raise RuntimeError(f"Hugging Face request failed: {e}")
-
-    async def _call_api_without_grammar(
-        self, prompt: str, params: dict[str, Any]
-    ) -> Any:
-        """Fallback API call without structured output grammar."""
-        if self._client is None:
-            raise RuntimeError("HTTP client not initialized")
-
-        response = await self._client.post(
-            self.base_url,
-            json={
-                "inputs": prompt,
-                "parameters": {
-                    "max_new_tokens": params.get("max_new_tokens", 500),
-                    "temperature": params.get("temperature", 0.1),
-                    "return_full_text": False,
-                },
-            },
-        )
-        response.raise_for_status()
-        return response.json()
-
-    def _parse_regime_response(self, response: Any) -> dict[str, Any]:
-        """Parse Hugging Face response into regime classification."""
+        Returns:
+            Validated regime response
+        """
         try:
-            # Hugging Face returns list of generated texts
-            if isinstance(response, list) and len(response) > 0:
-                content = response[0].get("generated_text", "")
-            elif isinstance(response, dict):
-                content = response.get("generated_text", response.get("content", "{}"))
-            else:
-                content = str(response)
-
-            # Try to extract JSON from response
-            if isinstance(content, str):
-                # Find JSON in response
-                start = content.find("{")
-                end = content.rfind("}") + 1
-                if start != -1 and end > start:
-                    json_str = content[start:end]
-                    data = json.loads(json_str)
-                else:
-                    data = {}
-            else:
-                data = content
-
             # Validate and return
             regime = data.get("regime", "sideways")
             if regime not in ["crisis", "bear", "bull", "sideways", "recovery"]:
@@ -215,7 +121,7 @@ class FinGPTClient:
                 "indicators": data.get("key_indicators", []),
             }
 
-        except (json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
+        except (KeyError, TypeError, ValueError) as e:
             logger.warning(f"Failed to parse FinGPT response: {e}")
             return {
                 "regime": "sideways",
@@ -226,26 +132,16 @@ class FinGPTClient:
 
     async def health_check(self) -> bool:
         """Check if Hugging Face API is accessible."""
-        if not self.api_key:
-            return False
         try:
-            if not self._client:
-                await self.connect()
-            if self._client is None:
-                return False
-            # Simple test query
-            response = await self._client.post(
-                self.base_url,
-                json={"inputs": "test", "parameters": {"max_new_tokens": 1}},
-            )
-            # 200 OK or 503 (model loading) are acceptable
-            return response.status_code in (200, 503)
+            # Simple test using shared client
+            await self._client.analyze(prompt="test", schema=None, params={"max_new_tokens": 1})
+            return True
         except Exception:
             return False
 
 
 class MockFinGPTClient(FinGPTClient):
-    """Mock client for testing without API calls."""
+    """Mock client wrapper for testing without API calls."""
 
     def __init__(
         self,
@@ -253,20 +149,18 @@ class MockFinGPTClient(FinGPTClient):
         model: str = "",
         timeout: float = 30.0,
     ) -> None:
-        """Initialize mock client (no real connection needed)."""
-        self.api_key = api_key
-        self.model = model or "mock-model"
-        self.base_url = ""
-        self.timeout = timeout
-        self._client = None
+        """Initialize mock client wrapper."""
+        # Don't call parent __init__, use shared mock instead
+        self._client = SharedMockFinGPTClient()
+        logger.info("MockFinGPTClient wrapper initialized (no actual connection)")
 
     async def connect(self) -> None:
         """No-op for mock client."""
-        logger.info("MockFinGPTClient initialized (no actual connection)")
+        logger.info("MockFinGPTClient wrapper connected (no actual connection)")
 
     async def close(self) -> None:
         """No-op for mock client."""
-        pass
+        await self._client.close()
 
     async def classify_regime(
         self,

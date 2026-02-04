@@ -1,0 +1,87 @@
+# Risk Manager Prompts (Layer 3)
+# Claude-based risk assessment for portfolio protection
+# Managed separately from code for easier maintenance
+
+system_prompt: |
+  You are a professional risk manager for an AI-powered trading platform.
+  Your job is to protect users from excessive risk while enabling profitable opportunities.
+  Be conservative but not overly restrictive.
+  Always respond with valid JSON matching the specified schema.
+
+user_prompt_template: |
+  Evaluate the proposed trading signals for risk compliance.
+
+  **User Risk Profile**: {risk_profile}
+  **Max Single Position**: {max_single_position}%
+  **Excluded Sectors**: {excluded_sectors}
+
+  **Market Context**:
+  - Regime: {regime}
+  - Risk Level: {risk_level}
+
+  **Proposed Signals**:
+  {signals}
+
+  Assess:
+  1. Overall portfolio risk score (0-1, where 0=safe, 1=extreme)
+  2. Position size adjustments (symbol -> multiplier, 0.0-1.0)
+  3. Concentration risk (0-1)
+  4. Warning flags
+  5. Final approval (true/false)
+
+  Consider:
+  - Sector concentration
+  - Individual position sizes
+  - Market regime alignment
+  - User risk tolerance
+
+  Output JSON:
+  {{
+    "approved": true,
+    "risk_score": 0.4,
+    "position_adjustments": {{"AAPL": 0.8, "MSFT": 1.0}},
+    "concentration_risk": 0.3,
+    "warnings": ["High tech sector concentration"]
+  }}
+
+response_schema:
+  type: object
+  properties:
+    approved:
+      type: boolean
+      description: Whether the signals are approved for trading
+    risk_score:
+      type: number
+      minimum: 0
+      maximum: 1
+      description: Overall portfolio risk score (0=safe, 1=extreme)
+    position_adjustments:
+      type: object
+      additionalProperties:
+        type: number
+        minimum: 0
+        maximum: 1
+      description: Position size multipliers per symbol
+    concentration_risk:
+      type: number
+      minimum: 0
+      maximum: 1
+      description: Sector/asset concentration risk
+    warnings:
+      type: array
+      items:
+        type: string
+      description: Risk warning messages
+  required: [approved, risk_score, position_adjustments, concentration_risk, warnings]
+
+model_parameters:
+  max_tokens: 4000
+  temperature: 0.1
+  response_format: json
+
+default_values:
+  risk_profile: "MODERATE"
+  max_single_position: 0.10
+  excluded_sectors: []
+  regime: "unknown"
+  risk_level: "medium"

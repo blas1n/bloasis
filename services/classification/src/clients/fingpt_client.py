@@ -1,14 +1,15 @@
-"""FinGPT client for sector and thematic analysis.
+"""FinGPT client wrapper for sector and thematic analysis.
 
-Provides both real Hugging Face API client and mock client for development.
+This module wraps the shared FinGPT client with Classification-specific
+methods for sector and theme analysis.
 """
 
-import json
 import logging
 from abc import ABC, abstractmethod
 from typing import List
 
-import httpx
+from shared.ai_clients import FinGPTClient as SharedFinGPTClient
+from shared.ai_clients import MockFinGPTClient as SharedMockFinGPTClient
 
 from ..config import config
 from ..models import SectorScore, ThemeScore
@@ -40,7 +41,7 @@ ALL_SECTORS = [
 
 
 class FinGPTClientBase(ABC):
-    """Base class for FinGPT clients."""
+    """Base class for FinGPT clients with Classification-specific methods."""
 
     @abstractmethod
     async def analyze_sectors(self, regime: str) -> List[SectorScore]:
@@ -74,7 +75,7 @@ class FinGPTClientBase(ABC):
 
 
 class FinGPTClient(FinGPTClientBase):
-    """Real FinGPT client using Hugging Face Inference API."""
+    """Real FinGPT client wrapper using shared Hugging Face client."""
 
     def __init__(
         self,
@@ -89,19 +90,12 @@ class FinGPTClient(FinGPTClientBase):
             model: Model ID (default from config)
             timeout: Request timeout in seconds
         """
-        self.api_key = api_key or config.huggingface_token
-        self.model = model or config.fingpt_model
-        self.timeout = timeout
+        api_key = api_key or config.huggingface_token
+        model = model or config.fingpt_model
 
-        if not self.api_key:
-            raise ValueError("Hugging Face API token required for FinGPT client")
-
-        self.client = httpx.AsyncClient(
-            base_url="https://api-inference.huggingface.co",
-            headers={"Authorization": f"Bearer {self.api_key}"},
-            timeout=self.timeout,
-        )
-        logger.info(f"FinGPT client initialized (model: {self.model})")
+        # Use shared FinGPT client
+        self._client = SharedFinGPTClient(api_key=api_key, model=model, timeout=timeout)
+        logger.info(f"FinGPT client wrapper initialized (model: {model})")
 
     async def analyze_sectors(self, regime: str) -> List[SectorScore]:
         """Analyze sectors using FinGPT with YAML prompts and structured output."""
@@ -111,23 +105,8 @@ class FinGPTClient(FinGPTClientBase):
         params = get_sector_model_parameters()
 
         try:
-            response = await self.client.post(
-                f"/models/{self.model}",
-                json={
-                    "inputs": prompt,
-                    "parameters": {
-                        **params,
-                        "grammar": {"type": "json", "value": schema},  # Structured output
-                    },
-                },
-            )
-            response.raise_for_status()
-
-            result = response.json()
-            generated_text = result[0]["generated_text"] if isinstance(result, list) else result
-
-            # Parse JSON response
-            sectors_data = self._parse_json_response(generated_text)
+            # Use shared client's analyze method
+            sectors_data = await self._client.analyze(prompt=prompt, schema=schema, params=params)
             return self._convert_to_sector_scores(sectors_data)
 
         except Exception as e:
@@ -142,38 +121,13 @@ class FinGPTClient(FinGPTClientBase):
         params = get_theme_model_parameters()
 
         try:
-            response = await self.client.post(
-                f"/models/{self.model}",
-                json={
-                    "inputs": prompt,
-                    "parameters": {
-                        **params,
-                        "grammar": {"type": "json", "value": schema},  # Structured output
-                    },
-                },
-            )
-            response.raise_for_status()
-
-            result = response.json()
-            generated_text = result[0]["generated_text"] if isinstance(result, list) else result
-
-            # Parse JSON response
-            themes_data = self._parse_json_response(generated_text)
+            # Use shared client's analyze method
+            themes_data = await self._client.analyze(prompt=prompt, schema=schema, params=params)
             return self._convert_to_theme_scores(themes_data)
 
         except Exception as e:
             logger.error(f"FinGPT theme analysis failed: {e}")
             raise
-
-    def _parse_json_response(self, text: str) -> dict:
-        """Parse JSON from generated text."""
-        # Find JSON in text (may have extra text before/after)
-        start = text.find("{")
-        end = text.rfind("}") + 1
-        if start >= 0 and end > start:
-            json_str = text[start:end]
-            return json.loads(json_str)
-        raise ValueError(f"No valid JSON found in response: {text}")
 
     def _convert_to_sector_scores(self, data: dict) -> List[SectorScore]:
         """Convert dict to SectorScore models."""
@@ -204,19 +158,21 @@ class FinGPTClient(FinGPTClientBase):
 
     async def close(self) -> None:
         """Close HTTP client."""
-        await self.client.aclose()
-        logger.info("FinGPT client closed")
+        await self._client.close()
+        logger.info("FinGPT client wrapper closed")
 
 
 class MockFinGPTClient(FinGPTClientBase):
-    """Mock FinGPT client for development and testing.
+    """Mock FinGPT client wrapper for development and testing.
 
     Uses rule-based logic to generate realistic sector and theme analysis.
+    Extends the shared mock client with Classification-specific behavior.
     """
 
     def __init__(self):
         """Initialize mock client."""
-        logger.info("MockFinGPT client initialized (no API calls)")
+        self._client = SharedMockFinGPTClient()
+        logger.info("MockFinGPT client wrapper initialized (no API calls)")
 
     async def analyze_sectors(self, regime: str) -> List[SectorScore]:
         """Generate mock sector analysis based on regime."""

@@ -1,0 +1,99 @@
+# Macro Strategist Prompts (Layer 1)
+# FinGPT-based macro economic analysis
+# Managed separately from code for easier maintenance
+
+system_prompt: |
+  You are a macro strategist specializing in market regime analysis for algorithmic trading.
+  Your task is to analyze the macro economic environment and provide risk assessment
+  for the given stock picks. Always respond with valid JSON matching the specified schema.
+
+user_prompt_template: |
+  As a macro strategist, analyze the current market environment for the given stock picks.
+
+  **Stock Picks**: {symbols}
+  **Current Regime**: {regime}
+  **Sectors**: {sectors}
+
+  Provide:
+  1. Overall market risk level (low/medium/high/extreme)
+  2. Sector-specific outlook (score 0-100 for each sector)
+  3. Key macro indicators affecting these stocks
+  4. Risk factors to consider
+
+  Output JSON format:
+  {{
+    "risk_level": "medium",
+    "sector_outlook": {{"Technology": 75, "Healthcare": 60}},
+    "macro_indicators": {{"inflation": "rising", "rates": "stable", "gdp_growth": "moderate"}},
+    "rationale": "Market shows moderate risk with sector rotation from growth to value..."
+  }}
+
+response_schema:
+  type: object
+  properties:
+    risk_level:
+      type: string
+      enum: ["low", "medium", "high", "extreme"]
+      description: Overall market risk level
+    sector_outlook:
+      type: object
+      additionalProperties:
+        type: number
+        minimum: 0
+        maximum: 100
+      description: Score for each sector (0-100)
+    macro_indicators:
+      type: object
+      properties:
+        inflation:
+          type: string
+          description: Inflation trend
+        rates:
+          type: string
+          description: Interest rate environment
+        gdp_growth:
+          type: string
+          description: GDP growth outlook
+      description: Key macro economic indicators
+    rationale:
+      type: string
+      description: Explanation of the analysis
+  required: [risk_level, sector_outlook, macro_indicators, rationale]
+
+model_parameters:
+  max_new_tokens: 800
+  temperature: 0.1
+  top_p: 0.9
+  return_full_text: false
+
+default_values:
+  regime: "unknown"
+  symbols: []
+  sectors: []
+
+# Regime Risk Assessment (used by assess_regime_risk method)
+regime_risk:
+  system_prompt: |
+    You are a market regime risk analyst. Assess the risk level for trading
+    given the current market regime and economic indicators.
+
+  user_prompt_template: |
+    Assess the risk level for the current market regime.
+
+    **Regime**: {regime}
+    **Indicators**: {indicators}
+
+    Provide:
+    1. Confidence level (0-1)
+    2. Risk level (low/medium/high/extreme)
+    3. Key factors influencing the assessment
+
+    Output JSON:
+    {{
+      "confidence": 0.85,
+      "risk_level": "medium",
+      "factors": ["factor1", "factor2"]
+    }}
+
+  model_parameters:
+    temperature: 0.1

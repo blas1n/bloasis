@@ -106,18 +106,21 @@ class TestFinGPTClient:
     """Tests for FinGPTClient and MockFinGPTClient."""
 
     def test_init_with_explicit_api_key(self) -> None:
-        """Should use explicit API key."""
+        """Should initialize wrapper with API key passed to shared client."""
         from src.clients.fingpt_client import FinGPTClient
 
         client = FinGPTClient(api_key="explicit-key")
-        assert client.api_key == "explicit-key"
+        # Wrapper stores reference to shared client
+        assert client._client is not None
+        assert client._client.api_key == "explicit-key"
 
     def test_mock_client_init(self) -> None:
         """Should initialize MockFinGPTClient without API key."""
         from src.clients.fingpt_client import MockFinGPTClient
 
         client = MockFinGPTClient()
-        assert client.api_key == ""
+        # Mock wrapper uses shared mock client internally
+        assert client._client is not None
 
     @pytest.mark.asyncio
     async def test_mock_classify_regime_returns_data(self) -> None:
@@ -144,13 +147,12 @@ class TestFinGPTClient:
         assert result is True
 
     @pytest.mark.asyncio
-    async def test_health_check_without_api_key(self) -> None:
-        """Should return False when API key is empty."""
+    async def test_health_check_without_api_key_raises(self) -> None:
+        """Should raise ValueError when API key is empty."""
         from src.clients.fingpt_client import FinGPTClient
 
-        client = FinGPTClient(api_key="")
-        result = await client.health_check()
-        assert result is False
+        with pytest.raises(ValueError, match="Hugging Face API token required"):
+            FinGPTClient(api_key="")
 
     @pytest.mark.asyncio
     async def test_health_check_with_api_key(self) -> None:

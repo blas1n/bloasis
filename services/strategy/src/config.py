@@ -41,6 +41,13 @@ class ServiceConfig(BaseSettings):
     market_data_host: str = "market-data"
     market_data_port: int = 50053
 
+    # Redpanda (Event Publishing)
+    redpanda_brokers: str = "localhost:9092"
+
+    # External AI APIs
+    fingpt_api_key: str = ""
+    claude_api_key: str = ""
+
 
 # Global config instance - validated at import time
 config = ServiceConfig()

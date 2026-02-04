@@ -4,6 +4,7 @@ Implements Stock Selection Pipeline Stage 3:
 - Stage 3: Factor Scoring (6 factors with risk profile-based weighting)
 - User Preferences Management (risk profiles, sector preferences)
 - Layer 3 Caching (user-specific, 1-hour TTL)
+- AI Flow Integration (5-Layer LangGraph workflow)
 """
 
 import logging
@@ -24,6 +25,7 @@ from .utils.cache import (
     build_preferences_cache_key,
     build_strategy_cache_key,
 )
+from .workflow.graph import create_ai_workflow
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +54,10 @@ class StrategyServicer(strategy_pb2_grpc.StrategyServiceServicer):
         self.cache = cache_manager
         self.factor_engine = FactorScoringEngine(market_data_client)
 
-        logger.info("Strategy servicer initialized")
+        # Initialize AI workflow
+        self.ai_workflow = create_ai_workflow()
+
+        logger.info("Strategy servicer initialized with AI workflow")
 
     async def get_stock_picks(
         self, user_id: str, max_picks: int = 15
@@ -272,6 +277,76 @@ class StrategyServicer(strategy_pb2_grpc.StrategyServiceServicer):
 
         logger.info(f"Preferences updated and strategy cache invalidated for user {user_id}")
         return preferences
+
+    async def run_ai_analysis(self, user_id: str) -> dict:
+        """Run AI Flow (5-Layer LangGraph workflow).
+
+        This executes the complete AI analysis pipeline:
+        - Layer 1: Macro Analysis (FinGPT)
+        - Layer 2: Technical Analysis (Claude)
+        - Layer 3: Risk Assessment (Claude)
+        - Layer 4: Signal Generation
+        - Layer 5: Event Publishing (Redpanda)
+
+        Args:
+            user_id: User ID
+
+        Returns:
+            Final workflow state with trading signals
+
+        Raises:
+            Exception: If workflow execution fails
+        """
+        logger.info(f"Running AI analysis workflow for user {user_id}")
+
+        # Get stock picks from Stage 3 (Factor Scoring)
+        picks, regime, preferences = await self.get_stock_picks(user_id, max_picks=15)
+
+        # Prepare initial state
+        initial_state = {
+            "user_id": user_id,
+            "stock_picks": [
+                {
+                    "symbol": p.symbol,
+                    "sector": p.sector,
+                    "theme": p.theme,
+                    "final_score": p.final_score,
+                    "factor_scores": {
+                        "momentum": p.factor_scores.momentum,
+                        "value": p.factor_scores.value,
+                        "quality": p.factor_scores.quality,
+                        "volatility": p.factor_scores.volatility,
+                        "liquidity": p.factor_scores.liquidity,
+                        "sentiment": p.factor_scores.sentiment,
+                    },
+                }
+                for p in picks
+            ],
+            "preferences": {
+                "user_id": preferences.user_id,
+                "risk_profile": preferences.risk_profile.value,
+                "preferred_sectors": preferences.preferred_sectors,
+                "excluded_sectors": preferences.excluded_sectors,
+                "max_single_position": preferences.max_single_position,
+                "regime": regime,
+            },
+            "technical_signals": [],
+            "trading_signals": [],
+        }
+
+        # Execute workflow
+        try:
+            final_state = await self.ai_workflow.ainvoke(initial_state)
+            logger.info(
+                f"AI analysis complete for user {user_id}: "
+                f"phase={final_state.get('phase')}, "
+                f"signals={len(final_state.get('trading_signals', []))}"
+            )
+            return final_state
+
+        except Exception as e:
+            logger.error(f"AI workflow execution failed for user {user_id}: {e}", exc_info=True)
+            raise
 
     def _generate_rationale(self, candidate, factor_scores) -> str:
         """Generate investment rationale based on factor strengths.

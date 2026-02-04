@@ -7,13 +7,14 @@ Future: Can be extended to support remote prompt storage, versioning, A/B testin
 
 import logging
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Union
 
 import yaml
 
 logger = logging.getLogger(__name__)
 
-# In-memory cache for loaded prompts
+# Global in-memory cache for loaded prompts
+# Key: "{prompts_dir}:{name}" -> Value: parsed YAML content
 _cache: dict[str, dict[str, Any]] = {}
 
 
@@ -31,18 +32,22 @@ class PromptLoader:
     - Prompt versioning
     - A/B testing support
     - Hot reloading
+
+    Example:
+        loader = PromptLoader(Path("/workspace/services/strategy/src/prompts"))
+        config = loader.load("macro_strategist")
+        system_prompt = config.get("system_prompt", "")
     """
 
-    def __init__(self, prompts_dir: Optional[Path] = None) -> None:
+    def __init__(self, prompts_dir: Union[Path, str]) -> None:
         """
         Initialize the prompt loader.
 
         Args:
             prompts_dir: Directory containing prompt YAML files.
-                        Defaults to the directory of this module.
         """
-        if prompts_dir is None:
-            prompts_dir = Path(__file__).parent
+        if isinstance(prompts_dir, str):
+            prompts_dir = Path(prompts_dir)
         self.prompts_dir = prompts_dir
 
     def load(self, name: str, use_cache: bool = True) -> dict[str, Any]:
@@ -93,9 +98,13 @@ class PromptLoader:
         return self.load(name, use_cache=False)
 
     def clear_cache(self) -> None:
-        """Clear all cached prompts."""
-        _cache.clear()
-        logger.info("Prompt cache cleared")
+        """Clear all cached prompts for this loader's directory."""
+        keys_to_remove = [
+            key for key in _cache if key.startswith(f"{self.prompts_dir}:")
+        ]
+        for key in keys_to_remove:
+            del _cache[key]
+        logger.info(f"Prompt cache cleared for {self.prompts_dir}")
 
     def list_prompts(self) -> list[str]:
         """
@@ -104,32 +113,16 @@ class PromptLoader:
         Returns:
             List of prompt names (without .yaml extension).
         """
+        if not self.prompts_dir.exists():
+            return []
         return [
-            f.stem for f in self.prompts_dir.glob("*.yaml")
+            f.stem
+            for f in self.prompts_dir.glob("*.yaml")
             if not f.name.startswith("_")
         ]
 
 
-# Default loader instance
-_default_loader: Optional[PromptLoader] = None
-
-
-def get_loader() -> PromptLoader:
-    """Get the default prompt loader instance."""
-    global _default_loader
-    if _default_loader is None:
-        _default_loader = PromptLoader()
-    return _default_loader
-
-
-def load_prompt(name: str) -> dict[str, Any]:
-    """
-    Load a prompt using the default loader.
-
-    Args:
-        name: Prompt file name without extension.
-
-    Returns:
-        Parsed prompt configuration.
-    """
-    return get_loader().load(name)
+def clear_prompt_cache() -> None:
+    """Clear the global prompt cache."""
+    _cache.clear()
+    logger.info("Global prompt cache cleared")

@@ -1,0 +1,91 @@
+# Technical Analyst Prompts (Layer 2)
+# Claude-based technical analysis with multi-factor synthesis
+# Managed separately from code for easier maintenance
+
+system_prompt: |
+  You are an expert technical analyst specializing in equity markets.
+  Analyze stocks using technical indicators, price patterns, and market context.
+  Provide actionable trading signals with clear rationale.
+  Always respond with valid JSON matching the specified schema.
+
+user_prompt_template: |
+  Analyze the following stocks for trading opportunities.
+
+  **Stock Picks**:
+  {stock_data}
+
+  **Market Context**:
+  - Regime: {regime}
+  - Risk Level: {risk_level}
+  - Sector Outlook: {sector_outlook}
+
+  **OHLCV Data Summary**:
+  {ohlcv_summary}
+
+  For each stock, determine:
+  1. Trading direction (long/short/neutral)
+  2. Signal strength (0-1)
+  3. Entry price recommendation
+  4. Key technical indicators
+  5. Rationale (2-3 sentences)
+
+  Output JSON array:
+  [
+    {{
+      "symbol": "AAPL",
+      "direction": "long",
+      "strength": 0.75,
+      "entry_price": 150.25,
+      "indicators": {{"rsi": 65, "macd": "bullish", "trend": "up"}},
+      "rationale": "Strong momentum with RSI in healthy range. MACD crossover confirms uptrend."
+    }}
+  ]
+
+response_schema:
+  type: array
+  items:
+    type: object
+    properties:
+      symbol:
+        type: string
+        description: Stock ticker symbol
+      direction:
+        type: string
+        enum: ["long", "short", "neutral"]
+        description: Trading direction
+      strength:
+        type: number
+        minimum: 0
+        maximum: 1
+        description: Signal strength (0-1)
+      entry_price:
+        type: number
+        description: Recommended entry price
+      indicators:
+        type: object
+        properties:
+          rsi:
+            type: number
+            description: RSI value
+          macd:
+            type: string
+            description: MACD signal (bullish/bearish/neutral)
+          trend:
+            type: string
+            description: Trend direction (up/down/sideways)
+        description: Key technical indicators
+      rationale:
+        type: string
+        description: Explanation for the signal
+    required: [symbol, direction, strength, entry_price, rationale]
+
+model_parameters:
+  max_tokens: 8000
+  temperature: 0.2
+  response_format: json
+
+default_values:
+  regime: "unknown"
+  risk_level: "medium"
+  sector_outlook: {}
+  ohlcv_summary: "No data available"
