@@ -406,3 +406,483 @@ class TestSignalGenerator:
         assert generator._signal_to_action("long") == "buy"
         assert generator._signal_to_action("short") == "sell"
         assert generator._signal_to_action("neutral") == "hold"
+
+    def test_signal_to_action_unknown(self, generator):
+        """Test signal direction to action conversion with unknown direction."""
+        assert generator._signal_to_action("unknown") == "hold"
+        assert generator._signal_to_action("") == "hold"
+
+
+class TestRiskManagerSectorConcentration:
+    """Tests for Risk Manager sector concentration checks."""
+
+    @pytest.fixture
+    def mock_claude_client(self):
+        """Create mock Claude client."""
+        client = AsyncMock()
+        client.analyze = AsyncMock(
+            return_value={
+                "approved": True,
+                "risk_score": 0.4,
+                "position_adjustments": {},
+                "concentration_risk": 0.3,
+                "warnings": [],
+            }
+        )
+        return client
+
+    @pytest.fixture
+    def manager(self, mock_claude_client):
+        """Create Risk Manager with mock client."""
+        return RiskManager(claude_client=mock_claude_client)
+
+    def test_check_sector_concentration_empty_signals(self, manager):
+        """Test sector concentration check with empty signals."""
+        exceeds, ratio = manager._check_sector_concentration([])
+
+        assert exceeds is False
+        assert ratio == 0.0
+
+    def test_check_sector_concentration_single_signal(self, manager):
+        """Test sector concentration check with single signal."""
+        signals = [
+            TechnicalSignal(
+                symbol="AAPL",
+                direction="long",
+                strength=0.75,
+                entry_price=Decimal("150.00"),
+                indicators={},
+                rationale="Test",
+            )
+        ]
+
+        exceeds, ratio = manager._check_sector_concentration(signals)
+
+        assert exceeds is False
+        assert ratio == 1.0  # 1/1 = 1.0
+
+    def test_check_sector_concentration_two_signals(self, manager):
+        """Test sector concentration check with two signals."""
+        signals = [
+            TechnicalSignal(
+                symbol="AAPL",
+                direction="long",
+                strength=0.75,
+                entry_price=Decimal("150.00"),
+                indicators={},
+                rationale="Test",
+            ),
+            TechnicalSignal(
+                symbol="MSFT",
+                direction="long",
+                strength=0.65,
+                entry_price=Decimal("350.00"),
+                indicators={},
+                rationale="Test",
+            ),
+        ]
+
+        exceeds, ratio = manager._check_sector_concentration(signals)
+
+        assert exceeds is False
+        assert ratio == 0.5  # 1/2 = 0.5
+
+    def test_check_sector_concentration_three_signals(self, manager):
+        """Test sector concentration check with three signals."""
+        signals = [
+            TechnicalSignal(
+                symbol="AAPL",
+                direction="long",
+                strength=0.75,
+                entry_price=Decimal("150.00"),
+                indicators={},
+                rationale="Test",
+            ),
+            TechnicalSignal(
+                symbol="MSFT",
+                direction="long",
+                strength=0.65,
+                entry_price=Decimal("350.00"),
+                indicators={},
+                rationale="Test",
+            ),
+            TechnicalSignal(
+                symbol="GOOGL",
+                direction="long",
+                strength=0.70,
+                entry_price=Decimal("2800.00"),
+                indicators={},
+                rationale="Test",
+            ),
+        ]
+
+        exceeds, ratio = manager._check_sector_concentration(signals)
+
+        # 1/3 = 0.33, which is less than 0.5 default
+        assert exceeds is False
+        assert ratio == pytest.approx(1.0 / 3.0)
+
+    def test_check_sector_concentration_many_signals(self, manager):
+        """Test sector concentration check with many signals (uses conservative estimate)."""
+        signals = [
+            TechnicalSignal(
+                symbol=f"STOCK{i}",
+                direction="long",
+                strength=0.75,
+                entry_price=Decimal("100.00"),
+                indicators={},
+                rationale="Test",
+            )
+            for i in range(5)
+        ]
+
+        exceeds, ratio = manager._check_sector_concentration(signals)
+
+        # With >3 signals, uses conservative 0.4 estimate
+        assert exceeds is False
+        assert ratio == 0.4
+
+    def test_check_sector_concentration_custom_threshold(self, manager):
+        """Test sector concentration check with custom max_concentration."""
+        signals = [
+            TechnicalSignal(
+                symbol=f"STOCK{i}",
+                direction="long",
+                strength=0.75,
+                entry_price=Decimal("100.00"),
+                indicators={},
+                rationale="Test",
+            )
+            for i in range(5)
+        ]
+
+        # With 0.3 threshold, 0.4 concentration should exceed
+        exceeds, ratio = manager._check_sector_concentration(signals, max_concentration=0.3)
+
+        assert exceeds is True
+        assert ratio == 0.4
+
+
+class TestRiskManagerInvalidResponse:
+    """Tests for Risk Manager invalid response handling."""
+
+    @pytest.fixture
+    def mock_claude_client(self):
+        """Create mock Claude client."""
+        return AsyncMock()
+
+    @pytest.fixture
+    def manager(self, mock_claude_client):
+        """Create Risk Manager with mock client."""
+        return RiskManager(claude_client=mock_claude_client)
+
+    @pytest.fixture
+    def market_context(self):
+        """Create test market context."""
+        return MarketContext(
+            regime="normal_bull",
+            confidence=0.8,
+            risk_level="medium",
+            sector_outlook={},
+            macro_indicators={},
+        )
+
+    @pytest.fixture
+    def technical_signals(self):
+        """Create test technical signals."""
+        return [
+            TechnicalSignal(
+                symbol="AAPL",
+                direction="long",
+                strength=0.75,
+                entry_price=Decimal("150.25"),
+                indicators={},
+                rationale="Strong momentum",
+            )
+        ]
+
+    @pytest.mark.asyncio
+    async def test_assess_invalid_response_type_string(
+        self, manager, technical_signals, market_context, mock_claude_client
+    ):
+        """Test fail-safe when Claude returns string instead of dict."""
+        mock_claude_client.analyze.return_value = "This is not a valid response"
+
+        result = await manager.assess(
+            signals=technical_signals,
+            market_context=market_context,
+            user_preferences={},
+        )
+
+        # Should fail-safe to rejection
+        assert result.approved is False
+        assert result.risk_score == 1.0
+        assert "Invalid response type" in result.warnings[0]
+
+    @pytest.mark.asyncio
+    async def test_assess_invalid_response_type_list(
+        self, manager, technical_signals, market_context, mock_claude_client
+    ):
+        """Test fail-safe when Claude returns list instead of dict."""
+        mock_claude_client.analyze.return_value = ["not", "a", "dict"]
+
+        result = await manager.assess(
+            signals=technical_signals,
+            market_context=market_context,
+            user_preferences={},
+        )
+
+        # Should fail-safe to rejection
+        assert result.approved is False
+        assert result.risk_score == 1.0
+
+    @pytest.mark.asyncio
+    async def test_assess_invalid_response_type_none(
+        self, manager, technical_signals, market_context, mock_claude_client
+    ):
+        """Test fail-safe when Claude returns None."""
+        mock_claude_client.analyze.return_value = None
+
+        result = await manager.assess(
+            signals=technical_signals,
+            market_context=market_context,
+            user_preferences={},
+        )
+
+        # Should fail-safe to rejection
+        assert result.approved is False
+        assert result.risk_score == 1.0
+
+
+class TestSignalGeneratorEdgeCases:
+    """Tests for Signal Generator edge cases."""
+
+    @pytest.fixture
+    def generator(self):
+        """Create Signal Generator."""
+        return SignalGenerator()
+
+    def test_calculate_base_size_unknown_profile(self, generator):
+        """Test position size calculation with unknown risk profile."""
+        # Unknown profile should default to MODERATE (0.10)
+        size = generator._calculate_base_size(strength=0.8, risk_profile="UNKNOWN")
+        assert size == Decimal("0.08")  # 0.8 * 0.10
+
+    def test_calculate_base_size_zero_strength(self, generator):
+        """Test position size calculation with zero strength."""
+        size = generator._calculate_base_size(strength=0.0, risk_profile="MODERATE")
+        assert size == Decimal("0.0000")
+
+    def test_calculate_base_size_max_strength(self, generator):
+        """Test position size calculation with max strength."""
+        size = generator._calculate_base_size(strength=1.0, risk_profile="AGGRESSIVE")
+        assert size == Decimal("0.1500")  # 1.0 * 0.15
+
+    def test_calculate_levels_short_normal_risk(self, generator):
+        """Test stop-loss and take-profit for short position in normal risk."""
+        signal = TechnicalSignal(
+            symbol="AAPL",
+            direction="short",
+            strength=0.75,
+            entry_price=Decimal("150.00"),
+            indicators={},
+            rationale="Test",
+        )
+        market_context = MarketContext(
+            regime="normal_bull",
+            confidence=0.8,
+            risk_level="medium",
+            sector_outlook={},
+            macro_indicators={},
+        )
+
+        stop_loss, take_profit = generator._calculate_levels(signal, market_context)
+
+        # For short: stop_loss > entry, take_profit < entry
+        assert stop_loss > signal.entry_price
+        assert take_profit < signal.entry_price
+        assert stop_loss == signal.entry_price * Decimal("1.02")  # +2%
+        assert take_profit == signal.entry_price * Decimal("0.95")  # -5%
+
+    def test_calculate_levels_short_high_risk(self, generator):
+        """Test stop-loss and take-profit for short position in high risk."""
+        signal = TechnicalSignal(
+            symbol="AAPL",
+            direction="short",
+            strength=0.75,
+            entry_price=Decimal("150.00"),
+            indicators={},
+            rationale="Test",
+        )
+        market_context = MarketContext(
+            regime="crisis",
+            confidence=0.8,
+            risk_level="high",
+            sector_outlook={},
+            macro_indicators={},
+        )
+
+        stop_loss, take_profit = generator._calculate_levels(signal, market_context)
+
+        # For short in high risk: tighter stops
+        assert stop_loss == signal.entry_price * Decimal("1.01")  # +1%
+        assert take_profit == signal.entry_price * Decimal("0.97")  # -3%
+
+    def test_calculate_levels_long_extreme_risk(self, generator):
+        """Test stop-loss and take-profit for long position in extreme risk."""
+        signal = TechnicalSignal(
+            symbol="AAPL",
+            direction="long",
+            strength=0.75,
+            entry_price=Decimal("150.00"),
+            indicators={},
+            rationale="Test",
+        )
+        market_context = MarketContext(
+            regime="crisis",
+            confidence=0.8,
+            risk_level="extreme",
+            sector_outlook={},
+            macro_indicators={},
+        )
+
+        stop_loss, take_profit = generator._calculate_levels(signal, market_context)
+
+        # For long in extreme risk: very tight stops
+        assert stop_loss == signal.entry_price * Decimal("0.995")  # -0.5%
+        assert take_profit == signal.entry_price * Decimal("1.02")  # +2%
+
+    def test_calculate_levels_short_extreme_risk(self, generator):
+        """Test stop-loss and take-profit for short position in extreme risk."""
+        signal = TechnicalSignal(
+            symbol="AAPL",
+            direction="short",
+            strength=0.75,
+            entry_price=Decimal("150.00"),
+            indicators={},
+            rationale="Test",
+        )
+        market_context = MarketContext(
+            regime="crisis",
+            confidence=0.8,
+            risk_level="extreme",
+            sector_outlook={},
+            macro_indicators={},
+        )
+
+        stop_loss, take_profit = generator._calculate_levels(signal, market_context)
+
+        # For short in extreme risk: very tight stops
+        assert stop_loss == signal.entry_price * Decimal("1.005")  # +0.5%
+        assert take_profit == signal.entry_price * Decimal("0.98")  # -2%
+
+    def test_calculate_levels_low_risk(self, generator):
+        """Test stop-loss and take-profit in low risk environment."""
+        signal = TechnicalSignal(
+            symbol="AAPL",
+            direction="long",
+            strength=0.75,
+            entry_price=Decimal("150.00"),
+            indicators={},
+            rationale="Test",
+        )
+        market_context = MarketContext(
+            regime="normal_bull",
+            confidence=0.8,
+            risk_level="low",
+            sector_outlook={},
+            macro_indicators={},
+        )
+
+        stop_loss, take_profit = generator._calculate_levels(signal, market_context)
+
+        # For long in low risk: normal stops
+        assert stop_loss == signal.entry_price * Decimal("0.98")  # -2%
+        assert take_profit == signal.entry_price * Decimal("1.05")  # +5%
+
+    def test_generate_with_no_position_adjustment(self, generator):
+        """Test generate when symbol has no position adjustment."""
+        signals = [
+            TechnicalSignal(
+                symbol="AAPL",
+                direction="long",
+                strength=0.8,
+                entry_price=Decimal("150.00"),
+                indicators={},
+                rationale="Test",
+            )
+        ]
+        risk_assessment = RiskAssessment(
+            approved=True,
+            risk_score=0.4,
+            position_adjustments={},  # No adjustment for AAPL
+            warnings=[],
+            concentration_risk=0.3,
+        )
+        market_context = MarketContext(
+            regime="normal_bull",
+            confidence=0.8,
+            risk_level="medium",
+            sector_outlook={},
+            macro_indicators={},
+        )
+
+        result = generator.generate(
+            technical_signals=signals,
+            risk_assessment=risk_assessment,
+            market_context=market_context,
+            user_preferences={"risk_profile": "MODERATE"},
+        )
+
+        assert len(result) == 1
+        # Size should be base_size * 1.0 (default multiplier)
+        expected_base = Decimal("0.8") * Decimal("0.10")  # strength * max_size
+        assert result[0].size_recommendation == expected_base.quantize(Decimal("0.0001"))
+
+    def test_generate_multiple_signals(self, generator):
+        """Test generate with multiple technical signals."""
+        signals = [
+            TechnicalSignal(
+                symbol="AAPL",
+                direction="long",
+                strength=0.8,
+                entry_price=Decimal("150.00"),
+                indicators={},
+                rationale="Strong momentum",
+            ),
+            TechnicalSignal(
+                symbol="MSFT",
+                direction="short",
+                strength=0.6,
+                entry_price=Decimal("350.00"),
+                indicators={},
+                rationale="Weak outlook",
+            ),
+        ]
+        risk_assessment = RiskAssessment(
+            approved=True,
+            risk_score=0.4,
+            position_adjustments={"AAPL": 0.5, "MSFT": 0.8},
+            warnings=[],
+            concentration_risk=0.3,
+        )
+        market_context = MarketContext(
+            regime="normal_bull",
+            confidence=0.8,
+            risk_level="medium",
+            sector_outlook={},
+            macro_indicators={},
+        )
+
+        result = generator.generate(
+            technical_signals=signals,
+            risk_assessment=risk_assessment,
+            market_context=market_context,
+            user_preferences={"risk_profile": "MODERATE"},
+        )
+
+        assert len(result) == 2
+        assert result[0].symbol == "AAPL"
+        assert result[0].action == "buy"
+        assert result[1].symbol == "MSFT"
+        assert result[1].action == "sell"
