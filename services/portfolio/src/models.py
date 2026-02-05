@@ -74,6 +74,36 @@ class PositionRecord(Base):
     )
 
 
+class TradeRecord(Base):
+    """
+    SQLAlchemy model for trading.trades table.
+
+    Stores completed trade records for P&L tracking.
+    Note: Schema matches existing migration with new columns for P&L.
+    """
+
+    __tablename__ = "trades"
+    __table_args__ = {"schema": "trading"}
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    order_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, unique=True)
+    symbol: Mapped[str] = mapped_column(String(10), nullable=False)
+    action: Mapped[str] = mapped_column(String(4), nullable=False)  # BUY or SELL
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    price: Mapped[Decimal] = mapped_column(Numeric(precision=15, scale=2), nullable=False)
+    total_value: Mapped[Decimal] = mapped_column(Numeric(precision=15, scale=2), nullable=False)
+    commission: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(precision=15, scale=2), nullable=True
+    )
+    realized_pnl: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(precision=15, scale=2), nullable=True, default=Decimal("0")
+    )
+    executed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=datetime.utcnow
+    )
+
+
 # Domain Models
 
 
@@ -228,4 +258,56 @@ class Portfolio:
             total_return_amount=total_return_amount,
             currency=currency,
             timestamp=timestamp,
+        )
+
+
+@dataclass
+class Trade:
+    """
+    Data class representing a completed trade.
+
+    All monetary values use Decimal for precision.
+
+    Attributes:
+        order_id: Alpaca order ID (optional for legacy records).
+        symbol: Stock ticker symbol.
+        side: Trade side ("buy" or "sell").
+        qty: Quantity traded.
+        price: Execution price.
+        commission: Commission paid.
+        realized_pnl: Realized P&L for this trade.
+        executed_at: Execution timestamp.
+    """
+
+    order_id: Optional[str]
+    symbol: str
+    side: str
+    qty: Decimal
+    price: Decimal
+    commission: Decimal
+    realized_pnl: Decimal
+    executed_at: datetime
+
+    @classmethod
+    def from_record(cls, record: TradeRecord) -> "Trade":
+        """Create a Trade domain object from a database record.
+
+        Args:
+            record: SQLAlchemy TradeRecord from database.
+
+        Returns:
+            Trade domain object.
+        """
+        # Convert action (BUY/SELL) to side (buy/sell)
+        side = record.action.lower() if record.action else "buy"
+
+        return cls(
+            order_id=record.order_id,
+            symbol=record.symbol,
+            side=side,
+            qty=Decimal(str(record.quantity)),
+            price=Decimal(str(record.price)),
+            commission=Decimal(str(record.commission)) if record.commission else Decimal("0"),
+            realized_pnl=Decimal(str(record.realized_pnl)) if record.realized_pnl else Decimal("0"),
+            executed_at=record.executed_at,
         )

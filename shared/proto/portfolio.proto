@@ -30,6 +30,39 @@ service PortfolioService {
     };
   }
 
+  // GetPortfolioSummary returns detailed P&L summary
+  // Includes realized/unrealized P&L, daily P&L, and account metrics
+  rpc GetPortfolioSummary(GetPortfolioSummaryRequest) returns (GetPortfolioSummaryResponse) {
+    option (google.api.http) = {
+      get: "/v1/portfolio/{user_id}/summary"
+    };
+  }
+
+  // SyncWithAlpaca syncs positions with Alpaca paper trading account
+  // Used to reconcile local positions with broker
+  rpc SyncWithAlpaca(SyncWithAlpacaRequest) returns (SyncWithAlpacaResponse) {
+    option (google.api.http) = {
+      post: "/v1/portfolio/{user_id}/sync"
+    };
+  }
+
+  // RecordTrade records a completed trade for P&L tracking
+  // Called by Executor Service after order fills
+  rpc RecordTrade(RecordTradeRequest) returns (RecordTradeResponse) {
+    option (google.api.http) = {
+      post: "/v1/portfolio/{user_id}/trades"
+      body: "*"
+    };
+  }
+
+  // GetTradeHistory returns trade history for a user
+  // Supports filtering by symbol and date range
+  rpc GetTradeHistory(GetTradeHistoryRequest) returns (GetTradeHistoryResponse) {
+    option (google.api.http) = {
+      get: "/v1/portfolio/{user_id}/trades"
+    };
+  }
+
   // ============================================================================
   // Internal Write Operations (gRPC only - no HTTP/REST exposure)
   // These are called by other internal services (e.g., Order Service)
@@ -247,4 +280,152 @@ message DeletePositionResponse {
 
   // ISO 8601 timestamp of deletion
   string timestamp = 2;
+}
+
+// ============================================================================
+// P&L and Trade Tracking Messages
+// ============================================================================
+
+// GetPortfolioSummaryRequest - Request for detailed P&L summary
+message GetPortfolioSummaryRequest {
+  // User identifier
+  string user_id = 1;
+}
+
+// GetPortfolioSummaryResponse - Detailed portfolio summary with P&L
+message GetPortfolioSummaryResponse {
+  // Total account equity (cash + positions)
+  double total_equity = 1;
+
+  // Available cash
+  double cash = 2;
+
+  // Buying power (margin available)
+  double buying_power = 3;
+
+  // Total market value of positions
+  double market_value = 4;
+
+  // Total unrealized P&L (open positions)
+  double unrealized_pnl = 5;
+
+  // Unrealized P&L as percentage
+  double unrealized_pnl_pct = 6;
+
+  // Total realized P&L (closed trades)
+  double realized_pnl = 7;
+
+  // Today's P&L
+  double daily_pnl = 8;
+
+  // Daily P&L as percentage
+  double daily_pnl_pct = 9;
+
+  // Number of open positions
+  int32 position_count = 10;
+}
+
+// SyncWithAlpacaRequest - Request to sync with Alpaca account
+message SyncWithAlpacaRequest {
+  // User identifier
+  string user_id = 1;
+}
+
+// SyncWithAlpacaResponse - Result of Alpaca sync
+message SyncWithAlpacaResponse {
+  // Whether sync was successful
+  bool success = 1;
+
+  // Number of positions synced
+  int32 positions_synced = 2;
+
+  // Error message if failed
+  string error_message = 3;
+}
+
+// RecordTradeRequest - Request to record a completed trade
+message RecordTradeRequest {
+  // User identifier
+  string user_id = 1;
+
+  // Alpaca order ID
+  string order_id = 2;
+
+  // Stock ticker symbol
+  string symbol = 3;
+
+  // Trade side: "buy" or "sell"
+  string side = 4;
+
+  // Quantity traded
+  double qty = 5;
+
+  // Execution price
+  double price = 6;
+
+  // Commission paid
+  double commission = 7;
+}
+
+// RecordTradeResponse - Result of recording trade
+message RecordTradeResponse {
+  // Whether trade was recorded successfully
+  bool success = 1;
+
+  // Error message if failed
+  string error_message = 2;
+}
+
+// GetTradeHistoryRequest - Request for trade history
+message GetTradeHistoryRequest {
+  // User identifier
+  string user_id = 1;
+
+  // Optional symbol filter
+  string symbol = 2;
+
+  // Optional start date (ISO 8601)
+  string start_date = 3;
+
+  // Optional end date (ISO 8601)
+  string end_date = 4;
+
+  // Maximum number of trades to return
+  int32 limit = 5;
+}
+
+// Trade - A single trade record
+message Trade {
+  // Alpaca order ID
+  string order_id = 1;
+
+  // Stock ticker symbol
+  string symbol = 2;
+
+  // Trade side: "buy" or "sell"
+  string side = 3;
+
+  // Quantity traded
+  double qty = 4;
+
+  // Execution price
+  double price = 5;
+
+  // Commission paid
+  double commission = 6;
+
+  // Execution timestamp (ISO 8601)
+  string executed_at = 7;
+
+  // Realized P&L for this trade (for sell trades)
+  double realized_pnl = 8;
+}
+
+// GetTradeHistoryResponse - Trade history response
+message GetTradeHistoryResponse {
+  // List of trades
+  repeated Trade trades = 1;
+
+  // Total realized P&L for the period
+  double total_realized_pnl = 2;
 }

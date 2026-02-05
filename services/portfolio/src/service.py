@@ -9,15 +9,21 @@ Implements the PortfolioService gRPC interface with:
 import logging
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 import grpc
+
+if TYPE_CHECKING:
+    from typing import Any
+
+    AlpacaClient = Any  # Executor service's AlpacaClient
 from shared.generated import portfolio_pb2, portfolio_pb2_grpc
 from shared.generated.common_pb2 import Money
 from shared.utils import PostgresClient, RedisClient
 
 from .models import Portfolio, Position
-from .repositories import PortfolioRepository
+from .pnl_calculator import PnLCalculator
+from .repositories import PortfolioRepository, TradeRepository
 
 logger = logging.getLogger(__name__)
 
@@ -177,6 +183,8 @@ class PortfolioServicer(portfolio_pb2_grpc.PortfolioServiceServicer):
         redis_client: Optional[RedisClient] = None,
         postgres_client: Optional[PostgresClient] = None,
         repository: Optional[PortfolioRepository] = None,
+        trade_repository: Optional[TradeRepository] = None,
+        alpaca_client: Optional["AlpacaClient"] = None,
     ) -> None:
         """
         Initialize the servicer with required clients.
@@ -185,10 +193,14 @@ class PortfolioServicer(portfolio_pb2_grpc.PortfolioServiceServicer):
             redis_client: Redis client for caching.
             postgres_client: PostgreSQL client for persistence.
             repository: Repository for database operations.
+            trade_repository: Repository for trade operations.
+            alpaca_client: Alpaca client for broker sync.
         """
         self.redis = redis_client
         self.postgres = postgres_client
         self.repository = repository or PortfolioRepository(postgres_client)
+        self.trade_repository = trade_repository
+        self.alpaca_client = alpaca_client
 
     async def GetPortfolio(
         self,
@@ -638,3 +650,352 @@ class PortfolioServicer(portfolio_pb2_grpc.PortfolioServiceServicer):
             context.set_code(grpc.StatusCode.INTERNAL)
             context.set_details(f"Failed to delete position: {str(e)}")
             return portfolio_pb2.DeletePositionResponse()
+
+    async def GetPortfolioSummary(
+        self,
+        request: portfolio_pb2.GetPortfolioSummaryRequest,
+        context: grpc.aio.ServicerContext,
+    ) -> portfolio_pb2.GetPortfolioSummaryResponse:
+        """Get detailed portfolio summary with P&L.
+
+        Args:
+            request: The gRPC request containing user_id.
+            context: The gRPC servicer context.
+
+        Returns:
+            GetPortfolioSummaryResponse with P&L details.
+        """
+        try:
+            user_id = request.user_id
+            if not user_id:
+                context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
+                context.set_details("user_id is required")
+                return portfolio_pb2.GetPortfolioSummaryResponse()
+
+            # Get positions
+            positions = await self.repository.get_position_domain_objects(user_id)
+
+            # Get realized P&L from trade history
+            realized_pnl = Decimal("0")
+            if self.trade_repository:
+                realized_pnl = await self.trade_repository.get_realized_pnl(user_id)
+
+            # Calculate P&L
+            pnl_calculator = PnLCalculator()
+            position_dicts = [
+                {
+                    "symbol": p.symbol,
+                    "qty": p.quantity,
+                    "avg_cost": p.avg_cost,
+                    "current_price": p.current_price,
+                }
+                for p in positions
+            ]
+            portfolio_pnl = await pnl_calculator.calculate_portfolio_pnl(
+                position_dicts, realized_pnl
+            )
+
+            # Get cash balance
+            portfolio = await self.repository.get_full_portfolio(
+                user_id, datetime.now(timezone.utc).isoformat()
+            )
+            cash = portfolio.cash_balance
+            total_equity = cash + portfolio_pnl.total_market_value
+
+            return portfolio_pb2.GetPortfolioSummaryResponse(
+                total_equity=float(total_equity),
+                cash=float(cash),
+                buying_power=float(cash),  # Simplified - no margin
+                market_value=float(portfolio_pnl.total_market_value),
+                unrealized_pnl=float(portfolio_pnl.total_unrealized_pnl),
+                unrealized_pnl_pct=float(portfolio_pnl.total_unrealized_pnl_pct),
+                realized_pnl=float(portfolio_pnl.total_realized_pnl),
+                daily_pnl=float(portfolio_pnl.total_daily_pnl),
+                daily_pnl_pct=float(portfolio_pnl.total_daily_pnl_pct),
+                position_count=len(positions),
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to get portfolio summary: {e}")
+            context.set_code(grpc.StatusCode.INTERNAL)
+            context.set_details(f"Failed to get portfolio summary: {str(e)}")
+            return portfolio_pb2.GetPortfolioSummaryResponse()
+
+    async def SyncWithAlpaca(
+        self,
+        request: portfolio_pb2.SyncWithAlpacaRequest,
+        context: grpc.aio.ServicerContext,
+    ) -> portfolio_pb2.SyncWithAlpacaResponse:
+        """Sync positions with Alpaca account.
+
+        Args:
+            request: The gRPC request containing user_id.
+            context: The gRPC servicer context.
+
+        Returns:
+            SyncWithAlpacaResponse with sync results.
+        """
+        try:
+            user_id = request.user_id
+            if not user_id:
+                context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
+                context.set_details("user_id is required")
+                return portfolio_pb2.SyncWithAlpacaResponse()
+
+            if self.alpaca_client is None:
+                return portfolio_pb2.SyncWithAlpacaResponse(
+                    success=False,
+                    positions_synced=0,
+                    error_message="Alpaca client not configured",
+                )
+
+            # Get positions from Alpaca
+            alpaca_positions = await self.alpaca_client.get_positions()
+            synced_count = 0
+
+            for pos in alpaca_positions:
+                # Update or create position
+                existing = await self.repository.get_position_by_symbol(user_id, pos.symbol)
+
+                if existing:
+                    await self.repository.update_position(
+                        user_id=user_id,
+                        symbol=pos.symbol,
+                        quantity_delta=int(pos.qty) - existing.quantity,
+                        cost_per_share=Decimal(str(pos.avg_entry_price)),
+                        current_price=Decimal(str(pos.current_price)),
+                    )
+                else:
+                    await self.repository.create_position(
+                        user_id=user_id,
+                        symbol=pos.symbol,
+                        quantity=int(pos.qty),
+                        cost_per_share=Decimal(str(pos.avg_entry_price)),
+                        currency="USD",
+                    )
+                synced_count += 1
+
+            # Invalidate cache
+            await self._invalidate_user_cache(user_id)
+
+            return portfolio_pb2.SyncWithAlpacaResponse(
+                success=True,
+                positions_synced=synced_count,
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to sync with Alpaca: {e}")
+            return portfolio_pb2.SyncWithAlpacaResponse(
+                success=False,
+                positions_synced=0,
+                error_message=str(e),
+            )
+
+    async def RecordTrade(
+        self,
+        request: portfolio_pb2.RecordTradeRequest,
+        context: grpc.aio.ServicerContext,
+    ) -> portfolio_pb2.RecordTradeResponse:
+        """Record a completed trade for P&L tracking.
+
+        Args:
+            request: The gRPC request containing trade details.
+            context: The gRPC servicer context.
+
+        Returns:
+            RecordTradeResponse with success status.
+        """
+        try:
+            user_id = request.user_id
+            if not user_id:
+                context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
+                context.set_details("user_id is required")
+                return portfolio_pb2.RecordTradeResponse()
+
+            if not request.order_id:
+                context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
+                context.set_details("order_id is required")
+                return portfolio_pb2.RecordTradeResponse()
+
+            if self.trade_repository is None:
+                return portfolio_pb2.RecordTradeResponse(
+                    success=False,
+                    error_message="Trade repository not configured",
+                )
+
+            # Calculate realized P&L for sell trades
+            realized_pnl = Decimal("0")
+            if request.side.lower() == "sell":
+                # Get position to calculate realized P&L
+                position = await self.repository.get_position_by_symbol(user_id, request.symbol)
+                if position:
+                    pnl_calculator = PnLCalculator()
+                    realized_pnl = pnl_calculator.calculate_trade_pnl(
+                        side=request.side,
+                        qty=Decimal(str(request.qty)),
+                        price=Decimal(str(request.price)),
+                        avg_cost=position.avg_cost,
+                        commission=Decimal(str(request.commission)),
+                    )
+
+            # Save trade
+            await self.trade_repository.save_trade(
+                user_id=user_id,
+                order_id=request.order_id,
+                symbol=request.symbol,
+                side=request.side,
+                qty=Decimal(str(request.qty)),
+                price=Decimal(str(request.price)),
+                commission=Decimal(str(request.commission)),
+                realized_pnl=realized_pnl,
+            )
+
+            # Update position based on trade
+            await self._update_position_from_trade(
+                user_id=user_id,
+                symbol=request.symbol,
+                side=request.side,
+                qty=Decimal(str(request.qty)),
+                price=Decimal(str(request.price)),
+            )
+
+            # Invalidate cache
+            await self._invalidate_user_cache(user_id)
+
+            return portfolio_pb2.RecordTradeResponse(success=True)
+
+        except Exception as e:
+            logger.error(f"Failed to record trade: {e}")
+            return portfolio_pb2.RecordTradeResponse(
+                success=False,
+                error_message=str(e),
+            )
+
+    async def GetTradeHistory(
+        self,
+        request: portfolio_pb2.GetTradeHistoryRequest,
+        context: grpc.aio.ServicerContext,
+    ) -> portfolio_pb2.GetTradeHistoryResponse:
+        """Get trade history for a user.
+
+        Args:
+            request: The gRPC request with filters.
+            context: The gRPC servicer context.
+
+        Returns:
+            GetTradeHistoryResponse with trade list.
+        """
+        try:
+            user_id = request.user_id
+            if not user_id:
+                context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
+                context.set_details("user_id is required")
+                return portfolio_pb2.GetTradeHistoryResponse()
+
+            if self.trade_repository is None:
+                return portfolio_pb2.GetTradeHistoryResponse()
+
+            # Parse date filters
+            start_date = None
+            end_date = None
+            if request.start_date:
+                start_date = datetime.fromisoformat(request.start_date.replace("Z", "+00:00"))
+            if request.end_date:
+                end_date = datetime.fromisoformat(request.end_date.replace("Z", "+00:00"))
+
+            # Get trades
+            trades = await self.trade_repository.get_trades(
+                user_id=user_id,
+                symbol=request.symbol if request.symbol else None,
+                start_date=start_date,
+                end_date=end_date,
+                limit=request.limit if request.limit > 0 else 100,
+            )
+
+            # Calculate total realized P&L
+            total_realized_pnl = sum((t.realized_pnl for t in trades), Decimal("0"))
+
+            # Convert to proto
+            proto_trades = [
+                portfolio_pb2.Trade(
+                    order_id=t.order_id,
+                    symbol=t.symbol,
+                    side=t.side,
+                    qty=float(t.qty),
+                    price=float(t.price),
+                    commission=float(t.commission),
+                    executed_at=t.executed_at.isoformat(),
+                    realized_pnl=float(t.realized_pnl),
+                )
+                for t in trades
+            ]
+
+            return portfolio_pb2.GetTradeHistoryResponse(
+                trades=proto_trades,
+                total_realized_pnl=float(total_realized_pnl),
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to get trade history: {e}")
+            context.set_code(grpc.StatusCode.INTERNAL)
+            context.set_details(f"Failed to get trade history: {str(e)}")
+            return portfolio_pb2.GetTradeHistoryResponse()
+
+    async def _update_position_from_trade(
+        self,
+        user_id: str,
+        symbol: str,
+        side: str,
+        qty: Decimal,
+        price: Decimal,
+    ) -> None:
+        """Update position based on a trade.
+
+        Args:
+            user_id: User identifier.
+            symbol: Stock ticker symbol.
+            side: Trade side ("buy" or "sell").
+            qty: Trade quantity.
+            price: Execution price.
+        """
+        existing = await self.repository.get_position_by_symbol(user_id, symbol)
+
+        if side.lower() == "buy":
+            if existing:
+                # Update existing position with new average cost
+                old_qty = Decimal(str(existing.quantity))
+                old_cost = existing.avg_cost
+                new_qty = old_qty + qty
+                # Weighted average cost
+                new_avg_cost = ((old_qty * old_cost) + (qty * price)) / new_qty
+
+                await self.repository.update_position(
+                    user_id=user_id,
+                    symbol=symbol,
+                    quantity_delta=int(qty),
+                    cost_per_share=new_avg_cost,
+                    current_price=price,
+                )
+            else:
+                # Create new position
+                await self.repository.create_position(
+                    user_id=user_id,
+                    symbol=symbol,
+                    quantity=int(qty),
+                    cost_per_share=price,
+                    currency="USD",
+                )
+        elif side.lower() == "sell":
+            if existing:
+                new_qty = existing.quantity - int(qty)
+                if new_qty <= 0:
+                    # Close position entirely
+                    await self.repository.delete_position(user_id, symbol)
+                else:
+                    # Reduce position
+                    await self.repository.update_position(
+                        user_id=user_id,
+                        symbol=symbol,
+                        quantity_delta=-int(qty),
+                        current_price=price,
+                    )
