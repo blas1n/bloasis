@@ -1,0 +1,172 @@
+// Risk Committee Service - Multi-agent risk assessment before order execution
+// Part of BLOASIS Phase 1 infrastructure for risk management
+//
+// This service provides risk evaluation through multiple specialized agents:
+// - Position Risk Agent: Checks position sizing limits
+// - Concentration Risk Agent: Checks portfolio concentration
+// - Market Risk Agent: Checks market conditions (VIX, liquidity)
+//
+// Uses voting/consensus mechanism for approval/rejection decisions
+//
+// Dependencies:
+// - Portfolio Service: Current positions and portfolio value
+// - Market Data Service: VIX, liquidity data
+
+syntax = "proto3";
+
+package bloasis.risk;
+
+import "google/api/annotations.proto";
+
+// RiskCommitteeService evaluates orders through multiple risk agents
+// Final checkpoint before orders go to Executor
+service RiskCommitteeService {
+  // EvaluateOrder evaluates a single order through all risk agents
+  // Returns consensus decision with votes and adjustments
+  rpc EvaluateOrder(EvaluateOrderRequest) returns (EvaluateOrderResponse) {
+    option (google.api.http) = {
+      post: "/v1/risk/evaluate"
+      body: "*"
+    };
+  }
+
+  // EvaluateBatch evaluates multiple orders together
+  // Includes cross-order correlation risk checks
+  rpc EvaluateBatch(EvaluateBatchRequest) returns (EvaluateBatchResponse) {
+    option (google.api.http) = {
+      post: "/v1/risk/evaluate/batch"
+      body: "*"
+    };
+  }
+
+  // GetRiskLimits retrieves risk limits for a user
+  rpc GetRiskLimits(GetRiskLimitsRequest) returns (GetRiskLimitsResponse) {
+    option (google.api.http) = {
+      get: "/v1/risk/limits/{user_id}"
+    };
+  }
+}
+
+// EvaluateOrderRequest - Request to evaluate a single order
+message EvaluateOrderRequest {
+  // User identifier
+  string user_id = 1;
+  // Stock ticker symbol
+  string symbol = 2;
+  // Order action: "buy" or "sell"
+  string action = 3;
+  // Number of shares
+  double size = 4;
+  // Price per share
+  double price = 5;
+  // Order type: "market", "limit", "stop"
+  string order_type = 6;
+}
+
+// EvaluateOrderResponse - Risk evaluation result
+message EvaluateOrderResponse {
+  // Whether the order is approved
+  bool approved = 1;
+  // Decision type: "approve", "reject", "adjust"
+  string decision = 2;
+  // Overall risk score (0.0 - 1.0)
+  double risk_score = 3;
+  // Individual agent votes
+  repeated RiskVote votes = 4;
+  // Suggested adjustments if decision is "adjust"
+  repeated Adjustment adjustments = 5;
+  // Warning messages
+  repeated string warnings = 6;
+  // Human-readable reasoning
+  string reasoning = 7;
+}
+
+// RiskVote - Individual agent's vote
+message RiskVote {
+  // Agent name (e.g., "PositionRiskAgent")
+  string agent = 1;
+  // Agent's decision
+  string decision = 2;
+  // Agent's risk score
+  double risk_score = 3;
+  // Agent's reasoning
+  string reasoning = 4;
+}
+
+// Adjustment - Suggested order adjustment
+message Adjustment {
+  // Adjustment type: "reduce_size", "reduce_sector", "split_order"
+  string type = 1;
+  // Adjustment value (interpretation depends on type)
+  double value = 2;
+  // Reason for adjustment
+  string reason = 3;
+  // Target sector (for reduce_sector type)
+  string sector = 4;
+  // Target percentage (for reduce_size type)
+  double target_pct = 5;
+}
+
+// EvaluateBatchRequest - Request to evaluate multiple orders
+message EvaluateBatchRequest {
+  // User identifier
+  string user_id = 1;
+  // Orders to evaluate
+  repeated OrderToEvaluate orders = 2;
+}
+
+// OrderToEvaluate - Single order in batch evaluation
+message OrderToEvaluate {
+  // Stock ticker symbol
+  string symbol = 1;
+  // Order action: "buy" or "sell"
+  string action = 2;
+  // Number of shares
+  double size = 3;
+  // Price per share
+  double price = 4;
+}
+
+// EvaluateBatchResponse - Batch evaluation result
+message EvaluateBatchResponse {
+  // Individual order decisions
+  repeated OrderDecision decisions = 1;
+  // Overall batch risk score
+  double overall_risk_score = 2;
+  // Cross-order correlation warnings
+  repeated string cross_order_warnings = 3;
+}
+
+// OrderDecision - Decision for single order in batch
+message OrderDecision {
+  // Stock ticker symbol
+  string symbol = 1;
+  // Whether the order is approved
+  bool approved = 2;
+  // Decision type
+  string decision = 3;
+  // Risk score for this order
+  double risk_score = 4;
+  // Suggested adjustments
+  repeated Adjustment adjustments = 5;
+}
+
+// GetRiskLimitsRequest - Request for user's risk limits
+message GetRiskLimitsRequest {
+  // User identifier
+  string user_id = 1;
+}
+
+// GetRiskLimitsResponse - User's current risk limits
+message GetRiskLimitsResponse {
+  // Maximum position size as percentage of portfolio (e.g., 0.10 = 10%)
+  double max_position_size = 1;
+  // Maximum sector concentration (e.g., 0.30 = 30%)
+  double max_sector_concentration = 2;
+  // Maximum single order size (e.g., 0.05 = 5%)
+  double max_single_order = 3;
+  // Current portfolio risk score
+  double current_risk_score = 4;
+  // User ID
+  string user_id = 5;
+}
