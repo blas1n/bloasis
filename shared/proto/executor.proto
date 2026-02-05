@@ -1,185 +1,154 @@
-// Executor Service - Executes trading orders via Alpaca paper trading API
-// Part of BLOASIS Phase 1 infrastructure for order execution
+// Executor Service - Order execution with Alpaca paper trading integration
+// Part of BLOASIS Phase 1 infrastructure for trade execution
 //
-// This service integrates with Alpaca paper trading API for order execution.
-// It acts as the final step in the trading pipeline after strategy generation
-// and risk assessment.
+// This service handles order execution after Risk Committee approval:
+// - Submits orders to Alpaca paper trading
+// - Supports market, limit, and bracket orders
+// - Tracks order status and fills
+// - Publishes execution events to Redpanda
 //
 // Dependencies:
-// - Risk Management Service: Must approve strategy before execution
-// - Portfolio Service: Tracks positions and available buying power
-// - AI Analysis Service: Provides strategy_id with trading signals
-//
-// Event Publishing (Redpanda):
-// - order-filled: Published when an order is successfully filled
-// - order-rejected: Published when an order is rejected by the system or broker
+// - Risk Committee Service: Approval verification
+// - Redis: Order tracking and risk approval cache
 //
 // Order Status Flow:
-// - PENDING: Order submitted, awaiting execution
-// - FILLED: Order fully executed at filled_price
-// - REJECTED: Order rejected by risk management or broker
-// - CANCELLED: Order cancelled by user or system
+// - pending: Order created, not yet submitted
+// - submitted: Order submitted to Alpaca
+// - filled: Order fully executed
+// - partially_filled: Order partially executed
+// - cancelled: Order cancelled
+// - rejected: Order rejected by broker
+// - expired: Order expired
 //
 // Note: This service is for paper trading only in Phase 1.
-// Live trading integration will be added in Phase 2.
 
 syntax = "proto3";
 
 package bloasis.executor;
 
 import "google/api/annotations.proto";
-import "common.proto";
 
-// ExecutorService handles order execution via Alpaca paper trading API
-// All orders must pass risk assessment before execution
+// ExecutorService handles order execution through Alpaca paper trading
 service ExecutorService {
-  // ExecuteOrder submits a trading order for execution
-  //
-  // The workflow:
-  // 1. Validates order parameters (symbol, quantity, order type)
-  // 2. Checks available buying power with Portfolio Service
-  // 3. Submits order to Alpaca paper trading API
-  // 4. Returns order status and execution details
-  //
-  // Order Types:
-  // - MARKET: Execute immediately at current market price
-  // - LIMIT: Execute only at specified limit_price or better
-  //
-  // Events Published:
-  // - order-filled: When order is successfully executed
-  // - order-rejected: When order is rejected
-  //
-  // Note: Orders should only be submitted after risk assessment approval
+  // ExecuteOrder submits an order for execution
+  // Requires prior Risk Committee approval
   rpc ExecuteOrder(ExecuteOrderRequest) returns (ExecuteOrderResponse) {
     option (google.api.http) = {
-      post: "/v1/executor/execute-order"
+      post: "/v1/executor/order"
       body: "*"
     };
   }
 
-  // GetOrderStatus retrieves the current status of an order
-  //
-  // Use this to:
-  // - Track pending order progress
-  // - Verify order completion
-  // - Check fill details for completed orders
-  //
-  // Note: Order status is also available via WebSocket notifications
+  // GetOrderStatus retrieves current status of an order
   rpc GetOrderStatus(GetOrderStatusRequest) returns (GetOrderStatusResponse) {
     option (google.api.http) = {
-      get: "/v1/executor/order-status/{order_id}"
+      get: "/v1/executor/order/{order_id}"
+    };
+  }
+
+  // CancelOrder cancels an open order
+  rpc CancelOrder(CancelOrderRequest) returns (CancelOrderResponse) {
+    option (google.api.http) = {
+      delete: "/v1/executor/order/{order_id}"
+    };
+  }
+
+  // GetAccount retrieves account information
+  rpc GetAccount(GetAccountRequest) returns (GetAccountResponse) {
+    option (google.api.http) = {
+      get: "/v1/executor/account"
     };
   }
 }
 
-// ExecuteOrderRequest - Request parameters for order execution
+// ExecuteOrderRequest - Request to execute an order
 message ExecuteOrderRequest {
-  // User identifier who is placing the order
-  // Used for position tracking and audit logging
+  // User identifier
   string user_id = 1;
-
-  // Strategy identifier that generated this trade signal
-  // Links order to AI Analysis strategy for tracking
-  // Format: "strategy_{user_id}_{timestamp}"
-  string strategy_id = 2;
-
-  // Stock ticker symbol to trade (e.g., "AAPL", "GOOGL")
-  // Must be a valid symbol supported by Alpaca
-  string symbol = 3;
-
-  // Trading action to execute
-  // Valid values:
-  // - "BUY": Open or add to long position
-  // - "SELL": Close or reduce long position
-  string action = 4;
-
-  // Number of shares to trade
-  // Must be positive integer
-  // Will be validated against available buying power (for BUY)
-  // or current position size (for SELL)
-  int32 quantity = 5;
-
-  // Order type for execution
-  // Valid values:
-  // - "MARKET": Execute immediately at current market price
-  // - "LIMIT": Execute only at limit_price or better
-  string order_type = 6;
-
-  // Limit price for LIMIT orders
-  // Uses bloasis.common.Money for Decimal precision (critical for trading)
-  // Required for LIMIT orders, ignored for MARKET orders
-  // For BUY: Order executes only at limit_price or lower
-  // For SELL: Order executes only at limit_price or higher
-  bloasis.common.Money limit_price = 7;
+  // Stock ticker symbol (e.g., "AAPL", "GOOGL")
+  string symbol = 2;
+  // Order side: "buy" or "sell"
+  string side = 3;
+  // Quantity to trade
+  double qty = 4;
+  // Order type: "market", "limit", "bracket"
+  string order_type = 5;
+  // Limit price (required for limit orders)
+  double limit_price = 6;
+  // Stop loss price (for bracket orders)
+  double stop_loss = 7;
+  // Take profit price (for bracket orders)
+  double take_profit = 8;
+  // Risk approval ID from Risk Committee (required)
+  string risk_approval_id = 9;
 }
 
-// ExecuteOrderResponse - Result of order execution request
+// ExecuteOrderResponse - Order execution result
 message ExecuteOrderResponse {
-  // Unique identifier for this order
-  // Format: "order_{user_id}_{timestamp}"
-  // Use this ID to track order status
-  string order_id = 1;
-
-  // User identifier who placed the order
-  // Matches user_id from request
-  string user_id = 2;
-
-  // Current order status
-  // Valid values:
-  // - "PENDING": Order submitted, awaiting execution
-  // - "FILLED": Order fully executed
-  // - "REJECTED": Order rejected by risk management or broker
-  // - "CANCELLED": Order cancelled by user or system
-  string status = 3;
-
-  // Price at which the order was filled
-  // Uses bloasis.common.Money for Decimal precision (critical for trading)
-  // Populated when status is "FILLED"
-  // For MARKET orders: Actual execution price
-  // For LIMIT orders: Limit price or better
-  bloasis.common.Money filled_price = 4;
-
-  // ISO 8601 timestamp when order was processed
-  // Example: "2025-01-26T14:30:00Z"
-  string timestamp = 5;
+  // Whether the order was submitted successfully
+  bool success = 1;
+  // Alpaca order ID
+  string order_id = 2;
+  // Client-generated order ID (format: bloasis-xxxxxxxx)
+  string client_order_id = 3;
+  // Order status (pending, submitted, filled, rejected, etc.)
+  string status = 4;
+  // Error message if failed
+  string error_message = 5;
 }
 
-// GetOrderStatusRequest - Request to check order status
+// GetOrderStatusRequest - Request for order status
 message GetOrderStatusRequest {
-  // Unique identifier of the order to query
-  // Obtained from ExecuteOrderResponse.order_id
+  // Alpaca order ID
   string order_id = 1;
-
-  // User identifier for authorization
-  // Must match the user who placed the order
-  string user_id = 2;
 }
 
-// GetOrderStatusResponse - Current status of an order
+// GetOrderStatusResponse - Order status details
 message GetOrderStatusResponse {
-  // Unique identifier of the queried order
+  // Alpaca order ID
   string order_id = 1;
-
-  // Current order status
-  // Valid values:
-  // - "PENDING": Order submitted, awaiting execution
-  // - "FILLED": Order fully executed
-  // - "REJECTED": Order rejected by risk management or broker
-  // - "CANCELLED": Order cancelled by user or system
+  // Current status
   string status = 2;
+  // Quantity filled
+  double filled_qty = 3;
+  // Average fill price
+  double filled_avg_price = 4;
+  // Submission timestamp (ISO 8601)
+  string submitted_at = 5;
+  // Fill timestamp (ISO 8601, if filled)
+  string filled_at = 6;
+}
 
-  // Number of shares that have been filled
-  // For partially filled orders, this may be less than requested quantity
-  // For fully filled orders, this equals the original quantity
-  int32 filled_quantity = 3;
+// CancelOrderRequest - Request to cancel an order
+message CancelOrderRequest {
+  // User identifier
+  string user_id = 1;
+  // Alpaca order ID to cancel
+  string order_id = 2;
+}
 
-  // Price at which shares were filled
-  // Uses bloasis.common.Money for Decimal precision (critical for trading)
-  // Populated when filled_quantity > 0
-  // For multiple fills, this is the weighted average price
-  bloasis.common.Money filled_price = 4;
+// CancelOrderResponse - Cancellation result
+message CancelOrderResponse {
+  // Whether cancellation succeeded
+  bool success = 1;
+  // Status message
+  string message = 2;
+}
 
-  // ISO 8601 timestamp of last status update
-  // Example: "2025-01-26T14:30:00Z"
-  string timestamp = 5;
+// GetAccountRequest - Request for account info
+message GetAccountRequest {
+  // User identifier
+  string user_id = 1;
+}
+
+// GetAccountResponse - Account information from Alpaca
+message GetAccountResponse {
+  // Available cash
+  double cash = 1;
+  // Buying power
+  double buying_power = 2;
+  // Total portfolio value
+  double portfolio_value = 3;
+  // Account equity
+  double equity = 4;
 }
