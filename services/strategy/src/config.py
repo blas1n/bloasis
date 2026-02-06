@@ -46,7 +46,11 @@ class ServiceConfig(BaseSettings):
 
     # External AI APIs
     fingpt_api_key: str = ""
+    fingpt_base_url: str = "https://api.fingpt.ai"
     claude_api_key: str = ""
+
+    # Sentiment caching
+    sentiment_cache_ttl: int = 3600  # 1 hour TTL for FinGPT sentiment
 
 
 # Global config instance - validated at import time

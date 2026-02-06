@@ -1,6 +1,7 @@
 """Unit tests for Factor Scoring Engine."""
 
 from decimal import Decimal
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -10,8 +11,50 @@ from src.models import FactorScores, RiskProfile
 
 @pytest.fixture
 def factor_engine(mock_market_data_client):
-    """Create FactorScoringEngine with mocked market data client."""
+    """Create FactorScoringEngine with mocked market data client (no FinGPT)."""
     return FactorScoringEngine(mock_market_data_client)
+
+
+@pytest.fixture
+def mock_fingpt_client():
+    """Mock FinGPT client for sentiment analysis."""
+    from src.clients.fingpt_client import FinGPTClient
+
+    client = AsyncMock(spec=FinGPTClient)
+    client.connect = AsyncMock()
+    client.close = AsyncMock()
+    client.analyze_sentiment = AsyncMock(
+        return_value={
+            "sentiment": 0.6,
+            "confidence": 0.85,
+            "news_count": 10,
+            "summary": "Positive outlook for the stock",
+        }
+    )
+    return client
+
+
+@pytest.fixture
+def mock_redis_client():
+    """Mock Redis client for caching."""
+    from shared.utils.redis_client import RedisClient
+
+    client = AsyncMock(spec=RedisClient)
+    client.connect = AsyncMock()
+    client.close = AsyncMock()
+    client.get = AsyncMock(return_value=None)  # Default: cache miss
+    client.setex = AsyncMock()
+    return client
+
+
+@pytest.fixture
+def factor_engine_with_fingpt(mock_market_data_client, mock_fingpt_client, mock_redis_client):
+    """Create FactorScoringEngine with FinGPT and Redis clients."""
+    return FactorScoringEngine(
+        market_data_client=mock_market_data_client,
+        fingpt_client=mock_fingpt_client,
+        redis_client=mock_redis_client,
+    )
 
 
 @pytest.mark.asyncio
@@ -517,3 +560,258 @@ def test_factor_weights_all_factors():
 
     for profile, weights in FACTOR_WEIGHTS.items():
         assert set(weights.keys()) == expected_factors, f"{profile} missing factors"
+
+
+# FinGPT Sentiment Analysis Tests
+
+
+@pytest.mark.asyncio
+async def test_calculate_sentiment_fingpt_success(
+    factor_engine_with_fingpt, mock_fingpt_client, mock_redis_client
+):
+    """Test sentiment calculation using FinGPT with high confidence."""
+    # FinGPT returns positive sentiment with high confidence
+    mock_fingpt_client.analyze_sentiment.return_value = {
+        "sentiment": 0.6,  # Bullish
+        "confidence": 0.85,  # Above 0.5 threshold
+        "news_count": 15,
+        "summary": "Strong positive sentiment",
+    }
+
+    sentiment = await factor_engine_with_fingpt._calculate_sentiment("AAPL")
+
+    # Convert 0.6 to 0-100 scale: (0.6 + 1.0) * 50 = 80.0
+    assert sentiment == 80.0
+
+    # Should cache the result
+    mock_redis_client.setex.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_calculate_sentiment_fingpt_bearish(
+    factor_engine_with_fingpt, mock_fingpt_client, mock_redis_client
+):
+    """Test bearish sentiment from FinGPT."""
+    mock_fingpt_client.analyze_sentiment.return_value = {
+        "sentiment": -0.5,  # Bearish
+        "confidence": 0.9,
+        "news_count": 20,
+        "summary": "Negative outlook",
+    }
+
+    sentiment = await factor_engine_with_fingpt._calculate_sentiment("AAPL")
+
+    # Convert -0.5 to 0-100 scale: (-0.5 + 1.0) * 50 = 25.0
+    assert sentiment == 25.0
+
+
+@pytest.mark.asyncio
+async def test_calculate_sentiment_fingpt_neutral(
+    factor_engine_with_fingpt, mock_fingpt_client, mock_redis_client
+):
+    """Test neutral sentiment from FinGPT."""
+    mock_fingpt_client.analyze_sentiment.return_value = {
+        "sentiment": 0.0,  # Neutral
+        "confidence": 0.75,
+        "news_count": 10,
+        "summary": "Mixed sentiment",
+    }
+
+    sentiment = await factor_engine_with_fingpt._calculate_sentiment("AAPL")
+
+    # Convert 0.0 to 0-100 scale: (0.0 + 1.0) * 50 = 50.0
+    assert sentiment == 50.0
+
+
+@pytest.mark.asyncio
+async def test_calculate_sentiment_fingpt_low_confidence_fallback(
+    factor_engine_with_fingpt,
+    mock_fingpt_client,
+    mock_redis_client,
+    mock_market_data_client,
+):
+    """Test fallback to momentum when FinGPT confidence is low."""
+    # FinGPT returns low confidence
+    mock_fingpt_client.analyze_sentiment.return_value = {
+        "sentiment": 0.8,
+        "confidence": 0.3,  # Below 0.5 threshold
+        "news_count": 2,
+        "summary": "Limited data",
+    }
+
+    # Mock OHLCV data for momentum fallback (uptrend)
+    mock_ohlcv = [{"close": 100.0 + i * 2, "volume": 1_000_000} for i in range(30)]
+    mock_market_data_client.get_ohlcv.return_value = mock_ohlcv
+
+    sentiment = await factor_engine_with_fingpt._calculate_sentiment("AAPL")
+
+    # Should use momentum proxy, not FinGPT result
+    assert 60.0 <= sentiment <= 80.0  # High momentum range
+
+    # Should NOT cache low confidence result
+    mock_redis_client.setex.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_calculate_sentiment_fingpt_error_fallback(
+    factor_engine_with_fingpt,
+    mock_fingpt_client,
+    mock_redis_client,
+    mock_market_data_client,
+):
+    """Test fallback to momentum when FinGPT call fails."""
+    # FinGPT raises exception
+    mock_fingpt_client.analyze_sentiment.side_effect = Exception("API Error")
+
+    # Mock OHLCV data for momentum fallback (neutral)
+    mock_ohlcv = [{"close": 150.0, "volume": 1_000_000} for _ in range(30)]
+    mock_market_data_client.get_ohlcv.return_value = mock_ohlcv
+
+    sentiment = await factor_engine_with_fingpt._calculate_sentiment("AAPL")
+
+    # Should use momentum proxy
+    assert 40.0 <= sentiment <= 60.0  # Neutral momentum range
+
+
+@pytest.mark.asyncio
+async def test_calculate_sentiment_uses_cache(
+    factor_engine_with_fingpt, mock_fingpt_client, mock_redis_client
+):
+    """Test that cached sentiment is used when available."""
+    # Redis returns cached value
+    mock_redis_client.get.return_value = 75.0
+
+    sentiment = await factor_engine_with_fingpt._calculate_sentiment("AAPL")
+
+    # Should use cached value
+    assert sentiment == 75.0
+
+    # Should NOT call FinGPT
+    mock_fingpt_client.analyze_sentiment.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_calculate_sentiment_caches_result(
+    factor_engine_with_fingpt, mock_fingpt_client, mock_redis_client
+):
+    """Test that sentiment result is cached in Redis."""
+    mock_fingpt_client.analyze_sentiment.return_value = {
+        "sentiment": 0.4,
+        "confidence": 0.8,
+        "news_count": 12,
+        "summary": "Positive",
+    }
+
+    await factor_engine_with_fingpt._calculate_sentiment("AAPL")
+
+    # Verify cache was set
+    mock_redis_client.setex.assert_called_once()
+    call_args = mock_redis_client.setex.call_args
+
+    # Check cache key
+    assert call_args[0][0] == "sentiment:AAPL"
+
+    # Check score value (0.4 -> 70.0)
+    assert call_args[0][2] == 70.0
+
+
+@pytest.mark.asyncio
+async def test_calculate_sentiment_without_fingpt_client(factor_engine, mock_market_data_client):
+    """Test sentiment calculation without FinGPT client (original behavior)."""
+    # Create OHLCV data with uptrend
+    mock_ohlcv = [{"close": 100.0 + i * 2, "volume": 1_000_000} for i in range(30)]
+    mock_market_data_client.get_ohlcv.return_value = mock_ohlcv
+
+    sentiment = await factor_engine._calculate_sentiment("AAPL")
+
+    # Should use momentum proxy (high momentum = bullish sentiment)
+    assert 60.0 <= sentiment <= 80.0
+
+
+@pytest.mark.asyncio
+async def test_calculate_sentiment_clips_to_bounds(
+    factor_engine_with_fingpt, mock_fingpt_client, mock_redis_client
+):
+    """Test that sentiment score is clipped to 0-100 range."""
+    # FinGPT returns maximum bullish sentiment
+    mock_fingpt_client.analyze_sentiment.return_value = {
+        "sentiment": 1.0,  # Maximum bullish
+        "confidence": 0.95,
+        "news_count": 30,
+        "summary": "Extremely positive",
+    }
+
+    sentiment = await factor_engine_with_fingpt._calculate_sentiment("AAPL")
+
+    # (1.0 + 1.0) * 50 = 100.0, should be clipped
+    assert sentiment == 100.0
+
+
+@pytest.mark.asyncio
+async def test_calculate_sentiment_clips_minimum(
+    factor_engine_with_fingpt, mock_fingpt_client, mock_redis_client
+):
+    """Test that minimum bearish sentiment is clipped."""
+    mock_fingpt_client.analyze_sentiment.return_value = {
+        "sentiment": -1.0,  # Maximum bearish
+        "confidence": 0.95,
+        "news_count": 25,
+        "summary": "Extremely negative",
+    }
+
+    sentiment = await factor_engine_with_fingpt._calculate_sentiment("AAPL")
+
+    # (-1.0 + 1.0) * 50 = 0.0
+    assert sentiment == 0.0
+
+
+@pytest.mark.asyncio
+async def test_cache_sentiment_handles_redis_error(
+    factor_engine_with_fingpt, mock_fingpt_client, mock_redis_client
+):
+    """Test that cache errors don't break sentiment calculation."""
+    mock_fingpt_client.analyze_sentiment.return_value = {
+        "sentiment": 0.5,
+        "confidence": 0.8,
+        "news_count": 10,
+        "summary": "Positive",
+    }
+    mock_redis_client.setex.side_effect = Exception("Redis connection error")
+
+    # Should not raise, just log warning
+    sentiment = await factor_engine_with_fingpt._calculate_sentiment("AAPL")
+
+    assert sentiment == 75.0  # (0.5 + 1.0) * 50 = 75.0
+
+
+@pytest.mark.asyncio
+async def test_get_cached_sentiment_handles_redis_error(
+    factor_engine_with_fingpt, mock_fingpt_client, mock_redis_client
+):
+    """Test that cache retrieval errors fall back to FinGPT."""
+    mock_redis_client.get.side_effect = Exception("Redis connection error")
+    mock_fingpt_client.analyze_sentiment.return_value = {
+        "sentiment": 0.3,
+        "confidence": 0.75,
+        "news_count": 8,
+        "summary": "Slightly positive",
+    }
+
+    sentiment = await factor_engine_with_fingpt._calculate_sentiment("AAPL")
+
+    # Should fall back to FinGPT
+    assert sentiment == 65.0  # (0.3 + 1.0) * 50 = 65.0
+    mock_fingpt_client.analyze_sentiment.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_calculate_sentiment_from_momentum_directly(factor_engine, mock_market_data_client):
+    """Test the _calculate_sentiment_from_momentum method directly."""
+    # Create OHLCV data with downtrend
+    mock_ohlcv = [{"close": 200.0 - i * 3, "volume": 1_000_000} for i in range(30)]
+    mock_market_data_client.get_ohlcv.return_value = mock_ohlcv
+
+    sentiment = await factor_engine._calculate_sentiment_from_momentum("AAPL")
+
+    # Downtrend should give low sentiment (20-40)
+    assert 20.0 <= sentiment <= 40.0

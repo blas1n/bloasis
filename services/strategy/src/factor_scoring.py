@@ -6,17 +6,21 @@ Implements 6-factor scoring system with risk profile-based weighting:
 - Quality: ROE, debt ratios
 - Volatility: Price volatility (inverse scoring)
 - Liquidity: Trading volume
-- Sentiment: News/social sentiment
+- Sentiment: News/social sentiment (FinGPT with momentum fallback)
 """
 
 import logging
 import statistics
 from decimal import Decimal
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
+from .config import config
 from .models import FactorScores, RiskProfile
 
 if TYPE_CHECKING:
+    from shared.utils.redis_client import RedisClient
+
+    from .clients.fingpt_client import FinGPTClient
     from .clients.market_data_client import MarketDataClient
 
 logger = logging.getLogger(__name__)
@@ -53,13 +57,22 @@ FACTOR_WEIGHTS: dict[RiskProfile, dict[str, float]] = {
 class FactorScoringEngine:
     """Factor scoring engine for stock evaluation."""
 
-    def __init__(self, market_data_client: "MarketDataClient"):
+    def __init__(
+        self,
+        market_data_client: "MarketDataClient",
+        fingpt_client: "FinGPTClient | None" = None,
+        redis_client: "RedisClient | None" = None,
+    ) -> None:
         """Initialize factor scoring engine.
 
         Args:
-            market_data_client: Market Data Service gRPC client
+            market_data_client: Market Data Service gRPC client.
+            fingpt_client: Optional FinGPT client for sentiment analysis.
+            redis_client: Optional Redis client for caching sentiment results.
         """
         self.market_data = market_data_client
+        self.fingpt_client = fingpt_client
+        self.redis_client = redis_client
 
     async def calculate_factor_scores(self, symbol: str, regime: str) -> FactorScores:
         """Calculate all 6 factor scores for a symbol.
@@ -299,48 +312,131 @@ class FactorScoringEngine:
             return 50.0
 
     async def _calculate_sentiment(self, symbol: str) -> float:
-        """Calculate sentiment score (0-100) using momentum as proxy.
+        """Calculate sentiment score (0-100) using FinGPT analysis.
 
-        Phase 1: Uses momentum as a simplified sentiment proxy.
-        Rationale: Bullish price action often reflects positive market sentiment.
+        Uses FinGPT for news sentiment analysis with Redis caching (1 hour TTL).
+        Falls back to momentum proxy if FinGPT is unavailable or low confidence.
+
+        Args:
+            symbol: Stock ticker symbol.
+
+        Returns:
+            Sentiment score (0-100).
+        """
+        # Try cached sentiment first
+        cached_score = await self._get_cached_sentiment(symbol)
+        if cached_score is not None:
+            logger.debug(f"Using cached sentiment for {symbol}: {cached_score:.2f}")
+            return cached_score
+
+        # Try FinGPT if available
+        if self.fingpt_client:
+            try:
+                result = await self.fingpt_client.analyze_sentiment(symbol)
+
+                if result["confidence"] > 0.5:  # Only use if confident
+                    # Convert -1.0 ~ 1.0 to 0-100 scale
+                    sentiment = result["sentiment"]
+                    score = (sentiment + 1.0) * 50.0
+                    score = max(0.0, min(100.0, score))
+
+                    logger.debug(
+                        f"FinGPT sentiment for {symbol}: {score:.2f} "
+                        f"(raw: {sentiment}, confidence: {result['confidence']})"
+                    )
+
+                    # Cache the result
+                    await self._cache_sentiment(symbol, score)
+                    return score
+
+                logger.debug(
+                    f"FinGPT low confidence for {symbol} "
+                    f"({result['confidence']:.2f}), using momentum proxy"
+                )
+
+            except Exception as e:
+                logger.warning(f"FinGPT failed for {symbol}: {e}, using momentum proxy")
+
+        # Fallback to momentum proxy
+        return await self._calculate_sentiment_from_momentum(symbol)
+
+    async def _calculate_sentiment_from_momentum(self, symbol: str) -> float:
+        """Calculate sentiment using momentum as proxy (fallback).
+
+        Uses price momentum as a simplified sentiment proxy.
         - High momentum (>70): Bullish sentiment (60-80)
         - Low momentum (<30): Bearish sentiment (20-40)
         - Neutral momentum: Neutral sentiment (40-60)
 
-        Phase 2 TODO: Integrate FinGPT sentiment analysis for news/social sentiment.
-
         Args:
-            symbol: Stock ticker symbol
+            symbol: Stock ticker symbol.
 
         Returns:
-            Sentiment score (0-100)
+            Sentiment score (0-100).
         """
         try:
-            # Fetch OHLCV data to calculate momentum
             ohlcv_bars = await self.market_data.get_ohlcv(symbol, period="3mo", interval="1d")
-
-            # Calculate momentum using internal method
             momentum = self._calculate_momentum(ohlcv_bars)
 
-            # Convert momentum to sentiment proxy
             if momentum > 70:
-                # Bullish price action implies positive sentiment
                 # Map momentum 70-100 to sentiment 60-80
                 score = 60.0 + (momentum - 70) * (20.0 / 30.0)
             elif momentum < 30:
-                # Bearish price action implies negative sentiment
                 # Map momentum 0-30 to sentiment 20-40
                 score = 20.0 + momentum * (20.0 / 30.0)
             else:
-                # Neutral momentum implies neutral sentiment
                 # Map momentum 30-70 to sentiment 40-60
                 score = 40.0 + (momentum - 30) * (20.0 / 40.0)
 
             logger.debug(
-                f"Sentiment score for {symbol}: {score:.2f} (momentum proxy: {momentum:.2f})"
+                f"Sentiment (momentum proxy) for {symbol}: {score:.2f} (momentum: {momentum:.2f})"
             )
             return score
 
         except Exception as e:
             logger.warning(f"Failed to get sentiment score for {symbol}: {e}")
             return 50.0
+
+    async def _get_cached_sentiment(self, symbol: str) -> float | None:
+        """Get cached sentiment score from Redis.
+
+        Args:
+            symbol: Stock ticker symbol.
+
+        Returns:
+            Cached sentiment score or None if not cached.
+        """
+        if not self.redis_client:
+            return None
+
+        try:
+            cache_key = f"sentiment:{symbol}"
+            cached: Any = await self.redis_client.get(cache_key)
+
+            if cached is not None:
+                return float(cached)
+            return None
+
+        except Exception as e:
+            logger.warning(f"Failed to get cached sentiment for {symbol}: {e}")
+            return None
+
+    async def _cache_sentiment(self, symbol: str, score: float) -> None:
+        """Cache sentiment score in Redis.
+
+        Args:
+            symbol: Stock ticker symbol.
+            score: Sentiment score to cache.
+        """
+        if not self.redis_client:
+            return
+
+        try:
+            cache_key = f"sentiment:{symbol}"
+            await self.redis_client.setex(cache_key, config.sentiment_cache_ttl, score)
+            logger.debug(
+                f"Cached sentiment for {symbol}: {score:.2f} (TTL: {config.sentiment_cache_ttl}s)"
+            )
+
+        except Exception as e:
+            logger.warning(f"Failed to cache sentiment for {symbol}: {e}")
