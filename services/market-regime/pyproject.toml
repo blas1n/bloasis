@@ -19,6 +19,7 @@ dependencies = [
     "yfinance>=0.2.36",
     "python-consul>=1.1.0",
     "pyyaml>=6.0.0",
+    "fredapi>=0.5.1",
 ]
 
 [project.optional-dependencies]

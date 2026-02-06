@@ -1,6 +1,7 @@
 """Tests for P&L Calculator."""
 
 from decimal import Decimal
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -291,4 +292,168 @@ class TestPnLCalculator:
     async def test_get_previous_close_no_client(self, calculator):
         """Test previous close fetch without market data client."""
         previous_close = await calculator._get_previous_close("AAPL")
+        assert previous_close is None
+
+
+class TestPnLCalculatorWithMarketData:
+    """Tests for PnLCalculator with mocked Market Data client."""
+
+    @pytest.fixture
+    def mock_market_data_client(self):
+        """Create a mock Market Data client."""
+        mock_client = MagicMock()
+        mock_client.get_current_price = AsyncMock(return_value=Decimal("175.50"))
+        mock_client.get_previous_close = AsyncMock(return_value=Decimal("170.00"))
+        return mock_client
+
+    @pytest.fixture
+    def calculator_with_client(self, mock_market_data_client):
+        """Create a PnLCalculator with mocked market data client."""
+        return PnLCalculator(market_data_client=mock_market_data_client)
+
+    @pytest.mark.asyncio
+    async def test_get_current_price_with_client(
+        self, calculator_with_client, mock_market_data_client
+    ):
+        """Test price fetch with market data client."""
+        price = await calculator_with_client._get_current_price("AAPL")
+        assert price == Decimal("175.50")
+        mock_market_data_client.get_current_price.assert_called_once_with("AAPL")
+
+    @pytest.mark.asyncio
+    async def test_get_previous_close_with_client(
+        self, calculator_with_client, mock_market_data_client
+    ):
+        """Test previous close fetch with market data client."""
+        previous_close = await calculator_with_client._get_previous_close("AAPL")
+        assert previous_close == Decimal("170.00")
+        mock_market_data_client.get_previous_close.assert_called_once_with("AAPL")
+
+    @pytest.mark.asyncio
+    async def test_get_current_price_client_error(self, mock_market_data_client):
+        """Test price fetch handles client errors gracefully."""
+        mock_market_data_client.get_current_price = AsyncMock(
+            side_effect=Exception("Connection error")
+        )
+        calculator = PnLCalculator(market_data_client=mock_market_data_client)
+
+        price = await calculator._get_current_price("AAPL")
+        assert price == Decimal("0")
+
+    @pytest.mark.asyncio
+    async def test_get_previous_close_client_error(self, mock_market_data_client):
+        """Test previous close fetch handles client errors gracefully."""
+        mock_market_data_client.get_previous_close = AsyncMock(
+            side_effect=Exception("Connection error")
+        )
+        calculator = PnLCalculator(market_data_client=mock_market_data_client)
+
+        previous_close = await calculator._get_previous_close("AAPL")
+        assert previous_close is None
+
+    @pytest.mark.asyncio
+    async def test_calculate_position_pnl_fetches_price(
+        self, calculator_with_client, mock_market_data_client
+    ):
+        """Test position P&L calculation fetches price from market data."""
+        pnl = await calculator_with_client.calculate_position_pnl(
+            symbol="AAPL",
+            qty=Decimal("10"),
+            avg_cost=Decimal("150.00"),
+        )
+
+        # Price fetched from mock: 175.50
+        assert pnl.current_price == Decimal("175.50")
+        assert pnl.market_value == Decimal("1755.00")
+        # Cost basis: 10 * 150 = 1500
+        assert pnl.cost_basis == Decimal("1500.00")
+        # Unrealized P&L: 1755 - 1500 = 255
+        assert pnl.unrealized_pnl == Decimal("255.00")
+
+        # Daily P&L: previous close 170, current 175.50
+        # (175.50 - 170) * 10 = 55
+        assert pnl.daily_pnl == Decimal("55.00")
+
+        mock_market_data_client.get_current_price.assert_called_once_with("AAPL")
+        mock_market_data_client.get_previous_close.assert_called_once_with("AAPL")
+
+    @pytest.mark.asyncio
+    async def test_calculate_position_pnl_provided_price_skips_fetch(
+        self, calculator_with_client, mock_market_data_client
+    ):
+        """Test position P&L uses provided price and skips fetch."""
+        pnl = await calculator_with_client.calculate_position_pnl(
+            symbol="AAPL",
+            qty=Decimal("10"),
+            avg_cost=Decimal("150.00"),
+            current_price=Decimal("180.00"),
+            previous_close=Decimal("175.00"),
+        )
+
+        # Uses provided prices
+        assert pnl.current_price == Decimal("180.00")
+        assert pnl.daily_pnl == Decimal("50.00")  # (180-175) * 10
+
+        # Should not call market data client when prices are provided
+        mock_market_data_client.get_current_price.assert_not_called()
+        mock_market_data_client.get_previous_close.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_calculate_portfolio_pnl_with_market_data(
+        self, calculator_with_client, mock_market_data_client
+    ):
+        """Test portfolio P&L fetches prices from market data."""
+        # Configure mock to return different prices for different symbols
+        async def mock_get_price(symbol: str) -> Decimal:
+            prices = {"AAPL": Decimal("175.50"), "GOOGL": Decimal("220.00")}
+            return prices.get(symbol, Decimal("0"))
+
+        async def mock_get_prev_close(symbol: str) -> Decimal | None:
+            prices = {"AAPL": Decimal("170.00"), "GOOGL": Decimal("215.00")}
+            return prices.get(symbol)
+
+        mock_market_data_client.get_current_price = AsyncMock(side_effect=mock_get_price)
+        mock_market_data_client.get_previous_close = AsyncMock(
+            side_effect=mock_get_prev_close
+        )
+
+        positions = [
+            {"symbol": "AAPL", "qty": 10, "avg_cost": "150.00"},
+            {"symbol": "GOOGL", "qty": 5, "avg_cost": "200.00"},
+        ]
+
+        portfolio_pnl = await calculator_with_client.calculate_portfolio_pnl(positions)
+
+        # AAPL: 10 * 175.50 = 1755, GOOGL: 5 * 220 = 1100
+        assert portfolio_pnl.total_market_value == Decimal("2855.00")
+        # AAPL: 10 * 150 = 1500, GOOGL: 5 * 200 = 1000
+        assert portfolio_pnl.total_cost_basis == Decimal("2500.00")
+        # 2855 - 2500 = 355
+        assert portfolio_pnl.total_unrealized_pnl == Decimal("355.00")
+
+        # Verify positions have correct prices
+        assert len(portfolio_pnl.positions) == 2
+        aapl_pos = next(p for p in portfolio_pnl.positions if p.symbol == "AAPL")
+        assert aapl_pos.current_price == Decimal("175.50")
+
+    @pytest.mark.asyncio
+    async def test_get_current_price_returns_zero_on_no_data(
+        self, mock_market_data_client
+    ):
+        """Test that zero is returned when market data returns zero."""
+        mock_market_data_client.get_current_price = AsyncMock(return_value=Decimal("0"))
+        calculator = PnLCalculator(market_data_client=mock_market_data_client)
+
+        price = await calculator._get_current_price("INVALID")
+        assert price == Decimal("0")
+
+    @pytest.mark.asyncio
+    async def test_get_previous_close_returns_none_on_no_data(
+        self, mock_market_data_client
+    ):
+        """Test that None is returned when market data returns None."""
+        mock_market_data_client.get_previous_close = AsyncMock(return_value=None)
+        calculator = PnLCalculator(market_data_client=mock_market_data_client)
+
+        previous_close = await calculator._get_previous_close("INVALID")
         assert previous_close is None

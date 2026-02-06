@@ -1,8 +1,11 @@
 """Portfolio Service gRPC client."""
 
 import logging
+from decimal import Decimal
+from typing import Any
 
 import grpc
+from shared.generated import portfolio_pb2, portfolio_pb2_grpc
 
 from ..config import config
 from ..models import Portfolio, PortfolioPosition
@@ -25,7 +28,7 @@ class PortfolioClient:
         self.address = f"{self.host}:{self.port}"
 
         self.channel: grpc.aio.Channel | None = None
-        self.stub = None
+        self.stub: portfolio_pb2_grpc.PortfolioServiceStub | None = None
 
     async def connect(self) -> None:
         """Establish gRPC connection to Portfolio Service."""
@@ -42,8 +45,7 @@ class PortfolioClient:
                 ("grpc.keepalive_timeout_ms", 5000),
             ],
         )
-        # In production, would initialize stub from generated proto
-        # self.stub = portfolio_pb2_grpc.PortfolioServiceStub(self.channel)
+        self.stub = portfolio_pb2_grpc.PortfolioServiceStub(self.channel)
         logger.info(f"Connected to Portfolio Service at {self.address}")
 
     async def get_positions(self, user_id: str) -> Portfolio:
@@ -56,35 +58,76 @@ class PortfolioClient:
             Portfolio with positions
 
         Raises:
-            ConnectionError: On connection failure
-            TimeoutError: On timeout
+            ConnectionError: If Portfolio Service unavailable
+            TimeoutError: If request times out
         """
-        # For now, return mock data since Portfolio Service proto is not yet defined
-        # In production, would call gRPC:
-        # request = portfolio_pb2.GetPositionsRequest(user_id=user_id)
-        # response = await self.stub.GetPositions(request, timeout=10.0)
+        if not self.stub:
+            await self.connect()
 
-        logger.info(f"Getting positions for user: {user_id}")
+        assert self.stub is not None, "stub should be initialized after connect()"
 
-        # Return mock portfolio for development
-        return Portfolio(
-            user_id=user_id,
-            total_value=100000.0,
-            positions=[
+        try:
+            request = portfolio_pb2.GetPositionsRequest(user_id=user_id)
+            response = await self.stub.GetPositions(request, timeout=10.0)
+
+            logger.info(f"Retrieved {len(response.positions)} positions for user {user_id}")
+
+            # Convert proto response to internal models
+            positions = [
                 PortfolioPosition(
-                    symbol="AAPL",
-                    quantity=50,
-                    market_value=8750.0,
-                    sector="Technology",
-                ),
-                PortfolioPosition(
-                    symbol="GOOGL",
-                    quantity=20,
-                    market_value=2800.0,
-                    sector="Technology",
-                ),
-            ],
-        )
+                    symbol=pos.symbol,
+                    quantity=pos.quantity,
+                    market_value=self._money_to_float(pos.current_value),
+                    sector=self._get_sector(pos.symbol),
+                )
+                for pos in response.positions
+            ]
+
+            # Calculate total value from positions
+            total_value = sum(p.market_value for p in positions)
+
+            return Portfolio(
+                user_id=user_id,
+                total_value=total_value,
+                positions=positions,
+            )
+
+        except grpc.RpcError as e:
+            logger.error(f"gRPC error calling Portfolio Service: {e.code()} - {e.details()}")
+
+            if e.code() == grpc.StatusCode.UNAVAILABLE:
+                raise ConnectionError(f"Portfolio Service unavailable at {self.address}") from e
+            elif e.code() == grpc.StatusCode.DEADLINE_EXCEEDED:
+                raise TimeoutError("Portfolio Service request timed out") from e
+
+            raise
+
+    def _money_to_float(self, money: Any) -> float:
+        """Convert Money proto to float.
+
+        Args:
+            money: Money proto message with string amount
+
+        Returns:
+            Float value of the amount
+        """
+        if money and money.amount:
+            return float(Decimal(money.amount))
+        return 0.0
+
+    def _get_sector(self, symbol: str) -> str:
+        """Get sector for symbol.
+
+        TODO: In Phase 2, call MarketDataService.GetStockInfo for real sector.
+        For now, return 'Unknown' - concentration_risk.py has sector mapping.
+
+        Args:
+            symbol: Stock ticker symbol
+
+        Returns:
+            Sector name or 'Unknown'
+        """
+        return "Unknown"
 
     async def close(self) -> None:
         """Close gRPC connection."""

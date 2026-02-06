@@ -36,6 +36,10 @@ class ServiceConfig(BaseSettings):
     # Cache TTL (user-specific data - 1 hour)
     cache_ttl: int = 3600
 
+    # Market Data Service configuration
+    market_data_host: str = "market-data"
+    market_data_port: int = 50051
+
     # Consul configuration
     consul_host: str = "consul"
     consul_port: int = 8500

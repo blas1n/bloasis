@@ -10,8 +10,27 @@ from datetime import datetime, timedelta
 from typing import Any, Optional
 
 import yfinance as yf
+from fredapi import Fred
 
 logger = logging.getLogger(__name__)
+
+# FRED series IDs for economic indicators
+FRED_SERIES = {
+    "fed_funds_rate": "FEDFUNDS",
+    "unemployment_rate": "UNRATE",
+    "cpi_yoy": "CPIAUCSL",
+    "gdp_growth": "GDP",
+    "credit_spread": "BAMLH0A0HYM2",
+}
+
+# Default fallback values when FRED data is unavailable
+FRED_DEFAULTS = {
+    "fed_funds_rate": 5.25,
+    "unemployment_rate": 3.9,
+    "cpi_yoy": 3.2,
+    "gdp_growth": 2.5,
+    "credit_spread": 350,
+}
 
 
 class MacroDataFetcher:
@@ -32,6 +51,19 @@ class MacroDataFetcher:
         self.fred_api_key = fred_api_key
         self._cache: dict[str, Any] = {}
         self._cache_ttl = 300  # 5 minutes
+        self._fred_cache: dict[str, Any] = {}
+        self._fred_cache_ttl = 3600  # 1 hour for FRED data
+        self._fred_cache_time: Optional[datetime] = None
+        self._fred_client: Optional[Any] = None
+
+        # Initialize FRED client if API key is available
+        if self.fred_api_key:
+            try:
+                self._fred_client = Fred(api_key=self.fred_api_key)
+                logger.info("FRED API client initialized")
+            except Exception as e:
+                logger.warning(f"Failed to initialize FRED client: {e}")
+                self._fred_client = None
 
     async def get_indicators(self) -> dict[str, Any]:
         """
@@ -60,10 +92,75 @@ class MacroDataFetcher:
         market_data = await self.get_market_data()
         indicators.update(market_data)
 
-        # TODO: Implement FRED API integration for real economic data
-        # For now, these are not included in classification
-        # FRED series: FEDFUNDS, UNRATE, CPIAUCSL, GDP, BAMLH0A0HYM2
-        # See: https://fred.stlouisfed.org/
+        # Get FRED economic indicators
+        fred_data = await self.get_fred_indicators()
+        indicators.update(fred_data)
+
+        return indicators
+
+    async def get_fred_indicators(self) -> dict[str, Any]:
+        """
+        Get economic indicators from FRED API.
+
+        Returns cached data if available and not expired.
+        Falls back to default values if FRED is unavailable.
+
+        Returns:
+            Dictionary containing:
+            - fed_funds_rate: Federal funds rate
+            - unemployment_rate: Unemployment rate
+            - cpi_yoy: Year-over-year CPI inflation
+            - gdp_growth: GDP growth rate
+            - credit_spread: High Yield - Investment Grade spread
+        """
+        # Check if cached data is still valid
+        if self._fred_cache and self._fred_cache_time:
+            cache_age = (datetime.now() - self._fred_cache_time).total_seconds()
+            if cache_age < self._fred_cache_ttl:
+                logger.debug("Returning cached FRED data")
+                return self._fred_cache.copy()
+
+        # If FRED client is not available, return defaults
+        if not self._fred_client:
+            logger.debug("FRED client unavailable, using default values")
+            return FRED_DEFAULTS.copy()
+
+        # Fetch data from FRED
+        indicators: dict[str, Any] = {}
+
+        for indicator_name, series_id in FRED_SERIES.items():
+            try:
+                series = self._fred_client.get_series(series_id)
+                if series is not None and len(series) > 0:
+                    # Get the most recent value
+                    latest_value = float(series.iloc[-1])
+
+                    # Special handling for CPI (calculate YoY change)
+                    if indicator_name == "cpi_yoy" and len(series) >= 12:
+                        current = float(series.iloc[-1])
+                        year_ago = float(series.iloc[-13])
+                        if year_ago > 0:
+                            latest_value = ((current - year_ago) / year_ago) * 100
+
+                    # Special handling for GDP (calculate growth rate)
+                    elif indicator_name == "gdp_growth" and len(series) >= 4:
+                        current = float(series.iloc[-1])
+                        year_ago = float(series.iloc[-5])
+                        if year_ago > 0:
+                            latest_value = ((current - year_ago) / year_ago) * 100
+
+                    indicators[indicator_name] = latest_value
+                    logger.debug(f"Fetched {indicator_name}: {latest_value}")
+                else:
+                    indicators[indicator_name] = FRED_DEFAULTS[indicator_name]
+                    logger.warning(f"Empty series for {series_id}, using default")
+            except Exception as e:
+                indicators[indicator_name] = FRED_DEFAULTS[indicator_name]
+                logger.warning(f"Failed to fetch {series_id}: {e}, using default")
+
+        # Cache the results
+        self._fred_cache = indicators.copy()
+        self._fred_cache_time = datetime.now()
 
         return indicators
 
@@ -211,6 +308,16 @@ class MockMacroDataFetcher(MacroDataFetcher):
             "sp500_1m_change": 2.5,
             "sp500_pe": 21.5,
             "high_low_ratio": 1.2,
+        }
+
+    async def get_fred_indicators(self) -> dict[str, Any]:
+        """Return mock FRED indicators."""
+        return {
+            "fed_funds_rate": 5.25,
+            "unemployment_rate": 3.9,
+            "cpi_yoy": 3.2,
+            "gdp_growth": 2.5,
+            "credit_spread": 350,
         }
 
     async def get_full_market_data(self) -> dict[str, Any]:

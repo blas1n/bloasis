@@ -222,30 +222,279 @@ def test_calculate_liquidity_insufficient_data(factor_engine):
 
 
 @pytest.mark.asyncio
-async def test_calculate_value_placeholder(factor_engine):
-    """Test value calculation (placeholder)."""
+async def test_calculate_value_low_pe(factor_engine, mock_market_data_client):
+    """Test value calculation with low P/E (good value)."""
+    from shared.generated import market_data_pb2
+
+    # Mock stock info with low P/E
+    mock_market_data_client.get_stock_info.return_value = market_data_pb2.GetStockInfoResponse(
+        symbol="AAPL",
+        name="Apple Inc.",
+        sector="Technology",
+        industry="Consumer Electronics",
+        exchange="NASDAQ",
+        currency="USD",
+        market_cap=3_000_000_000_000,
+        pe_ratio=8.0,  # Low P/E = high value score
+    )
+
     value = await factor_engine._calculate_value("AAPL")
-
-    # Should return neutral score (placeholder)
-    assert value == 50.0
+    assert value == 100.0  # P/E < 10
 
 
 @pytest.mark.asyncio
-async def test_calculate_quality_placeholder(factor_engine):
-    """Test quality calculation (placeholder)."""
+async def test_calculate_value_medium_pe(factor_engine, mock_market_data_client):
+    """Test value calculation with medium P/E."""
+    from shared.generated import market_data_pb2
+
+    mock_market_data_client.get_stock_info.return_value = market_data_pb2.GetStockInfoResponse(
+        symbol="AAPL",
+        name="Apple Inc.",
+        sector="Technology",
+        industry="Consumer Electronics",
+        exchange="NASDAQ",
+        currency="USD",
+        market_cap=3_000_000_000_000,
+        pe_ratio=17.0,  # Medium P/E
+    )
+
+    value = await factor_engine._calculate_value("AAPL")
+    assert value == 60.0  # P/E 15-20
+
+
+@pytest.mark.asyncio
+async def test_calculate_value_high_pe(factor_engine, mock_market_data_client):
+    """Test value calculation with high P/E (expensive)."""
+    from shared.generated import market_data_pb2
+
+    mock_market_data_client.get_stock_info.return_value = market_data_pb2.GetStockInfoResponse(
+        symbol="AAPL",
+        name="Apple Inc.",
+        sector="Technology",
+        industry="Consumer Electronics",
+        exchange="NASDAQ",
+        currency="USD",
+        market_cap=3_000_000_000_000,
+        pe_ratio=35.0,  # High P/E = low value score
+    )
+
+    value = await factor_engine._calculate_value("AAPL")
+    assert value == 10.0  # P/E >= 30
+
+
+@pytest.mark.asyncio
+async def test_calculate_value_negative_pe(factor_engine, mock_market_data_client):
+    """Test value calculation with negative P/E (losses)."""
+    from shared.generated import market_data_pb2
+
+    mock_market_data_client.get_stock_info.return_value = market_data_pb2.GetStockInfoResponse(
+        symbol="LOSS",
+        name="Loss Inc.",
+        sector="Technology",
+        industry="Consumer Electronics",
+        exchange="NASDAQ",
+        currency="USD",
+        market_cap=1_000_000_000,
+        pe_ratio=-5.0,  # Negative P/E (company has losses)
+    )
+
+    value = await factor_engine._calculate_value("LOSS")
+    assert value == 50.0  # Neutral for negative P/E
+
+
+@pytest.mark.asyncio
+async def test_calculate_value_missing_pe(factor_engine, mock_market_data_client):
+    """Test value calculation when P/E is not available."""
+    from shared.generated import market_data_pb2
+
+    # Stock info without pe_ratio field set
+    mock_market_data_client.get_stock_info.return_value = market_data_pb2.GetStockInfoResponse(
+        symbol="AAPL",
+        name="Apple Inc.",
+        sector="Technology",
+        industry="Consumer Electronics",
+        exchange="NASDAQ",
+        currency="USD",
+        market_cap=3_000_000_000_000,
+        # pe_ratio not set
+    )
+
+    value = await factor_engine._calculate_value("AAPL")
+    assert value == 50.0  # Neutral when P/E unavailable
+
+
+@pytest.mark.asyncio
+async def test_calculate_value_api_error(factor_engine, mock_market_data_client):
+    """Test value calculation when API call fails."""
+    mock_market_data_client.get_stock_info.side_effect = Exception("API Error")
+
+    value = await factor_engine._calculate_value("AAPL")
+    assert value == 50.0  # Fallback to neutral
+
+
+@pytest.mark.asyncio
+async def test_calculate_quality_large_cap(factor_engine, mock_market_data_client):
+    """Test quality calculation for large cap company."""
+    from shared.generated import market_data_pb2
+
+    mock_market_data_client.get_stock_info.return_value = market_data_pb2.GetStockInfoResponse(
+        symbol="AAPL",
+        name="Apple Inc.",
+        sector="Technology",
+        industry="Consumer Electronics",
+        exchange="NASDAQ",
+        currency="USD",
+        market_cap=3_000_000_000_000,  # $3T - mega cap
+    )
+
     quality = await factor_engine._calculate_quality("AAPL")
-
-    # Should return neutral score (placeholder)
-    assert quality == 50.0
+    assert quality == 90.0  # Large cap, capped at 90
 
 
 @pytest.mark.asyncio
-async def test_calculate_sentiment_placeholder(factor_engine):
-    """Test sentiment calculation (placeholder)."""
-    sentiment = await factor_engine._calculate_sentiment("AAPL")
+async def test_calculate_quality_mid_cap(factor_engine, mock_market_data_client):
+    """Test quality calculation for mid cap company."""
+    from shared.generated import market_data_pb2
 
-    # Should return neutral score (placeholder)
-    assert sentiment == 50.0
+    mock_market_data_client.get_stock_info.return_value = market_data_pb2.GetStockInfoResponse(
+        symbol="MID",
+        name="Mid Cap Inc.",
+        sector="Technology",
+        industry="Software",
+        exchange="NASDAQ",
+        currency="USD",
+        market_cap=50_000_000_000,  # $50B - mid cap
+    )
+
+    quality = await factor_engine._calculate_quality("MID")
+    # Mid cap: 50 + ((50B - 10B) / 90B) * 20 = 50 + (40/90)*20 ≈ 58.89
+    assert 55.0 <= quality <= 65.0
+
+
+@pytest.mark.asyncio
+async def test_calculate_quality_small_cap(factor_engine, mock_market_data_client):
+    """Test quality calculation for small cap company."""
+    from shared.generated import market_data_pb2
+
+    mock_market_data_client.get_stock_info.return_value = market_data_pb2.GetStockInfoResponse(
+        symbol="SMALL",
+        name="Small Cap Inc.",
+        sector="Technology",
+        industry="Software",
+        exchange="NASDAQ",
+        currency="USD",
+        market_cap=5_000_000_000,  # $5B - small cap
+    )
+
+    quality = await factor_engine._calculate_quality("SMALL")
+    # Small cap: 30 + (5B / 10B) * 20 = 30 + 0.5 * 20 = 40
+    assert quality == 40.0
+
+
+@pytest.mark.asyncio
+async def test_calculate_quality_invalid_market_cap(factor_engine, mock_market_data_client):
+    """Test quality calculation with invalid market cap."""
+    from shared.generated import market_data_pb2
+
+    mock_market_data_client.get_stock_info.return_value = market_data_pb2.GetStockInfoResponse(
+        symbol="INVALID",
+        name="Invalid Inc.",
+        sector="Technology",
+        industry="Software",
+        exchange="NASDAQ",
+        currency="USD",
+        market_cap=0,  # Invalid
+    )
+
+    quality = await factor_engine._calculate_quality("INVALID")
+    assert quality == 50.0  # Neutral for invalid
+
+
+@pytest.mark.asyncio
+async def test_calculate_quality_api_error(factor_engine, mock_market_data_client):
+    """Test quality calculation when API call fails."""
+    mock_market_data_client.get_stock_info.side_effect = Exception("API Error")
+
+    quality = await factor_engine._calculate_quality("AAPL")
+    assert quality == 50.0  # Fallback to neutral
+
+
+@pytest.mark.asyncio
+async def test_calculate_sentiment_high_momentum(factor_engine, mock_market_data_client):
+    """Test sentiment calculation with high momentum (bullish)."""
+    # Create OHLCV data with strong uptrend (high momentum)
+    mock_ohlcv = [
+        {
+            "timestamp": f"2024-01-{i:02d}T00:00:00Z",
+            "open": 100.0 + i * 2,
+            "high": 102.0 + i * 2,
+            "low": 98.0 + i * 2,
+            "close": 100.0 + i * 2,  # Strong uptrend
+            "volume": 10_000_000,
+            "adj_close": 100.0 + i * 2,
+        }
+        for i in range(1, 31)
+    ]
+    mock_market_data_client.get_ohlcv.return_value = mock_ohlcv
+
+    sentiment = await factor_engine._calculate_sentiment("AAPL")
+    # High momentum should map to bullish sentiment (60-80)
+    assert 60.0 <= sentiment <= 80.0
+
+
+@pytest.mark.asyncio
+async def test_calculate_sentiment_low_momentum(factor_engine, mock_market_data_client):
+    """Test sentiment calculation with low momentum (bearish)."""
+    # Create OHLCV data with strong downtrend (low momentum)
+    mock_ohlcv = [
+        {
+            "timestamp": f"2024-01-{i:02d}T00:00:00Z",
+            "open": 200.0 - i * 3,
+            "high": 202.0 - i * 3,
+            "low": 198.0 - i * 3,
+            "close": 200.0 - i * 3,  # Strong downtrend
+            "volume": 10_000_000,
+            "adj_close": 200.0 - i * 3,
+        }
+        for i in range(1, 31)
+    ]
+    mock_market_data_client.get_ohlcv.return_value = mock_ohlcv
+
+    sentiment = await factor_engine._calculate_sentiment("AAPL")
+    # Low momentum should map to bearish sentiment (20-40)
+    assert 20.0 <= sentiment <= 40.0
+
+
+@pytest.mark.asyncio
+async def test_calculate_sentiment_neutral_momentum(factor_engine, mock_market_data_client):
+    """Test sentiment calculation with neutral momentum."""
+    # Create OHLCV data with sideways movement (neutral momentum)
+    mock_ohlcv = [
+        {
+            "timestamp": f"2024-01-{i:02d}T00:00:00Z",
+            "open": 150.0,
+            "high": 151.0,
+            "low": 149.0,
+            "close": 150.0 + (i % 3) - 1,  # Slight variation around 150
+            "volume": 10_000_000,
+            "adj_close": 150.0,
+        }
+        for i in range(1, 31)
+    ]
+    mock_market_data_client.get_ohlcv.return_value = mock_ohlcv
+
+    sentiment = await factor_engine._calculate_sentiment("AAPL")
+    # Neutral momentum should map to neutral sentiment (40-60)
+    assert 40.0 <= sentiment <= 60.0
+
+
+@pytest.mark.asyncio
+async def test_calculate_sentiment_api_error(factor_engine, mock_market_data_client):
+    """Test sentiment calculation when API call fails."""
+    mock_market_data_client.get_ohlcv.side_effect = Exception("API Error")
+
+    sentiment = await factor_engine._calculate_sentiment("AAPL")
+    assert sentiment == 50.0  # Fallback to neutral
 
 
 def test_factor_weights_sum_to_one():

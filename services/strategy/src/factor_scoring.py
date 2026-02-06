@@ -205,10 +205,9 @@ class FactorScoringEngine:
         return score
 
     async def _calculate_value(self, symbol: str) -> float:
-        """Calculate value score (0-100).
+        """Calculate value score (0-100) based on P/E ratio.
 
-        Based on P/E and P/B ratios (lower = better value).
-        TODO: Integrate with financial data API.
+        Lower P/E = higher score (value investing principle).
 
         Args:
             symbol: Stock ticker symbol
@@ -216,16 +215,47 @@ class FactorScoringEngine:
         Returns:
             Value score (0-100)
         """
-        # TODO: Implement with financial data API (Alpha Vantage, yfinance)
-        # For now, return neutral score
-        logger.debug(f"Value score placeholder for {symbol}: 50.0")
-        return 50.0
+        try:
+            stock_info = await self.market_data.get_stock_info(symbol)
+
+            # Check if pe_ratio is available
+            if stock_info.HasField("pe_ratio"):
+                pe = stock_info.pe_ratio
+
+                # Value scoring: Lower P/E = better value
+                if pe <= 0:
+                    # Negative P/E means losses, return neutral
+                    logger.debug(f"Negative P/E for {symbol}: {pe}, using neutral score")
+                    return 50.0
+                elif pe < 10:
+                    return 100.0
+                elif pe < 15:
+                    return 80.0
+                elif pe < 20:
+                    return 60.0
+                elif pe < 25:
+                    return 40.0
+                elif pe < 30:
+                    return 20.0
+                else:
+                    return 10.0
+
+            logger.debug(f"P/E ratio not available for {symbol}, using neutral score")
+            return 50.0
+
+        except Exception as e:
+            logger.warning(f"Failed to get value score for {symbol}: {e}")
+            return 50.0
 
     async def _calculate_quality(self, symbol: str) -> float:
-        """Calculate quality score (0-100).
+        """Calculate quality score (0-100) using market cap as proxy.
 
-        Based on ROE, debt/equity ratios.
-        TODO: Integrate with financial data API.
+        Phase 1: Uses market cap as a simplified quality proxy.
+        - Large cap (>$100B): Higher quality (more stable, established)
+        - Medium cap ($10-100B): Medium quality
+        - Small cap (<$10B): Lower quality (more risk)
+
+        Phase 2 TODO: Integrate ROE, debt/equity from financial data API.
 
         Args:
             symbol: Stock ticker symbol
@@ -233,16 +263,51 @@ class FactorScoringEngine:
         Returns:
             Quality score (0-100)
         """
-        # TODO: Implement with financial data API
-        # For now, return neutral score
-        logger.debug(f"Quality score placeholder for {symbol}: 50.0")
-        return 50.0
+        try:
+            stock_info = await self.market_data.get_stock_info(symbol)
+
+            # Use market_cap as quality proxy
+            market_cap = stock_info.market_cap
+
+            if market_cap <= 0:
+                logger.debug(f"Invalid market cap for {symbol}, using neutral score")
+                return 50.0
+
+            # Quality scoring based on market cap
+            # Large cap (>$100B) = 70-90 (established, stable)
+            # Mid cap ($10-100B) = 50-70 (growth potential with some stability)
+            # Small cap (<$10B) = 30-50 (higher risk, less established)
+            if market_cap >= 100_000_000_000:  # $100B+
+                # Large cap: 70-90 score, scaled by cap size
+                score = min(90.0, 70.0 + (market_cap / 1_000_000_000_000) * 10)
+            elif market_cap >= 10_000_000_000:  # $10B-$100B
+                # Mid cap: 50-70 score
+                ratio = (market_cap - 10_000_000_000) / 90_000_000_000
+                score = 50.0 + ratio * 20
+            else:  # <$10B
+                # Small cap: 30-50 score
+                ratio = market_cap / 10_000_000_000
+                score = 30.0 + ratio * 20
+
+            logger.debug(
+                f"Quality score for {symbol}: {score:.2f} (market_cap: ${market_cap:,.0f})"
+            )
+            return score
+
+        except Exception as e:
+            logger.warning(f"Failed to get quality score for {symbol}: {e}")
+            return 50.0
 
     async def _calculate_sentiment(self, symbol: str) -> float:
-        """Calculate sentiment score (0-100).
+        """Calculate sentiment score (0-100) using momentum as proxy.
 
-        Based on news and social media sentiment.
-        TODO: Integrate with FinGPT sentiment analysis.
+        Phase 1: Uses momentum as a simplified sentiment proxy.
+        Rationale: Bullish price action often reflects positive market sentiment.
+        - High momentum (>70): Bullish sentiment (60-80)
+        - Low momentum (<30): Bearish sentiment (20-40)
+        - Neutral momentum: Neutral sentiment (40-60)
+
+        Phase 2 TODO: Integrate FinGPT sentiment analysis for news/social sentiment.
 
         Args:
             symbol: Stock ticker symbol
@@ -250,7 +315,32 @@ class FactorScoringEngine:
         Returns:
             Sentiment score (0-100)
         """
-        # TODO: Implement with FinGPT sentiment API
-        # For now, return neutral score
-        logger.debug(f"Sentiment score placeholder for {symbol}: 50.0")
-        return 50.0
+        try:
+            # Fetch OHLCV data to calculate momentum
+            ohlcv_bars = await self.market_data.get_ohlcv(symbol, period="3mo", interval="1d")
+
+            # Calculate momentum using internal method
+            momentum = self._calculate_momentum(ohlcv_bars)
+
+            # Convert momentum to sentiment proxy
+            if momentum > 70:
+                # Bullish price action implies positive sentiment
+                # Map momentum 70-100 to sentiment 60-80
+                score = 60.0 + (momentum - 70) * (20.0 / 30.0)
+            elif momentum < 30:
+                # Bearish price action implies negative sentiment
+                # Map momentum 0-30 to sentiment 20-40
+                score = 20.0 + momentum * (20.0 / 30.0)
+            else:
+                # Neutral momentum implies neutral sentiment
+                # Map momentum 30-70 to sentiment 40-60
+                score = 40.0 + (momentum - 30) * (20.0 / 40.0)
+
+            logger.debug(
+                f"Sentiment score for {symbol}: {score:.2f} (momentum proxy: {momentum:.2f})"
+            )
+            return score
+
+        except Exception as e:
+            logger.warning(f"Failed to get sentiment score for {symbol}: {e}")
+            return 50.0

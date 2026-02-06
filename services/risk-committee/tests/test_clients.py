@@ -23,6 +23,7 @@ class TestPortfolioClient:
             assert client.host == "localhost"
             assert client.port == 50060
             assert client.channel is None
+            assert client.stub is None
 
     def test_init_with_custom_values(self):
         """Test initialization with custom host and port."""
@@ -40,10 +41,15 @@ class TestPortfolioClient:
             mock_channel_instance = MagicMock()
             mock_channel.return_value = mock_channel_instance
 
-            await client.connect()
+            with patch(
+                "src.clients.portfolio_client.portfolio_pb2_grpc.PortfolioServiceStub"
+            ) as mock_stub:
+                await client.connect()
 
-            mock_channel.assert_called_once()
-            assert client.channel == mock_channel_instance
+                mock_channel.assert_called_once()
+                mock_stub.assert_called_once_with(mock_channel_instance)
+                assert client.channel == mock_channel_instance
+                assert client.stub is not None
 
     @pytest.mark.asyncio
     async def test_connect_already_connected(self):
@@ -56,15 +62,160 @@ class TestPortfolioClient:
             mock_logger.warning.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_get_positions(self):
-        """Test getting portfolio positions."""
+    async def test_get_positions_success(self):
+        """Test getting portfolio positions successfully."""
         client = PortfolioClient(host="test-host", port=50060)
+        client.channel = MagicMock()
+        client.stub = AsyncMock()
+
+        # Create mock position with Money proto
+        mock_position1 = MagicMock()
+        mock_position1.symbol = "AAPL"
+        mock_position1.quantity = 50
+        mock_position1.current_value = MagicMock(amount="8750.00", currency="USD")
+
+        mock_position2 = MagicMock()
+        mock_position2.symbol = "GOOGL"
+        mock_position2.quantity = 20
+        mock_position2.current_value = MagicMock(amount="2800.00", currency="USD")
+
+        mock_response = MagicMock()
+        mock_response.positions = [mock_position1, mock_position2]
+
+        client.stub.GetPositions = AsyncMock(return_value=mock_response)
 
         portfolio = await client.get_positions("test-user")
 
         assert portfolio.user_id == "test-user"
-        assert portfolio.total_value == 100000.0
+        assert portfolio.total_value == 11550.0
         assert len(portfolio.positions) == 2
+        assert portfolio.positions[0].symbol == "AAPL"
+        assert portfolio.positions[0].quantity == 50
+        assert portfolio.positions[0].market_value == 8750.0
+        assert portfolio.positions[0].sector == "Unknown"
+        assert portfolio.positions[1].symbol == "GOOGL"
+        assert portfolio.positions[1].quantity == 20
+        assert portfolio.positions[1].market_value == 2800.0
+
+    @pytest.mark.asyncio
+    async def test_get_positions_empty(self):
+        """Test getting portfolio with no positions."""
+        client = PortfolioClient(host="test-host", port=50060)
+        client.channel = MagicMock()
+        client.stub = AsyncMock()
+
+        mock_response = MagicMock()
+        mock_response.positions = []
+
+        client.stub.GetPositions = AsyncMock(return_value=mock_response)
+
+        portfolio = await client.get_positions("test-user")
+
+        assert portfolio.user_id == "test-user"
+        assert portfolio.total_value == 0.0
+        assert len(portfolio.positions) == 0
+
+    @pytest.mark.asyncio
+    async def test_get_positions_auto_connect(self):
+        """Test get_positions auto-connects if not connected."""
+        client = PortfolioClient(host="test-host", port=50060)
+
+        # Mock the connection
+        with patch("src.clients.portfolio_client.grpc.aio.insecure_channel") as mock_channel:
+            mock_channel_instance = MagicMock()
+            mock_channel.return_value = mock_channel_instance
+
+            with patch(
+                "src.clients.portfolio_client.portfolio_pb2_grpc.PortfolioServiceStub"
+            ) as mock_stub_class:
+                mock_stub = AsyncMock()
+                mock_stub_class.return_value = mock_stub
+
+                mock_response = MagicMock()
+                mock_response.positions = []
+                mock_stub.GetPositions = AsyncMock(return_value=mock_response)
+
+                portfolio = await client.get_positions("test-user")
+
+                # Verify connection was established
+                mock_channel.assert_called_once()
+                mock_stub_class.assert_called_once()
+                assert portfolio.user_id == "test-user"
+
+    @pytest.mark.asyncio
+    async def test_get_positions_unavailable_error(self):
+        """Test getting positions with unavailable service."""
+        client = PortfolioClient(host="test-host", port=50060)
+        client.channel = MagicMock()
+        client.stub = AsyncMock()
+
+        error = grpc.RpcError()
+        error.code = MagicMock(return_value=grpc.StatusCode.UNAVAILABLE)
+        error.details = MagicMock(return_value="Service unavailable")
+
+        client.stub.GetPositions = AsyncMock(side_effect=error)
+
+        with pytest.raises(ConnectionError) as exc_info:
+            await client.get_positions("test-user")
+
+        assert "Portfolio Service unavailable" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_get_positions_timeout_error(self):
+        """Test getting positions with timeout."""
+        client = PortfolioClient(host="test-host", port=50060)
+        client.channel = MagicMock()
+        client.stub = AsyncMock()
+
+        error = grpc.RpcError()
+        error.code = MagicMock(return_value=grpc.StatusCode.DEADLINE_EXCEEDED)
+        error.details = MagicMock(return_value="Deadline exceeded")
+
+        client.stub.GetPositions = AsyncMock(side_effect=error)
+
+        with pytest.raises(TimeoutError) as exc_info:
+            await client.get_positions("test-user")
+
+        assert "timed out" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_get_positions_other_grpc_error(self):
+        """Test getting positions with other gRPC error."""
+        client = PortfolioClient(host="test-host", port=50060)
+        client.channel = MagicMock()
+        client.stub = AsyncMock()
+
+        error = grpc.RpcError()
+        error.code = MagicMock(return_value=grpc.StatusCode.INTERNAL)
+        error.details = MagicMock(return_value="Internal error")
+
+        client.stub.GetPositions = AsyncMock(side_effect=error)
+
+        with pytest.raises(grpc.RpcError):
+            await client.get_positions("test-user")
+
+    def test_money_to_float(self):
+        """Test converting Money proto to float."""
+        client = PortfolioClient(host="test-host", port=50060)
+
+        # Valid money
+        mock_money = MagicMock(amount="150.25", currency="USD")
+        assert client._money_to_float(mock_money) == 150.25
+
+        # Empty amount
+        mock_money_empty = MagicMock(amount="", currency="USD")
+        assert client._money_to_float(mock_money_empty) == 0.0
+
+        # None
+        assert client._money_to_float(None) == 0.0
+
+    def test_get_sector(self):
+        """Test getting sector for symbol returns Unknown."""
+        client = PortfolioClient(host="test-host", port=50060)
+
+        # Currently returns Unknown - will be enhanced in Phase 2
+        assert client._get_sector("AAPL") == "Unknown"
+        assert client._get_sector("GOOGL") == "Unknown"
 
     @pytest.mark.asyncio
     async def test_close(self):
@@ -72,11 +223,24 @@ class TestPortfolioClient:
         client = PortfolioClient(host="test-host", port=50060)
         mock_channel = AsyncMock()
         client.channel = mock_channel
+        client.stub = MagicMock()
 
         await client.close()
 
         mock_channel.close.assert_called_once()
         assert client.channel is None
+        assert client.stub is None
+
+    @pytest.mark.asyncio
+    async def test_close_not_connected(self):
+        """Test closing when not connected."""
+        client = PortfolioClient(host="test-host", port=50060)
+
+        # Should not raise
+        await client.close()
+
+        assert client.channel is None
+        assert client.stub is None
 
 
 class TestMarketDataClient:

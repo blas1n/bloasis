@@ -225,11 +225,7 @@ class PnLCalculator:
             return Decimal("0")
 
         try:
-            # TODO: Implement actual market data client call
-            # data = await self.market_data.get_quote(symbol)
-            # return Decimal(str(data.price))
-            logger.warning(f"Market data fetch not implemented for {symbol}")
-            return Decimal("0")
+            return await self.market_data.get_current_price(symbol)
         except Exception as e:
             logger.warning(f"Failed to get price for {symbol}: {e}")
             return Decimal("0")
@@ -247,10 +243,6 @@ class PnLCalculator:
             return None
 
         try:
-            # TODO: Implement actual market data client call
-            # data = await self.market_data.get_ohlcv(symbol, "1d", "5d")
-            # if len(data.bars) >= 2:
-            #     return Decimal(str(data.bars[-2].close))
-            return None
+            return await self.market_data.get_previous_close(symbol)
         except Exception:
             return None
