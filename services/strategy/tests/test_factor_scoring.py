@@ -376,8 +376,8 @@ async def test_calculate_value_api_error(factor_engine, mock_market_data_client)
 
 
 @pytest.mark.asyncio
-async def test_calculate_quality_large_cap(factor_engine, mock_market_data_client):
-    """Test quality calculation for large cap company."""
+async def test_calculate_quality_high_roe_low_debt(factor_engine, mock_market_data_client):
+    """Test quality calculation with high ROE and low debt."""
     from shared.generated import market_data_pb2
 
     mock_market_data_client.get_stock_info.return_value = market_data_pb2.GetStockInfoResponse(
@@ -388,15 +388,46 @@ async def test_calculate_quality_large_cap(factor_engine, mock_market_data_clien
         exchange="NASDAQ",
         currency="USD",
         market_cap=3_000_000_000_000,  # $3T - mega cap
+        return_on_equity=0.20,  # 20% ROE -> score 100
+        debt_to_equity=0.5,  # 0.5 D/E -> score 75
     )
 
     quality = await factor_engine._calculate_quality("AAPL")
-    assert quality == 90.0  # Large cap, capped at 90
+    # ROE: 0.20 * 500 = 100 (capped)
+    # D/E: 100 - 0.5 * 50 = 75
+    # Cap: 90 (mega cap)
+    # Final: 100 * 0.4 + 75 * 0.3 + 90 * 0.3 = 40 + 22.5 + 27 = 89.5
+    assert 89.0 <= quality <= 90.0
 
 
 @pytest.mark.asyncio
-async def test_calculate_quality_mid_cap(factor_engine, mock_market_data_client):
-    """Test quality calculation for mid cap company."""
+async def test_calculate_quality_low_roe_high_debt(factor_engine, mock_market_data_client):
+    """Test quality calculation with low ROE and high debt."""
+    from shared.generated import market_data_pb2
+
+    mock_market_data_client.get_stock_info.return_value = market_data_pb2.GetStockInfoResponse(
+        symbol="DEBT",
+        name="High Debt Inc.",
+        sector="Technology",
+        industry="Software",
+        exchange="NASDAQ",
+        currency="USD",
+        market_cap=50_000_000_000,  # $50B - mid cap
+        return_on_equity=0.05,  # 5% ROE -> score 25
+        debt_to_equity=2.0,  # 2.0 D/E -> score 0
+    )
+
+    quality = await factor_engine._calculate_quality("DEBT")
+    # ROE: 0.05 * 500 = 25
+    # D/E: 100 - 2.0 * 50 = 0
+    # Cap: ~58.89 (mid cap)
+    # Final: 25 * 0.4 + 0 * 0.3 + 58.89 * 0.3 = 10 + 0 + 17.67 ≈ 27.67
+    assert 25.0 <= quality <= 30.0
+
+
+@pytest.mark.asyncio
+async def test_calculate_quality_missing_fundamentals(factor_engine, mock_market_data_client):
+    """Test quality calculation with missing ROE and D/E (uses neutral)."""
     from shared.generated import market_data_pb2
 
     mock_market_data_client.get_stock_info.return_value = market_data_pb2.GetStockInfoResponse(
@@ -407,16 +438,22 @@ async def test_calculate_quality_mid_cap(factor_engine, mock_market_data_client)
         exchange="NASDAQ",
         currency="USD",
         market_cap=50_000_000_000,  # $50B - mid cap
+        # No return_on_equity or debt_to_equity set
     )
 
     quality = await factor_engine._calculate_quality("MID")
-    # Mid cap: 50 + ((50B - 10B) / 90B) * 20 = 50 + (40/90)*20 ≈ 58.89
-    assert 55.0 <= quality <= 65.0
+    # ROE: 50 (neutral)
+    # D/E: 50 (neutral)
+    # Cap: ~58.89 (mid cap)
+    # Final: 50 * 0.4 + 50 * 0.3 + 58.89 * 0.3 = 20 + 15 + 17.67 ≈ 52.67
+    assert 50.0 <= quality <= 55.0
 
 
 @pytest.mark.asyncio
-async def test_calculate_quality_small_cap(factor_engine, mock_market_data_client):
-    """Test quality calculation for small cap company."""
+async def test_calculate_quality_small_cap_good_fundamentals(
+    factor_engine, mock_market_data_client
+):
+    """Test quality calculation for small cap with good fundamentals."""
     from shared.generated import market_data_pb2
 
     mock_market_data_client.get_stock_info.return_value = market_data_pb2.GetStockInfoResponse(
@@ -427,11 +464,16 @@ async def test_calculate_quality_small_cap(factor_engine, mock_market_data_clien
         exchange="NASDAQ",
         currency="USD",
         market_cap=5_000_000_000,  # $5B - small cap
+        return_on_equity=0.15,  # 15% ROE -> score 75
+        debt_to_equity=0.3,  # 0.3 D/E -> score 85
     )
 
     quality = await factor_engine._calculate_quality("SMALL")
-    # Small cap: 30 + (5B / 10B) * 20 = 30 + 0.5 * 20 = 40
-    assert quality == 40.0
+    # ROE: 0.15 * 500 = 75
+    # D/E: 100 - 0.3 * 50 = 85
+    # Cap: 30 + (5/10) * 20 = 40 (small cap)
+    # Final: 75 * 0.4 + 85 * 0.3 + 40 * 0.3 = 30 + 25.5 + 12 = 67.5
+    assert 65.0 <= quality <= 70.0
 
 
 @pytest.mark.asyncio
@@ -447,10 +489,14 @@ async def test_calculate_quality_invalid_market_cap(factor_engine, mock_market_d
         exchange="NASDAQ",
         currency="USD",
         market_cap=0,  # Invalid
+        return_on_equity=0.10,  # 10% ROE -> score 50
+        debt_to_equity=1.0,  # 1.0 D/E -> score 50
     )
 
     quality = await factor_engine._calculate_quality("INVALID")
-    assert quality == 50.0  # Neutral for invalid
+    # ROE: 50, D/E: 50, Cap: 50 (neutral)
+    # Final: 50 * 0.4 + 50 * 0.3 + 50 * 0.3 = 50
+    assert quality == 50.0
 
 
 @pytest.mark.asyncio
@@ -460,6 +506,56 @@ async def test_calculate_quality_api_error(factor_engine, mock_market_data_clien
 
     quality = await factor_engine._calculate_quality("AAPL")
     assert quality == 50.0  # Fallback to neutral
+
+
+@pytest.mark.asyncio
+async def test_calculate_quality_extreme_roe(factor_engine, mock_market_data_client):
+    """Test quality calculation with extreme ROE (capped at 100)."""
+    from shared.generated import market_data_pb2
+
+    mock_market_data_client.get_stock_info.return_value = market_data_pb2.GetStockInfoResponse(
+        symbol="HIGH",
+        name="High ROE Inc.",
+        sector="Technology",
+        industry="Software",
+        exchange="NASDAQ",
+        currency="USD",
+        market_cap=100_000_000_000,  # $100B
+        return_on_equity=0.50,  # 50% ROE -> would be 250, capped at 100
+        debt_to_equity=0.0,  # 0 D/E -> score 100
+    )
+
+    quality = await factor_engine._calculate_quality("HIGH")
+    # ROE: min(100, 0.50 * 500) = 100
+    # D/E: 100 - 0 * 50 = 100
+    # Cap: 70 + (100B / 1000B) * 10 = 71
+    # Final: 100 * 0.4 + 100 * 0.3 + 71 * 0.3 = 40 + 30 + 21.3 = 91.3
+    assert 90.0 <= quality <= 92.0
+
+
+@pytest.mark.asyncio
+async def test_calculate_quality_negative_roe(factor_engine, mock_market_data_client):
+    """Test quality calculation with negative ROE (capped at 0)."""
+    from shared.generated import market_data_pb2
+
+    mock_market_data_client.get_stock_info.return_value = market_data_pb2.GetStockInfoResponse(
+        symbol="LOSS",
+        name="Loss Inc.",
+        sector="Technology",
+        industry="Software",
+        exchange="NASDAQ",
+        currency="USD",
+        market_cap=10_000_000_000,  # $10B
+        return_on_equity=-0.10,  # -10% ROE -> score 0
+        debt_to_equity=1.5,  # 1.5 D/E -> score 25
+    )
+
+    quality = await factor_engine._calculate_quality("LOSS")
+    # ROE: max(0, -0.10 * 500) = 0
+    # D/E: 100 - 1.5 * 50 = 25
+    # Cap: 50 (at $10B threshold)
+    # Final: 0 * 0.4 + 25 * 0.3 + 50 * 0.3 = 0 + 7.5 + 15 = 22.5
+    assert 20.0 <= quality <= 25.0
 
 
 @pytest.mark.asyncio

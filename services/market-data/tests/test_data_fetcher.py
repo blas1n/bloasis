@@ -43,6 +43,10 @@ class TestMarketDataFetcher:
             "dividendYield": 0.005,
             "fiftyTwoWeekHigh": 200.0,
             "fiftyTwoWeekLow": 150.0,
+            "returnOnEquity": 0.18,
+            "debtToEquity": 150.0,  # yfinance returns as percentage
+            "currentRatio": 1.5,
+            "profitMargins": 0.25,
         }
 
     def test_init(self, fetcher: MarketDataFetcher) -> None:
@@ -157,6 +161,55 @@ class TestMarketDataFetcher:
         assert result["name"] == "Apple Inc."
         assert result["sector"] == "Technology"
         assert result["market_cap"] == 2800000000000
+
+    @patch("src.data_fetcher.yf.Ticker")
+    def test_get_stock_info_with_fundamentals(
+        self,
+        mock_ticker_class: MagicMock,
+        fetcher: MarketDataFetcher,
+        mock_stock_info: dict,
+    ) -> None:
+        """Test stock info fetch includes fundamental metrics."""
+        mock_ticker = MagicMock()
+        mock_ticker.info = mock_stock_info
+        mock_ticker_class.return_value = mock_ticker
+
+        result = fetcher.get_stock_info("AAPL")
+
+        # Verify fundamental metrics
+        assert result["return_on_equity"] == 0.18
+        # debtToEquity is converted from percentage to ratio
+        assert result["debt_to_equity"] == 1.5  # 150% / 100 = 1.5
+        assert result["current_ratio"] == 1.5
+        assert result["profit_margin"] == 0.25
+
+    @patch("src.data_fetcher.yf.Ticker")
+    def test_get_stock_info_missing_fundamentals(
+        self,
+        mock_ticker_class: MagicMock,
+        fetcher: MarketDataFetcher,
+    ) -> None:
+        """Test stock info fetch when fundamental metrics are missing."""
+        mock_ticker = MagicMock()
+        mock_ticker.info = {
+            "symbol": "TEST",
+            "longName": "Test Inc.",
+            "sector": "Technology",
+            "industry": "Software",
+            "exchange": "NASDAQ",
+            "currency": "USD",
+            "marketCap": 1000000000,
+            # No fundamental metrics
+        }
+        mock_ticker_class.return_value = mock_ticker
+
+        result = fetcher.get_stock_info("TEST")
+
+        # Fundamental metrics should be None when not available
+        assert result["return_on_equity"] is None
+        assert result["debt_to_equity"] is None
+        assert result["current_ratio"] is None
+        assert result["profit_margin"] is None
 
     @patch("src.data_fetcher.yf.Ticker")
     def test_get_stock_info_invalid_symbol(

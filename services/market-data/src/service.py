@@ -195,6 +195,14 @@ class MarketDataServicer(market_data_pb2_grpc.MarketDataServiceServicer):
                 response.fifty_two_week_high = data["fifty_two_week_high"]
             if data.get("fifty_two_week_low") is not None:
                 response.fifty_two_week_low = data["fifty_two_week_low"]
+            if data.get("return_on_equity") is not None:
+                response.return_on_equity = data["return_on_equity"]
+            if data.get("debt_to_equity") is not None:
+                response.debt_to_equity = data["debt_to_equity"]
+            if data.get("current_ratio") is not None:
+                response.current_ratio = data["current_ratio"]
+            if data.get("profit_margin") is not None:
+                response.profit_margin = data["profit_margin"]
             return response
 
         try:
@@ -219,6 +227,14 @@ class MarketDataServicer(market_data_pb2_grpc.MarketDataServiceServicer):
                 response.fifty_two_week_high = info["fifty_two_week_high"]
             if info.get("fifty_two_week_low") is not None:
                 response.fifty_two_week_low = info["fifty_two_week_low"]
+            if info.get("return_on_equity") is not None:
+                response.return_on_equity = info["return_on_equity"]
+            if info.get("debt_to_equity") is not None:
+                response.debt_to_equity = info["debt_to_equity"]
+            if info.get("current_ratio") is not None:
+                response.current_ratio = info["current_ratio"]
+            if info.get("profit_margin") is not None:
+                response.profit_margin = info["profit_margin"]
 
             # Cache result
             await self._set_cached(cache_key, json.dumps(info))

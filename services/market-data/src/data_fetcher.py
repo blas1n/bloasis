@@ -131,6 +131,15 @@ class MarketDataFetcher:
                 "dividend_yield": info.get("dividendYield"),
                 "fifty_two_week_high": info.get("fiftyTwoWeekHigh"),
                 "fifty_two_week_low": info.get("fiftyTwoWeekLow"),
+                "return_on_equity": info.get("returnOnEquity"),
+                # yfinance returns D/E as percentage, convert to ratio
+                "debt_to_equity": (
+                    info.get("debtToEquity") / 100.0
+                    if info.get("debtToEquity") is not None
+                    else None
+                ),
+                "current_ratio": info.get("currentRatio"),
+                "profit_margin": info.get("profitMargins"),
             }
 
             logger.info(f"Fetched info for {symbol}")

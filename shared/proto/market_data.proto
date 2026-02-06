@@ -148,6 +148,18 @@ message GetStockInfoResponse {
 
   // 52-week low price (optional)
   optional double fifty_two_week_low = 11;
+
+  // Return on Equity (0.0 to 1.0, optional)
+  optional double return_on_equity = 12;
+
+  // Debt to Equity ratio (optional)
+  optional double debt_to_equity = 13;
+
+  // Current ratio (optional)
+  optional double current_ratio = 14;
+
+  // Profit margin (0.0 to 1.0, optional)
+  optional double profit_margin = 15;
 }
 
 // GetBatchOHLCVRequest - Request for multiple symbols

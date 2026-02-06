@@ -261,14 +261,14 @@ class FactorScoringEngine:
             return 50.0
 
     async def _calculate_quality(self, symbol: str) -> float:
-        """Calculate quality score (0-100) using market cap as proxy.
+        """Calculate quality score (0-100) using fundamental metrics.
 
-        Phase 1: Uses market cap as a simplified quality proxy.
-        - Large cap (>$100B): Higher quality (more stable, established)
-        - Medium cap ($10-100B): Medium quality
-        - Small cap (<$10B): Lower quality (more risk)
+        Phase 2: Uses ROE, debt/equity, and market cap for quality scoring.
 
-        Phase 2 TODO: Integrate ROE, debt/equity from financial data API.
+        Scoring breakdown:
+        - ROE weight: 40% (higher = better)
+        - Debt/Equity weight: 30% (lower = better, inverse)
+        - Market Cap weight: 30% (larger = better, stability)
 
         Args:
             symbol: Stock ticker symbol
@@ -279,33 +279,41 @@ class FactorScoringEngine:
         try:
             stock_info = await self.market_data.get_stock_info(symbol)
 
-            # Use market_cap as quality proxy
+            # ROE score: 0-20% ROE maps to 0-100 (higher is better)
+            if stock_info.HasField("return_on_equity"):
+                roe = stock_info.return_on_equity
+                roe_score = min(100.0, max(0.0, roe * 500))  # 20% ROE = 100
+            else:
+                roe_score = 50.0  # Neutral
+
+            # D/E score: 0-2 D/E maps to 100-0 (lower is better)
+            if stock_info.HasField("debt_to_equity"):
+                de = stock_info.debt_to_equity
+                de_score = max(0.0, 100.0 - de * 50)  # 2.0 D/E = 0
+            else:
+                de_score = 50.0  # Neutral
+
+            # Market cap score (existing logic)
             market_cap = stock_info.market_cap
-
             if market_cap <= 0:
-                logger.debug(f"Invalid market cap for {symbol}, using neutral score")
-                return 50.0
-
-            # Quality scoring based on market cap
-            # Large cap (>$100B) = 70-90 (established, stable)
-            # Mid cap ($10-100B) = 50-70 (growth potential with some stability)
-            # Small cap (<$10B) = 30-50 (higher risk, less established)
-            if market_cap >= 100_000_000_000:  # $100B+
-                # Large cap: 70-90 score, scaled by cap size
-                score = min(90.0, 70.0 + (market_cap / 1_000_000_000_000) * 10)
+                cap_score = 50.0  # Neutral for invalid
+            elif market_cap >= 100_000_000_000:  # $100B+
+                cap_score = min(90.0, 70.0 + (market_cap / 1_000_000_000_000) * 10)
             elif market_cap >= 10_000_000_000:  # $10B-$100B
-                # Mid cap: 50-70 score
                 ratio = (market_cap - 10_000_000_000) / 90_000_000_000
-                score = 50.0 + ratio * 20
+                cap_score = 50.0 + ratio * 20
             else:  # <$10B
-                # Small cap: 30-50 score
                 ratio = market_cap / 10_000_000_000
-                score = 30.0 + ratio * 20
+                cap_score = 30.0 + ratio * 20
+
+            # Weighted average
+            final_score = roe_score * 0.4 + de_score * 0.3 + cap_score * 0.3
 
             logger.debug(
-                f"Quality score for {symbol}: {score:.2f} (market_cap: ${market_cap:,.0f})"
+                f"Quality score for {symbol}: {final_score:.2f} "
+                f"(ROE: {roe_score:.2f}, D/E: {de_score:.2f}, Cap: {cap_score:.2f})"
             )
-            return score
+            return final_score
 
         except Exception as e:
             logger.warning(f"Failed to get quality score for {symbol}: {e}")
