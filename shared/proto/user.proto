@@ -1,0 +1,122 @@
+// User Service - gRPC Protocol Buffer Definition
+// Manages user profiles and trading preferences
+// Kong Gateway handles HTTP-to-gRPC transcoding via annotations
+
+syntax = "proto3";
+
+package bloasis.user;
+
+import "google/api/annotations.proto";
+
+// UserService provides user management and preferences
+service UserService {
+  // GetUser retrieves a user by ID
+  rpc GetUser(GetUserRequest) returns (GetUserResponse) {
+    option (google.api.http) = {
+      get: "/v1/users/{user_id}"
+    };
+  }
+
+  // CreateUser creates a new user account
+  rpc CreateUser(CreateUserRequest) returns (CreateUserResponse) {
+    option (google.api.http) = {
+      post: "/v1/users"
+      body: "*"
+    };
+  }
+
+  // ValidateCredentials validates user email/password (internal only - Auth Service)
+  // No HTTP annotation - internal gRPC only
+  rpc ValidateCredentials(ValidateCredentialsRequest) returns (ValidateCredentialsResponse);
+
+  // GetUserPreferences retrieves user trading preferences
+  rpc GetUserPreferences(GetPreferencesRequest) returns (GetPreferencesResponse) {
+    option (google.api.http) = {
+      get: "/v1/users/{user_id}/preferences"
+    };
+  }
+
+  // UpdateUserPreferences updates user trading preferences
+  rpc UpdateUserPreferences(UpdatePreferencesRequest) returns (UpdatePreferencesResponse) {
+    option (google.api.http) = {
+      patch: "/v1/users/{user_id}/preferences"
+      body: "*"
+    };
+  }
+}
+
+// User represents a user account
+message User {
+  string user_id = 1;      // UUID
+  string email = 2;        // Unique email address
+  string name = 3;         // Display name
+  string created_at = 4;   // ISO 8601 timestamp
+  string updated_at = 5;   // ISO 8601 timestamp
+}
+
+// UserPreferences contains user trading preferences
+// CRITICAL: Financial values are strings for Decimal precision
+message UserPreferences {
+  string user_id = 1;
+  string risk_profile = 2;           // "conservative", "moderate", "aggressive"
+  string max_portfolio_risk = 3;     // Decimal as string (e.g., "0.20")
+  string max_position_size = 4;      // Decimal as string (e.g., "0.10")
+  repeated string preferred_sectors = 5;  // e.g., ["Technology", "Healthcare"]
+  bool enable_notifications = 6;
+}
+
+// GetUserRequest - request to get a user by ID
+message GetUserRequest {
+  string user_id = 1;
+}
+
+// GetUserResponse - response containing user data
+message GetUserResponse {
+  User user = 1;
+}
+
+// CreateUserRequest - request to create a new user
+message CreateUserRequest {
+  string email = 1;
+  string password = 2;  // Will be hashed with bcrypt
+  string name = 3;
+}
+
+// CreateUserResponse - response after user creation
+message CreateUserResponse {
+  string user_id = 1;
+  User user = 2;
+}
+
+// ValidateCredentialsRequest - internal request for Auth Service
+message ValidateCredentialsRequest {
+  string email = 1;
+  string password = 2;
+}
+
+// ValidateCredentialsResponse - validation result
+message ValidateCredentialsResponse {
+  bool valid = 1;
+  string user_id = 2;  // Only set if valid=true
+}
+
+// GetPreferencesRequest - request to get user preferences
+message GetPreferencesRequest {
+  string user_id = 1;
+}
+
+// GetPreferencesResponse - response containing preferences
+message GetPreferencesResponse {
+  UserPreferences preferences = 1;
+}
+
+// UpdatePreferencesRequest - request to update preferences
+message UpdatePreferencesRequest {
+  string user_id = 1;
+  UserPreferences preferences = 2;
+}
+
+// UpdatePreferencesResponse - response after update
+message UpdatePreferencesResponse {
+  UserPreferences preferences = 1;
+}
