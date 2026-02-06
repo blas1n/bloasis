@@ -8,28 +8,15 @@ from ..config import config
 from ..models import OrderRequest, Portfolio, RiskDecision, RiskVote
 
 if TYPE_CHECKING:
+    from shared.utils.redis_client import RedisClient
+
+    from ..clients.market_data_client import MarketDataClient
     from ..clients.portfolio_client import PortfolioClient
 
 logger = logging.getLogger(__name__)
 
-# TODO: Replace with Market Data Service API call (GetSymbolInfo RPC)
-# Temporary hardcoded sector mapping until Market Data Service provides sector information
-SYMBOL_SECTORS = {
-    "AAPL": "Technology",
-    "MSFT": "Technology",
-    "GOOGL": "Technology",
-    "AMZN": "Consumer Discretionary",
-    "META": "Technology",
-    "NVDA": "Technology",
-    "TSLA": "Consumer Discretionary",
-    "JPM": "Financials",
-    "V": "Financials",
-    "JNJ": "Healthcare",
-    "UNH": "Healthcare",
-    "PG": "Consumer Staples",
-    "XOM": "Energy",
-    "CVX": "Energy",
-}
+# Cache TTL for sector data (24 hours)
+SECTOR_CACHE_TTL = 86400
 
 
 class ConcentrationRiskAgent:
@@ -48,13 +35,22 @@ class ConcentrationRiskAgent:
         ("Healthcare", "Consumer Staples"): 0.4,
     }
 
-    def __init__(self, portfolio_client: "PortfolioClient") -> None:
+    def __init__(
+        self,
+        portfolio_client: "PortfolioClient",
+        market_data_client: "MarketDataClient | None" = None,
+        redis_client: "RedisClient | None" = None,
+    ) -> None:
         """Initialize Concentration Risk Agent.
 
         Args:
             portfolio_client: Client for Portfolio Service
+            market_data_client: Client for Market Data Service (optional)
+            redis_client: Redis client for caching (optional)
         """
         self.portfolio = portfolio_client
+        self.market_data = market_data_client
+        self.redis = redis_client
         self.max_sector_concentration = Decimal(str(config.default_max_sector_concentration))
         self.max_correlation_exposure = Decimal("0.50")
 
@@ -82,7 +78,7 @@ class ConcentrationRiskAgent:
         sector = await self._get_sector(order.symbol)
 
         # Calculate sector concentration after order
-        sector_exposure = self._calculate_sector_exposure(portfolio, sector)
+        sector_exposure = await self._calculate_sector_exposure(portfolio, sector)
         order_value = Decimal(str(order.size)) * Decimal(str(order.price))
 
         # For sell orders, reduce sector exposure
@@ -140,17 +136,49 @@ class ConcentrationRiskAgent:
         )
 
     async def _get_sector(self, symbol: str) -> str:
-        """Get sector for a symbol.
+        """Get sector for a symbol from Market Data Service.
+
+        Uses Redis caching with 24-hour TTL to minimize API calls.
+        Falls back to "Unknown" if MarketDataService is unavailable.
 
         Args:
             symbol: Stock ticker symbol
 
         Returns:
-            Sector name
+            Sector name or "Unknown" if unavailable
         """
-        return SYMBOL_SECTORS.get(symbol, "Unknown")
+        # Check cache first
+        cache_key = f"sector:{symbol}"
 
-    def _calculate_sector_exposure(self, portfolio: Portfolio, sector: str) -> Decimal:
+        if self.redis:
+            try:
+                cached = await self.redis.get(cache_key)
+                if cached:
+                    return str(cached)
+            except Exception as e:
+                logger.warning(f"Redis cache read error for {symbol}: {e}")
+
+        # Fetch from Market Data Service
+        if self.market_data:
+            try:
+                stock_info = await self.market_data.get_stock_info(symbol)
+                sector = stock_info.sector if stock_info.sector else "Unknown"
+
+                # Cache for 24 hours
+                if self.redis:
+                    try:
+                        await self.redis.setex(cache_key, SECTOR_CACHE_TTL, sector)
+                    except Exception as e:
+                        logger.warning(f"Redis cache write error for {symbol}: {e}")
+
+                return sector
+
+            except Exception as e:
+                logger.warning(f"Failed to get sector for {symbol}: {e}")
+
+        return "Unknown"
+
+    async def _calculate_sector_exposure(self, portfolio: Portfolio, sector: str) -> Decimal:
         """Calculate total exposure to a sector.
 
         Args:
@@ -162,7 +190,10 @@ class ConcentrationRiskAgent:
         """
         total = Decimal("0")
         for position in portfolio.positions:
-            position_sector = SYMBOL_SECTORS.get(position.symbol, position.sector)
+            position_sector = await self._get_sector(position.symbol)
+            # Fallback to position's sector if MarketDataService returns Unknown
+            if position_sector == "Unknown" and position.sector:
+                position_sector = position.sector
             if position_sector == sector:
                 total += Decimal(str(position.market_value))
         return total
@@ -181,7 +212,10 @@ class ConcentrationRiskAgent:
         max_correlation = 0.0
 
         for position in portfolio.positions:
-            position_sector = SYMBOL_SECTORS.get(position.symbol, position.sector)
+            position_sector = await self._get_sector(position.symbol)
+            # Fallback to position's sector if MarketDataService returns Unknown
+            if position_sector == "Unknown" and position.sector:
+                position_sector = position.sector
 
             # Same sector = high correlation
             if position_sector == new_sector:

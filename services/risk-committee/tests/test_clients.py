@@ -209,13 +209,83 @@ class TestPortfolioClient:
         # None
         assert client._money_to_float(None) == 0.0
 
-    def test_get_sector(self):
-        """Test getting sector for symbol returns Unknown."""
+    @pytest.mark.asyncio
+    async def test_get_sector_with_market_data(self, mock_market_data_client, mock_redis_client):
+        """Test getting sector with Market Data client."""
+        client = PortfolioClient(
+            host="test-host",
+            port=50060,
+            market_data_client=mock_market_data_client,
+            redis_client=mock_redis_client,
+        )
+
+        # Should return sector from MarketDataService
+        assert await client._get_sector("AAPL") == "Technology"
+        assert await client._get_sector("XOM") == "Energy"
+        assert await client._get_sector("UNKNOWN_SYMBOL") == "Unknown"
+
+    @pytest.mark.asyncio
+    async def test_get_sector_without_clients(self):
+        """Test getting sector without Market Data client returns Unknown."""
         client = PortfolioClient(host="test-host", port=50060)
 
-        # Currently returns Unknown - will be enhanced in Phase 2
-        assert client._get_sector("AAPL") == "Unknown"
-        assert client._get_sector("GOOGL") == "Unknown"
+        # Without MarketDataClient, should return Unknown
+        assert await client._get_sector("AAPL") == "Unknown"
+        assert await client._get_sector("GOOGL") == "Unknown"
+
+    @pytest.mark.asyncio
+    async def test_get_sector_with_cache_hit(self, mock_market_data_client, mock_redis_client):
+        """Test getting sector from cache."""
+        mock_redis_client.get = AsyncMock(return_value="CachedSector")
+
+        client = PortfolioClient(
+            host="test-host",
+            port=50060,
+            market_data_client=mock_market_data_client,
+            redis_client=mock_redis_client,
+        )
+
+        # Should return cached sector without calling MarketDataService
+        result = await client._get_sector("AAPL")
+
+        assert result == "CachedSector"
+        mock_market_data_client.get_stock_info.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_get_sector_caches_result(self, mock_market_data_client, mock_redis_client):
+        """Test that sector is cached after fetching from MarketDataService."""
+        mock_redis_client.get = AsyncMock(return_value=None)
+
+        client = PortfolioClient(
+            host="test-host",
+            port=50060,
+            market_data_client=mock_market_data_client,
+            redis_client=mock_redis_client,
+        )
+
+        await client._get_sector("AAPL")
+
+        # Verify cache was written with 24-hour TTL
+        mock_redis_client.setex.assert_called_once_with("sector:AAPL", 86400, "Technology")
+
+    @pytest.mark.asyncio
+    async def test_get_sector_handles_market_data_error(
+        self, mock_market_data_client, mock_redis_client
+    ):
+        """Test graceful fallback when MarketDataService fails."""
+        mock_redis_client.get = AsyncMock(return_value=None)
+        mock_market_data_client.get_stock_info = AsyncMock(side_effect=Exception("API Error"))
+
+        client = PortfolioClient(
+            host="test-host",
+            port=50060,
+            market_data_client=mock_market_data_client,
+            redis_client=mock_redis_client,
+        )
+
+        # Should return Unknown on error
+        result = await client._get_sector("AAPL")
+        assert result == "Unknown"
 
     @pytest.mark.asyncio
     async def test_close(self):

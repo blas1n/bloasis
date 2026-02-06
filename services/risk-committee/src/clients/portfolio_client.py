@@ -2,7 +2,7 @@
 
 import logging
 from decimal import Decimal
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import grpc
 from shared.generated import portfolio_pb2, portfolio_pb2_grpc
@@ -10,18 +10,34 @@ from shared.generated import portfolio_pb2, portfolio_pb2_grpc
 from ..config import config
 from ..models import Portfolio, PortfolioPosition
 
+if TYPE_CHECKING:
+    from shared.utils.redis_client import RedisClient
+
+    from .market_data_client import MarketDataClient
+
 logger = logging.getLogger(__name__)
+
+# Cache TTL for sector data (24 hours)
+SECTOR_CACHE_TTL = 86400
 
 
 class PortfolioClient:
     """gRPC client for Portfolio Service."""
 
-    def __init__(self, host: str | None = None, port: int | None = None):
+    def __init__(
+        self,
+        host: str | None = None,
+        port: int | None = None,
+        market_data_client: "MarketDataClient | None" = None,
+        redis_client: "RedisClient | None" = None,
+    ):
         """Initialize Portfolio client.
 
         Args:
             host: Service host (default from config)
             port: Service port (default from config)
+            market_data_client: Client for Market Data Service (optional)
+            redis_client: Redis client for caching (optional)
         """
         self.host = host or config.portfolio_host
         self.port = port or config.portfolio_port
@@ -29,6 +45,8 @@ class PortfolioClient:
 
         self.channel: grpc.aio.Channel | None = None
         self.stub: portfolio_pb2_grpc.PortfolioServiceStub | None = None
+        self.market_data = market_data_client
+        self.redis = redis_client
 
     async def connect(self) -> None:
         """Establish gRPC connection to Portfolio Service."""
@@ -73,15 +91,17 @@ class PortfolioClient:
             logger.info(f"Retrieved {len(response.positions)} positions for user {user_id}")
 
             # Convert proto response to internal models
-            positions = [
-                PortfolioPosition(
-                    symbol=pos.symbol,
-                    quantity=pos.quantity,
-                    market_value=self._money_to_float(pos.current_value),
-                    sector=self._get_sector(pos.symbol),
+            positions = []
+            for pos in response.positions:
+                sector = await self._get_sector(pos.symbol)
+                positions.append(
+                    PortfolioPosition(
+                        symbol=pos.symbol,
+                        quantity=pos.quantity,
+                        market_value=self._money_to_float(pos.current_value),
+                        sector=sector,
+                    )
                 )
-                for pos in response.positions
-            ]
 
             # Calculate total value from positions
             total_value = sum(p.market_value for p in positions)
@@ -115,18 +135,47 @@ class PortfolioClient:
             return float(Decimal(money.amount))
         return 0.0
 
-    def _get_sector(self, symbol: str) -> str:
-        """Get sector for symbol.
+    async def _get_sector(self, symbol: str) -> str:
+        """Get sector for symbol from Market Data Service.
 
-        TODO: In Phase 2, call MarketDataService.GetStockInfo for real sector.
-        For now, return 'Unknown' - concentration_risk.py has sector mapping.
+        Uses Redis caching with 24-hour TTL to minimize API calls.
+        Falls back to "Unknown" if MarketDataService is unavailable.
 
         Args:
             symbol: Stock ticker symbol
 
         Returns:
-            Sector name or 'Unknown'
+            Sector name or "Unknown" if unavailable
         """
+        # Check cache first
+        cache_key = f"sector:{symbol}"
+
+        if self.redis:
+            try:
+                cached = await self.redis.get(cache_key)
+                if cached:
+                    return str(cached)
+            except Exception as e:
+                logger.warning(f"Redis cache read error for {symbol}: {e}")
+
+        # Fetch from Market Data Service
+        if self.market_data:
+            try:
+                stock_info = await self.market_data.get_stock_info(symbol)
+                sector = stock_info.sector if stock_info.sector else "Unknown"
+
+                # Cache for 24 hours
+                if self.redis:
+                    try:
+                        await self.redis.setex(cache_key, SECTOR_CACHE_TTL, sector)
+                    except Exception as e:
+                        logger.warning(f"Redis cache write error for {symbol}: {e}")
+
+                return sector
+
+            except Exception as e:
+                logger.warning(f"Failed to get sector for {symbol}: {e}")
+
         return "Unknown"
 
     async def close(self) -> None:

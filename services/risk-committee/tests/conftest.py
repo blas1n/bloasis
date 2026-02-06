@@ -44,6 +44,41 @@ def mock_market_data_client():
     client.get_average_volume = AsyncMock(return_value=5000000.0)
     client.connect = AsyncMock()
     client.close = AsyncMock()
+
+    # Mock GetStockInfo for sector lookup
+    def get_stock_info_side_effect(symbol):
+        sector_map = {
+            "AAPL": "Technology",
+            "MSFT": "Technology",
+            "GOOGL": "Technology",
+            "AMZN": "Consumer Discretionary",
+            "META": "Technology",
+            "NVDA": "Technology",
+            "TSLA": "Consumer Discretionary",
+            "JPM": "Financials",
+            "V": "Financials",
+            "JNJ": "Healthcare",
+            "UNH": "Healthcare",
+            "PG": "Consumer Staples",
+            "XOM": "Energy",
+            "CVX": "Energy",
+        }
+        mock_response = MagicMock()
+        mock_response.sector = sector_map.get(symbol, "Unknown")
+        return mock_response
+
+    client.get_stock_info = AsyncMock(side_effect=get_stock_info_side_effect)
+    return client
+
+
+@pytest.fixture
+def mock_redis_client():
+    """Create mock Redis client for caching."""
+    client = AsyncMock()
+    client.get = AsyncMock(return_value=None)  # No cache by default
+    client.setex = AsyncMock()
+    client.connect = AsyncMock()
+    client.close = AsyncMock()
     return client
 
 

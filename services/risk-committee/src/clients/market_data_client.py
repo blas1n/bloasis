@@ -118,6 +118,41 @@ class MarketDataClient:
 
             raise
 
+    async def get_stock_info(self, symbol: str) -> market_data_pb2.GetStockInfoResponse:
+        """Get stock information/metadata including sector.
+
+        Args:
+            symbol: Stock ticker symbol
+
+        Returns:
+            GetStockInfoResponse with stock metadata
+
+        Raises:
+            ConnectionError: On connection failure
+            TimeoutError: On timeout
+        """
+        if not self.stub:
+            await self.connect()
+
+        assert self.stub is not None, "stub should be initialized after connect()"
+
+        try:
+            request = market_data_pb2.GetStockInfoRequest(symbol=symbol)
+            response = await self.stub.GetStockInfo(request, timeout=10.0)
+
+            logger.info(f"Retrieved stock info for {symbol}")
+            return response
+
+        except grpc.RpcError as e:
+            logger.error(f"gRPC error getting stock info for {symbol}: {e.code()}")
+
+            if e.code() == grpc.StatusCode.UNAVAILABLE:
+                raise ConnectionError(f"Market Data Service unavailable at {self.address}") from e
+            elif e.code() == grpc.StatusCode.DEADLINE_EXCEEDED:
+                raise TimeoutError("Market Data Service request timed out") from e
+
+            raise
+
     async def close(self) -> None:
         """Close gRPC connection."""
         if self.channel:

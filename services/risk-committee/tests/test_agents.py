@@ -106,9 +106,13 @@ class TestConcentrationRiskAgent:
     """Tests for ConcentrationRiskAgent."""
 
     @pytest.fixture
-    def agent(self, mock_portfolio_client):
-        """Create ConcentrationRiskAgent with mock client."""
-        return ConcentrationRiskAgent(mock_portfolio_client)
+    def agent(self, mock_portfolio_client, mock_market_data_client, mock_redis_client):
+        """Create ConcentrationRiskAgent with mock clients."""
+        return ConcentrationRiskAgent(
+            portfolio_client=mock_portfolio_client,
+            market_data_client=mock_market_data_client,
+            redis_client=mock_redis_client,
+        )
 
     @pytest.mark.asyncio
     async def test_approve_order_concentration_ok(self, agent, sample_portfolio):
@@ -169,7 +173,7 @@ class TestConcentrationRiskAgent:
     @pytest.mark.asyncio
     async def test_calculate_sector_exposure(self, agent, sample_portfolio):
         """Test calculating sector exposure."""
-        exposure = agent._calculate_sector_exposure(sample_portfolio, "Technology")
+        exposure = await agent._calculate_sector_exposure(sample_portfolio, "Technology")
         # AAPL ($8750) + GOOGL ($2800) = $11550
         assert float(exposure) == 11550.0
 
