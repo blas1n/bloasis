@@ -58,5 +58,19 @@ services:
         config:
           proto: /kong/proto/market_data.proto
 
+  # Notification WebSocket Service
+  # Provides real-time notifications via WebSocket
+  # WebSocket Upgrade headers are passed through Kong
+  - name: notification-ws
+    url: http://notification:8000
+    routes:
+      - name: notification-ws-route
+        paths:
+          - /ws
+        protocols:
+          - http
+          - https
+        strip_path: false
+
 # Add services as they are implemented
 # See services/CLAUDE.md for gRPC service setup

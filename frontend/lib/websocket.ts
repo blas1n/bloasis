@@ -4,6 +4,8 @@
 
 type MessageHandler = (data: unknown) => void;
 
+// Connect to Notification Service via Kong Gateway
+// Kong routes /ws to the notification service (see infra/kong/kong.yml)
 const WS_BASE_URL = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8000/ws";
 
 class WebSocketClient {
