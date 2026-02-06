@@ -5,6 +5,28 @@ _transform: true
 # gRPC-to-REST transcoding via grpc-gateway plugin
 # Proto files are mounted at /kong/proto/ from shared/proto/
 
+# =============================================================================
+# JWT Consumer Configuration
+# =============================================================================
+# JWT consumers are used to verify JWT tokens
+# The secret MUST match the JWT_SECRET_KEY used by the Auth Service
+# In production, use environment variable substitution or Kong Admin API
+
+consumers:
+  - username: bloasis-jwt-consumer
+    custom_id: jwt-auth-consumer
+    jwt_secrets:
+      - key: bloasis-jwt-issuer
+        algorithm: HS256
+        # IMPORTANT: This secret MUST match AUTH_SERVICE JWT_SECRET_KEY
+        # In production, configure via Kong Admin API or environment variable
+        # secret: ${KONG_JWT_SECRET}
+        secret: your_jwt_secret_key_here
+
+# =============================================================================
+# Services Configuration
+# =============================================================================
+
 services:
   # Market Regime Service (Tier 1 - shared data)
   # Provides market regime classification (crisis, bear, bull, sideways, recovery)
@@ -27,6 +49,7 @@ services:
   # Provides portfolio summary and position management
   # User-specific data with 1-hour cache TTL
   # Note: Write operations (UpdateCashBalance, CreatePosition, etc.) are internal-only (no HTTP annotations)
+  # PROTECTED: Requires JWT authentication
   - name: portfolio-service
     url: grpc://portfolio:50057
     routes:
@@ -40,6 +63,17 @@ services:
       - name: grpc-gateway
         config:
           proto: /kong/proto/portfolio.proto
+      - name: jwt
+        config:
+          key_claim_name: sub
+          claims_to_verify:
+            - exp
+          secret_is_base64: false
+      - name: request-transformer
+        config:
+          add:
+            headers:
+              - "X-User-Id:$(jwt.claims.sub)"
 
   # Market Data Service (Tier 1 - shared data)
   # Provides stock market data (OHLCV, metadata) via yfinance
@@ -71,6 +105,92 @@ services:
           - http
           - https
         strip_path: false
+
+  # =============================================================================
+  # Protected Services (JWT Required)
+  # =============================================================================
+  # The following services require JWT authentication
+  # JWT token must be provided in Authorization header: Bearer <token>
+  # After validation, X-User-Id header is set from JWT sub claim
+
+  # Strategy Service (user-specific strategies)
+  # Provides strategy recommendations and customization
+  # PROTECTED: Requires JWT authentication
+  - name: strategy-service
+    url: grpc://strategy:50054
+    routes:
+      - name: strategy-route
+        paths:
+          - /v1/strategy
+        protocols:
+          - http
+          - https
+    plugins:
+      - name: grpc-gateway
+        config:
+          proto: /kong/proto/strategy.proto
+      - name: jwt
+        config:
+          key_claim_name: sub
+          claims_to_verify:
+            - exp
+          secret_is_base64: false
+      - name: request-transformer
+        config:
+          add:
+            headers:
+              - "X-User-Id:$(jwt.claims.sub)"
+
+  # Executor Service (trade execution)
+  # Provides order execution via Alpaca paper trading
+  # PROTECTED: Requires JWT authentication
+  - name: executor-service
+    url: grpc://executor:50058
+    routes:
+      - name: executor-route
+        paths:
+          - /v1/executor
+        protocols:
+          - http
+          - https
+    plugins:
+      - name: grpc-gateway
+        config:
+          proto: /kong/proto/executor.proto
+      - name: jwt
+        config:
+          key_claim_name: sub
+          claims_to_verify:
+            - exp
+          secret_is_base64: false
+      - name: request-transformer
+        config:
+          add:
+            headers:
+              - "X-User-Id:$(jwt.claims.sub)"
+
+  # =============================================================================
+  # Public Services (No Authentication Required)
+  # =============================================================================
+  # The following services are publicly accessible without JWT
+
+  # Auth Service (authentication endpoints)
+  # Provides login and token refresh functionality
+  # PUBLIC: No JWT required (users authenticate here to get JWT)
+  - name: auth-service
+    url: grpc://auth:50060
+    routes:
+      - name: auth-route
+        paths:
+          - /v1/auth
+        protocols:
+          - http
+          - https
+    plugins:
+      - name: grpc-gateway
+        config:
+          proto: /kong/proto/auth.proto
+      # No JWT plugin - public endpoint for login/refresh
 
 # Add services as they are implemented
 # See services/CLAUDE.md for gRPC service setup

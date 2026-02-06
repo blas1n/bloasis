@@ -134,6 +134,8 @@ services:
       KONG_ADMIN_ACCESS_LOG: /dev/stdout
       KONG_PROXY_ERROR_LOG: /dev/stderr
       KONG_ADMIN_ERROR_LOG: /dev/stderr
+      # JWT Secret for token verification (must match Auth Service JWT_SECRET_KEY)
+      KONG_JWT_SECRET: ${KONG_JWT_SECRET:-your_jwt_secret_key_here}
     volumes:
       - ../infra/kong:/kong
       - ../shared/proto:/kong/proto
