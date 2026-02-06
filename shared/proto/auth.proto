@@ -1,0 +1,95 @@
+// Auth Service - gRPC Protocol Buffer Definition
+// Handles JWT authentication, token validation, and refresh
+// Kong Gateway handles HTTP-to-gRPC transcoding via annotations
+
+syntax = "proto3";
+
+package bloasis.auth;
+
+import "google/api/annotations.proto";
+
+// AuthService provides JWT authentication and token management
+service AuthService {
+  // Login authenticates user credentials and returns JWT tokens
+  rpc Login(LoginRequest) returns (LoginResponse) {
+    option (google.api.http) = {
+      post: "/v1/auth/login"
+      body: "*"
+    };
+  }
+
+  // ValidateToken validates a JWT access token
+  rpc ValidateToken(ValidateTokenRequest) returns (ValidateTokenResponse) {
+    option (google.api.http) = {
+      post: "/v1/auth/validate"
+      body: "*"
+    };
+  }
+
+  // RefreshToken issues a new access token using a refresh token
+  rpc RefreshToken(RefreshTokenRequest) returns (RefreshTokenResponse) {
+    option (google.api.http) = {
+      post: "/v1/auth/refresh"
+      body: "*"
+    };
+  }
+
+  // Logout invalidates a refresh token
+  rpc Logout(LogoutRequest) returns (LogoutResponse) {
+    option (google.api.http) = {
+      post: "/v1/auth/logout"
+      body: "*"
+    };
+  }
+}
+
+// LoginRequest - request to authenticate user
+message LoginRequest {
+  string email = 1;     // User's email address
+  string password = 2;  // User's password (never logged)
+}
+
+// LoginResponse - response after authentication attempt
+message LoginResponse {
+  bool success = 1;           // Whether authentication was successful
+  string access_token = 2;    // JWT access token (short-lived)
+  string refresh_token = 3;   // JWT refresh token (long-lived)
+  int64 expires_in = 4;       // Access token expiry in seconds
+  string user_id = 5;         // User ID (only set if success=true)
+  string error_message = 6;   // Error message (only set if success=false)
+}
+
+// ValidateTokenRequest - request to validate a JWT token
+message ValidateTokenRequest {
+  string token = 1;  // JWT access token to validate
+}
+
+// ValidateTokenResponse - response with token validation result
+message ValidateTokenResponse {
+  bool valid = 1;           // Whether token is valid
+  string user_id = 2;       // User ID from token (only set if valid=true)
+  string error_message = 3; // Error message (only set if valid=false)
+}
+
+// RefreshTokenRequest - request to refresh access token
+message RefreshTokenRequest {
+  string refresh_token = 1;  // JWT refresh token
+}
+
+// RefreshTokenResponse - response with new access token
+message RefreshTokenResponse {
+  bool success = 1;         // Whether refresh was successful
+  string access_token = 2;  // New JWT access token
+  int64 expires_in = 3;     // New token expiry in seconds
+  string error_message = 4; // Error message (only set if success=false)
+}
+
+// LogoutRequest - request to invalidate refresh token
+message LogoutRequest {
+  string refresh_token = 1;  // JWT refresh token to invalidate
+}
+
+// LogoutResponse - response after logout
+message LogoutResponse {
+  bool success = 1;  // Whether logout was successful
+}
