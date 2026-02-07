@@ -6,22 +6,26 @@ _transform: true
 # Proto files are mounted at /kong/proto/ from shared/proto/
 
 # =============================================================================
-# JWT Consumer Configuration
+# JWT Consumer Configuration (RS256)
 # =============================================================================
-# JWT consumers are used to verify JWT tokens
-# The secret MUST match the JWT_SECRET_KEY used by the Auth Service
-# In production, use environment variable substitution or Kong Admin API
+# JWT consumers are used to verify JWT tokens using RS256 algorithm
+# The public key is extracted from the Auth Service's RSA key pair
+# Private key stays in Auth Service, public key is distributed to Kong
 
 consumers:
   - username: bloasis-jwt-consumer
     custom_id: jwt-auth-consumer
     jwt_secrets:
       - key: bloasis-jwt-issuer
-        algorithm: HS256
-        # IMPORTANT: This secret MUST match AUTH_SERVICE JWT_SECRET_KEY
-        # In production, configure via Kong Admin API or environment variable
-        # secret: ${KONG_JWT_SECRET}
-        secret: your_jwt_secret_key_here
+        algorithm: RS256
+        # RSA public key for token verification
+        # Generate using: ./scripts/generate_jwt_keys.sh
+        # Then copy contents of infra/keys/jwt-public.pem here
+        # IMPORTANT: In production, use environment variable or Kong Admin API
+        rsa_public_key: |
+          -----BEGIN PUBLIC KEY-----
+          REPLACE_WITH_PUBLIC_KEY_CONTENTS
+          -----END PUBLIC KEY-----
 
 # =============================================================================
 # Services Configuration
@@ -68,7 +72,7 @@ services:
           key_claim_name: sub
           claims_to_verify:
             - exp
-          secret_is_base64: false
+          # RS256 uses asymmetric keys (public key for verification)
       - name: request-transformer
         config:
           add:
@@ -109,7 +113,7 @@ services:
   # =============================================================================
   # Protected Services (JWT Required)
   # =============================================================================
-  # The following services require JWT authentication
+  # The following services require JWT authentication (RS256)
   # JWT token must be provided in Authorization header: Bearer <token>
   # After validation, X-User-Id header is set from JWT sub claim
 
@@ -134,7 +138,7 @@ services:
           key_claim_name: sub
           claims_to_verify:
             - exp
-          secret_is_base64: false
+          # RS256 uses asymmetric keys (public key for verification)
       - name: request-transformer
         config:
           add:
@@ -162,7 +166,7 @@ services:
           key_claim_name: sub
           claims_to_verify:
             - exp
-          secret_is_base64: false
+          # RS256 uses asymmetric keys (public key for verification)
       - name: request-transformer
         config:
           add:

@@ -81,13 +81,18 @@ package-lock.json
 # Secrets & Keys
 secrets/
 *.key
-*.pem
 *.p12
 *.pfx
 *.crt
 *.cer
 credentials.json
 service-account.json
+
+# JWT Keys (RS256)
+# Private key must NEVER be committed - keep in Auth Service only
+infra/keys/jwt-private.pem
+# Public key can be committed or distributed to Kong/other services
+# !infra/keys/jwt-public.pem
 
 # Database
 *.db

@@ -11,6 +11,13 @@ class ServiceConfig(BaseSettings):
     """Configuration for Auth Service.
 
     All settings can be overridden via environment variables.
+
+    JWT Algorithm Configuration:
+    - RS256 (default, recommended): Uses asymmetric RSA keys
+        - Set jwt_private_key_path for signing
+        - Set jwt_public_key_path for verification
+    - HS256 (legacy): Uses symmetric secret key
+        - Set jwt_secret_key for both signing and verification
     """
 
     model_config = SettingsConfigDict(
@@ -31,9 +38,16 @@ class ServiceConfig(BaseSettings):
     user_service_host: str = "localhost"
     user_service_port: int = 50058
 
-    # JWT configuration
-    jwt_secret_key: str = ""  # REQUIRED: Must be set via environment
-    jwt_algorithm: str = "HS256"
+    # JWT configuration - RS256 (default, recommended)
+    jwt_algorithm: str = "RS256"
+    jwt_private_key_path: str = "infra/keys/jwt-private.pem"
+    jwt_public_key_path: str = "infra/keys/jwt-public.pem"
+
+    # JWT configuration - HS256 (legacy support)
+    # If jwt_secret_key is set and jwt_algorithm is HS256, uses symmetric key
+    jwt_secret_key: str = ""
+
+    # Token expiry settings
     access_token_expire_minutes: int = 15
     refresh_token_expire_days: int = 7
 

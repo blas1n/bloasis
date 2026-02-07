@@ -19,7 +19,8 @@ class TestAuthServicerLogin:
     def jwt_handler(self) -> JWTHandler:
         """Create JWT handler for testing."""
         return JWTHandler(
-            secret_key="test-secret-key-for-testing",
+            secret_key="test-secret-key-for-jwt-testing-min-32-bytes",
+            algorithm="HS256",
             access_token_expire_minutes=15,
             refresh_token_expire_days=7,
         )
@@ -286,7 +287,7 @@ class TestAuthServicerValidateToken:
     @pytest.fixture
     def jwt_handler(self) -> JWTHandler:
         """Create JWT handler for testing."""
-        return JWTHandler(secret_key="test-secret-key-for-testing")
+        return JWTHandler(secret_key="test-secret-key-for-jwt-testing-min-32-bytes", algorithm="HS256")
 
     @pytest.fixture
     def mock_context(self) -> MagicMock:
@@ -379,7 +380,7 @@ class TestAuthServicerRefreshToken:
     @pytest.fixture
     def jwt_handler(self) -> JWTHandler:
         """Create JWT handler for testing."""
-        return JWTHandler(secret_key="test-secret-key-for-testing")
+        return JWTHandler(secret_key="test-secret-key-for-jwt-testing-min-32-bytes", algorithm="HS256")
 
     @pytest.fixture
     def mock_redis(self) -> AsyncMock:
@@ -562,7 +563,8 @@ class TestAuthServicerRefreshToken:
         # Create a different token by using a different user
         # but the request claims to be from user-123
         different_user_handler = JWTHandler(
-            secret_key="test-secret-key-for-testing",  # Same secret
+            secret_key="test-secret-key-for-jwt-testing-min-32-bytes",  # Same secret
+            algorithm="HS256",
         )
         different_token = different_user_handler.create_refresh_token(user_id="user-456")
         # But we'll check against user-123's stored token
@@ -611,7 +613,7 @@ class TestAuthServicerLogout:
     @pytest.fixture
     def jwt_handler(self) -> JWTHandler:
         """Create JWT handler for testing."""
-        return JWTHandler(secret_key="test-secret-key-for-testing")
+        return JWTHandler(secret_key="test-secret-key-for-jwt-testing-min-32-bytes", algorithm="HS256")
 
     @pytest.fixture
     def mock_redis(self) -> AsyncMock:
@@ -733,7 +735,7 @@ class TestServicerErrors:
     @pytest.fixture
     def jwt_handler(self) -> JWTHandler:
         """Create JWT handler for testing."""
-        return JWTHandler(secret_key="test-secret-key-for-testing")
+        return JWTHandler(secret_key="test-secret-key-for-jwt-testing-min-32-bytes", algorithm="HS256")
 
     @pytest.fixture
     def mock_context(self) -> MagicMock:
@@ -860,7 +862,7 @@ class TestMainModule:
             mock_config.service_name = "auth-test"
             mock_config.grpc_port = 50059
             mock_config.consul_enabled = False
-            mock_config.jwt_secret_key = "test-secret-key"
+            mock_config.jwt_secret_key = "test-secret-key-for-jwt-testing-min-32-bytes"
             mock_config.jwt_algorithm = "HS256"
             mock_config.access_token_expire_minutes = 15
             mock_config.refresh_token_expire_days = 7
@@ -900,16 +902,33 @@ class TestMainModule:
             # Verify health check was set up
             mock_health_servicer.set.assert_called()
 
-    @pytest.mark.asyncio
-    async def test_serve_requires_jwt_secret(self) -> None:
-        """Should raise error when JWT_SECRET_KEY is not set."""
+    def test_create_jwt_handler_requires_secret_for_hs256(self) -> None:
+        """Should raise error when JWT_SECRET_KEY is not set for HS256."""
         from unittest.mock import patch
 
         import src.main as main_module
 
         with patch.object(main_module, "config") as mock_config:
-            mock_config.service_name = "auth-test"
+            mock_config.jwt_algorithm = "HS256"
             mock_config.jwt_secret_key = ""
+            mock_config.access_token_expire_minutes = 15
+            mock_config.refresh_token_expire_days = 7
 
-            with pytest.raises(ValueError, match="JWT_SECRET_KEY environment variable is required"):
-                await main_module.serve()
+            with pytest.raises(ValueError, match="JWT_SECRET_KEY is required"):
+                main_module.create_jwt_handler()
+
+    def test_create_jwt_handler_requires_keys_for_rs256(self) -> None:
+        """Should raise error when key paths are not set for RS256."""
+        from unittest.mock import patch
+
+        import src.main as main_module
+
+        with patch.object(main_module, "config") as mock_config:
+            mock_config.jwt_algorithm = "RS256"
+            mock_config.jwt_private_key_path = ""
+            mock_config.jwt_public_key_path = ""
+            mock_config.access_token_expire_minutes = 15
+            mock_config.refresh_token_expire_days = 7
+
+            with pytest.raises(ValueError, match="RS256 algorithm requires"):
+                main_module.create_jwt_handler()
