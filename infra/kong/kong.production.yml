@@ -1,0 +1,434 @@
+_format_version: "3.0"
+_transform: true
+
+# =============================================================================
+# Kong Gateway Production Configuration for BLOASIS
+# =============================================================================
+# gRPC-to-REST transcoding via grpc-gateway plugin
+# JWT authentication (RS256) for protected routes
+# Rate limiting per route type
+# Request logging with correlation ID
+#
+# Proto files are mounted at /kong/proto/ from shared/proto/
+# =============================================================================
+
+# =============================================================================
+# JWT Consumer Configuration (RS256)
+# =============================================================================
+# JWT consumers verify tokens using RS256 algorithm
+# The public key is extracted from the Auth Service's RSA key pair
+# Private key stays in Auth Service, public key is distributed to Kong
+#
+# Generate keys using: ./scripts/generate_jwt_keys.sh
+# Then update rsa_public_key below or use environment variable
+# =============================================================================
+
+consumers:
+  - username: bloasis-jwt-consumer
+    custom_id: jwt-auth-consumer
+    jwt_secrets:
+      - key: bloasis-jwt-issuer
+        algorithm: RS256
+        # RSA public key for token verification
+        # IMPORTANT: In production, use environment variable or secrets manager
+        # This placeholder should be replaced by your deployment process
+        rsa_public_key: |
+          -----BEGIN PUBLIC KEY-----
+          REPLACE_WITH_PUBLIC_KEY_CONTENTS
+          -----END PUBLIC KEY-----
+
+# =============================================================================
+# Global Plugins
+# =============================================================================
+# Applied to all routes unless specifically excluded
+
+plugins:
+  # File logging - log all requests to stdout for container environments
+  - name: file-log
+    config:
+      path: /dev/stdout
+      reopen: false
+
+  # Correlation ID - add unique ID for request tracing
+  - name: correlation-id
+    config:
+      header_name: X-Correlation-ID
+      generator: uuid
+      echo_downstream: true
+
+# =============================================================================
+# Services Configuration
+# =============================================================================
+
+services:
+  # ===========================================================================
+  # Health Check (Public - No Auth)
+  # ===========================================================================
+  # Simple health endpoint for load balancers and monitoring
+  # No rate limiting - health checks should always succeed
+
+  - name: health-check
+    url: http://127.0.0.1:8001/status
+    routes:
+      - name: health-route
+        paths:
+          - /health
+          - /ready
+        protocols:
+          - http
+          - https
+        strip_path: true
+
+  # ===========================================================================
+  # Auth Service (Public - Rate Limited for Brute Force Protection)
+  # ===========================================================================
+  # Provides login and token refresh functionality
+  # PUBLIC: No JWT required (users authenticate here to get JWT)
+  # Rate limited to 20 req/min to prevent brute force attacks
+
+  - name: auth-service
+    url: grpc://auth:50062
+    routes:
+      - name: auth-route
+        paths:
+          - /v1/auth
+        protocols:
+          - http
+          - https
+    plugins:
+      - name: grpc-gateway
+        config:
+          proto: /kong/proto/auth.proto
+      # Rate limiting for auth endpoints - prevent brute force
+      - name: rate-limiting
+        config:
+          minute: 20
+          policy: local
+          fault_tolerant: true
+          hide_client_headers: false
+          error_code: 429
+          error_message: "Rate limit exceeded for authentication. Please try again later."
+
+  # ===========================================================================
+  # User Service (Protected - JWT Required)
+  # ===========================================================================
+  # Manages user profiles and trading preferences
+  # PROTECTED: Requires valid JWT token
+  # Rate limited to 100 req/min per consumer
+
+  - name: user-service
+    url: grpc://user:50061
+    routes:
+      - name: user-route
+        paths:
+          - /v1/users
+        protocols:
+          - http
+          - https
+    plugins:
+      - name: grpc-gateway
+        config:
+          proto: /kong/proto/user.proto
+      # JWT authentication - RS256
+      - name: jwt
+        config:
+          key_claim_name: sub
+          claims_to_verify:
+            - exp
+      # Extract user_id from JWT claims
+      - name: request-transformer
+        config:
+          add:
+            headers:
+              - "X-User-Id:$(jwt.claims.sub)"
+      # Rate limiting for user endpoints
+      - name: rate-limiting
+        config:
+          minute: 100
+          policy: local
+          fault_tolerant: true
+          hide_client_headers: false
+          error_code: 429
+          error_message: "Rate limit exceeded for user operations."
+
+  # ===========================================================================
+  # Strategy Service (Protected - JWT Required)
+  # ===========================================================================
+  # Provides strategy recommendations and customization
+  # PROTECTED: Requires JWT authentication
+  # Rate limited to 50 req/min (strategy generation is expensive)
+
+  - name: strategy-service
+    url: grpc://strategy:50054
+    routes:
+      - name: strategy-route
+        paths:
+          - /v1/strategy
+        protocols:
+          - http
+          - https
+    plugins:
+      - name: grpc-gateway
+        config:
+          proto: /kong/proto/strategy.proto
+      # JWT authentication - RS256
+      - name: jwt
+        config:
+          key_claim_name: sub
+          claims_to_verify:
+            - exp
+      # Extract user_id from JWT claims
+      - name: request-transformer
+        config:
+          add:
+            headers:
+              - "X-User-Id:$(jwt.claims.sub)"
+      # Rate limiting for strategy endpoints (expensive AI operations)
+      - name: rate-limiting
+        config:
+          minute: 50
+          policy: local
+          fault_tolerant: true
+          hide_client_headers: false
+          error_code: 429
+          error_message: "Rate limit exceeded for strategy operations."
+
+  # ===========================================================================
+  # Market Data Service (Protected - JWT Required)
+  # ===========================================================================
+  # Provides stock market data (OHLCV, metadata) via yfinance
+  # Cached for 5 minutes to balance freshness with API rate limits
+  # Rate limited to 200 req/min (high frequency data access)
+
+  - name: market-data-service
+    url: grpc://market-data:50052
+    routes:
+      - name: market-data-route
+        paths:
+          - /v1/market-data
+        protocols:
+          - http
+          - https
+    plugins:
+      - name: grpc-gateway
+        config:
+          proto: /kong/proto/market_data.proto
+      # JWT authentication - RS256
+      - name: jwt
+        config:
+          key_claim_name: sub
+          claims_to_verify:
+            - exp
+      # Extract user_id from JWT claims
+      - name: request-transformer
+        config:
+          add:
+            headers:
+              - "X-User-Id:$(jwt.claims.sub)"
+      # Rate limiting for market data (high volume allowed)
+      - name: rate-limiting
+        config:
+          minute: 200
+          policy: local
+          fault_tolerant: true
+          hide_client_headers: false
+          error_code: 429
+          error_message: "Rate limit exceeded for market data requests."
+
+  # ===========================================================================
+  # Portfolio Service (Protected - JWT Required)
+  # ===========================================================================
+  # Provides portfolio summary and position management
+  # User-specific data with 1-hour cache TTL
+  # Rate limited to 100 req/min
+
+  - name: portfolio-service
+    url: grpc://portfolio:50059
+    routes:
+      - name: portfolio-route
+        paths:
+          - /v1/portfolio
+        protocols:
+          - http
+          - https
+    plugins:
+      - name: grpc-gateway
+        config:
+          proto: /kong/proto/portfolio.proto
+      # JWT authentication - RS256
+      - name: jwt
+        config:
+          key_claim_name: sub
+          claims_to_verify:
+            - exp
+      # Extract user_id from JWT claims
+      - name: request-transformer
+        config:
+          add:
+            headers:
+              - "X-User-Id:$(jwt.claims.sub)"
+      # Rate limiting for portfolio endpoints
+      - name: rate-limiting
+        config:
+          minute: 100
+          policy: local
+          fault_tolerant: true
+          hide_client_headers: false
+          error_code: 429
+          error_message: "Rate limit exceeded for portfolio operations."
+
+  # ===========================================================================
+  # Notification WebSocket Service (Protected - JWT Required)
+  # ===========================================================================
+  # Provides real-time notifications via WebSocket
+  # WebSocket Upgrade headers are passed through Kong
+  # Rate limited to 100 req/min (connection establishment)
+
+  - name: notification-ws
+    url: http://notification:8000
+    routes:
+      - name: notification-ws-route
+        paths:
+          - /ws
+        protocols:
+          - http
+          - https
+        strip_path: false
+    plugins:
+      # JWT authentication for WebSocket connections
+      - name: jwt
+        config:
+          key_claim_name: sub
+          claims_to_verify:
+            - exp
+      # Extract user_id from JWT claims
+      - name: request-transformer
+        config:
+          add:
+            headers:
+              - "X-User-Id:$(jwt.claims.sub)"
+      # Rate limiting for WebSocket connections
+      - name: rate-limiting
+        config:
+          minute: 100
+          policy: local
+          fault_tolerant: true
+          hide_client_headers: false
+          error_code: 429
+          error_message: "Rate limit exceeded for WebSocket connections."
+
+  # ===========================================================================
+  # Market Regime Service (Protected - JWT Required)
+  # ===========================================================================
+  # Provides market regime classification (crisis, bear, bull, sideways, recovery)
+  # Tier 1 shared data - cached for 6 hours
+  # Rate limited to 100 req/min
+
+  - name: market-regime-service
+    url: grpc://market-regime:50051
+    routes:
+      - name: market-regime-route
+        paths:
+          - /v1/market-regime
+        protocols:
+          - http
+          - https
+    plugins:
+      - name: grpc-gateway
+        config:
+          proto: /kong/proto/market_regime.proto
+      # JWT authentication - RS256
+      - name: jwt
+        config:
+          key_claim_name: sub
+          claims_to_verify:
+            - exp
+      # Extract user_id from JWT claims
+      - name: request-transformer
+        config:
+          add:
+            headers:
+              - "X-User-Id:$(jwt.claims.sub)"
+      # Rate limiting for market regime endpoints
+      - name: rate-limiting
+        config:
+          minute: 100
+          policy: local
+          fault_tolerant: true
+          hide_client_headers: false
+          error_code: 429
+          error_message: "Rate limit exceeded for market regime requests."
+
+  # ===========================================================================
+  # Executor Service (Protected - JWT Required)
+  # ===========================================================================
+  # Provides order execution via Alpaca paper trading
+  # PROTECTED: Requires JWT authentication
+  # Rate limited to 50 req/min (trade execution is sensitive)
+
+  - name: executor-service
+    url: grpc://executor:50058
+    routes:
+      - name: executor-route
+        paths:
+          - /v1/executor
+        protocols:
+          - http
+          - https
+    plugins:
+      - name: grpc-gateway
+        config:
+          proto: /kong/proto/executor.proto
+      # JWT authentication - RS256
+      - name: jwt
+        config:
+          key_claim_name: sub
+          claims_to_verify:
+            - exp
+      # Extract user_id from JWT claims
+      - name: request-transformer
+        config:
+          add:
+            headers:
+              - "X-User-Id:$(jwt.claims.sub)"
+      # Rate limiting for executor (sensitive trading operations)
+      - name: rate-limiting
+        config:
+          minute: 50
+          policy: local
+          fault_tolerant: true
+          hide_client_headers: false
+          error_code: 429
+          error_message: "Rate limit exceeded for trade execution."
+
+# =============================================================================
+# Additional Notes
+# =============================================================================
+#
+# 1. JWT Token Format:
+#    Authorization: Bearer <jwt_token>
+#
+# 2. JWT Claims Required:
+#    - sub: User ID
+#    - exp: Expiration timestamp
+#    - iss: bloasis-jwt-issuer (must match consumer key)
+#
+# 3. Rate Limiting Summary:
+#    - Auth routes: 20 req/min (brute force protection)
+#    - Strategy routes: 50 req/min (expensive AI operations)
+#    - Executor routes: 50 req/min (sensitive trading)
+#    - User routes: 100 req/min
+#    - Portfolio routes: 100 req/min
+#    - Market regime routes: 100 req/min
+#    - WebSocket routes: 100 req/min
+#    - Market data routes: 200 req/min (high frequency)
+#
+# 4. Headers Added by Kong:
+#    - X-User-Id: Extracted from JWT sub claim
+#    - X-Correlation-ID: Unique request ID for tracing
+#
+# 5. Proto File Mounting:
+#    Proto files should be mounted from shared/proto/ to /kong/proto/
+#    in the Kong container via docker-compose volumes
+#
+# =============================================================================
