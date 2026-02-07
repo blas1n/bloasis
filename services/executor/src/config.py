@@ -1,10 +1,15 @@
 """Configuration for Executor Service."""
 
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     """Service configuration loaded from environment."""
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        extra="ignore",
+    )
 
     # Service settings
     service_name: str = "executor"
@@ -25,12 +30,6 @@ class Settings(BaseSettings):
     # Consul Service Discovery
     consul_host: str = "consul"
     consul_port: int = 8500
-
-    class Config:
-        """Pydantic config."""
-
-        env_file = ".env"
-        extra = "ignore"
 
 
 config = Settings()

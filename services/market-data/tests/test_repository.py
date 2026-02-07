@@ -267,3 +267,238 @@ class TestMarketDataRepository:
         symbols, total = await repository.list_symbols(sector="Technology", limit=50)
         assert symbols == ["AAPL", "MSFT", "GOOGL"]
         assert total == 5
+
+
+class TestRepositoryNullPostgres:
+    """Tests for repository when postgres is None (edge cases)."""
+
+    @pytest.fixture
+    def mock_session(self) -> AsyncMock:
+        """Create a mock SQLAlchemy async session."""
+        session = AsyncMock()
+        session.execute = AsyncMock()
+        return session
+
+    @pytest.fixture
+    def null_postgres_repository(self) -> MarketDataRepository:
+        """Create a repository with None postgres client."""
+        # Create a repository and manually set postgres to None for edge case testing
+        mock = MagicMock()
+        mock.get_session = MagicMock(return_value=MockSessionContext(AsyncMock()))
+        repo = MarketDataRepository(mock)
+        repo.postgres = None
+        return repo
+
+    @pytest.mark.asyncio
+    async def test_get_ohlcv_no_postgres(
+        self, null_postgres_repository: MarketDataRepository
+    ) -> None:
+        """Test get_ohlcv returns empty DataFrame when postgres is None."""
+        result = await null_postgres_repository.get_ohlcv("AAPL", "1d")
+        assert isinstance(result, pd.DataFrame)
+        assert result.empty
+
+    @pytest.mark.asyncio
+    async def test_get_latest_ohlcv_time_no_postgres(
+        self, null_postgres_repository: MarketDataRepository
+    ) -> None:
+        """Test get_latest_ohlcv_time returns None when postgres is None."""
+        result = await null_postgres_repository.get_latest_ohlcv_time("AAPL", "1d")
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_save_stock_info_no_postgres(
+        self, null_postgres_repository: MarketDataRepository
+    ) -> None:
+        """Test save_stock_info returns False when postgres is None."""
+        result = await null_postgres_repository.save_stock_info(
+            "AAPL", {"symbol": "AAPL"}
+        )
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_get_stock_info_no_postgres(
+        self, null_postgres_repository: MarketDataRepository
+    ) -> None:
+        """Test get_stock_info returns None when postgres is None."""
+        result = await null_postgres_repository.get_stock_info("AAPL")
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_get_symbols_by_sector_no_postgres(
+        self, null_postgres_repository: MarketDataRepository
+    ) -> None:
+        """Test get_symbols_by_sector returns empty list when postgres is None."""
+        result = await null_postgres_repository.get_symbols_by_sector("Technology")
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_list_symbols_no_postgres(
+        self, null_postgres_repository: MarketDataRepository
+    ) -> None:
+        """Test list_symbols returns empty list and 0 when postgres is None."""
+        symbols, total = await null_postgres_repository.list_symbols()
+        assert symbols == []
+        assert total == 0
+
+
+class TestSaveOHLCVEdgeCases:
+    """Tests for save_ohlcv edge cases."""
+
+    @pytest.fixture
+    def mock_session(self) -> AsyncMock:
+        """Create a mock SQLAlchemy async session."""
+        session = AsyncMock()
+        session.execute = AsyncMock()
+        return session
+
+    @pytest.fixture
+    def mock_postgres(self, mock_session: AsyncMock) -> MagicMock:
+        """Create a mock PostgresClient with session context manager."""
+        mock = MagicMock()
+        mock.get_session = MagicMock(return_value=MockSessionContext(mock_session))
+        return mock
+
+    @pytest.fixture
+    def repository(self, mock_postgres: MagicMock) -> MarketDataRepository:
+        """Create a repository with mocked PostgresClient."""
+        return MarketDataRepository(mock_postgres)
+
+    @pytest.mark.asyncio
+    async def test_save_ohlcv_with_date_column(
+        self, repository: MarketDataRepository, mock_session: AsyncMock
+    ) -> None:
+        """Test saving OHLCV data with 'date' column instead of 'timestamp'."""
+        df = pd.DataFrame(
+            {
+                "date": [datetime(2024, 1, 1), datetime(2024, 1, 2)],
+                "open": [100.0, 101.0],
+                "high": [105.0, 106.0],
+                "low": [99.0, 100.0],
+                "close": [104.0, 105.0],
+                "volume": [1000000, 1100000],
+            }
+        )
+
+        result = await repository.save_ohlcv("AAPL", "1d", df)
+        assert result == 2
+
+    @pytest.mark.asyncio
+    async def test_save_ohlcv_with_time_column(
+        self, repository: MarketDataRepository, mock_session: AsyncMock
+    ) -> None:
+        """Test saving OHLCV data with 'time' column instead of 'timestamp'."""
+        df = pd.DataFrame(
+            {
+                "time": [datetime(2024, 1, 1), datetime(2024, 1, 2)],
+                "open": [100.0, 101.0],
+                "high": [105.0, 106.0],
+                "low": [99.0, 100.0],
+                "close": [104.0, 105.0],
+                "volume": [1000000, 1100000],
+            }
+        )
+
+        result = await repository.save_ohlcv("AAPL", "1d", df)
+        assert result == 2
+
+    @pytest.mark.asyncio
+    async def test_save_ohlcv_no_timestamp_column(
+        self, repository: MarketDataRepository, mock_session: AsyncMock
+    ) -> None:
+        """Test saving OHLCV data with missing timestamp column skips rows."""
+        df = pd.DataFrame(
+            {
+                "open": [100.0, 101.0],
+                "high": [105.0, 106.0],
+                "low": [99.0, 100.0],
+                "close": [104.0, 105.0],
+                "volume": [1000000, 1100000],
+            }
+        )
+
+        result = await repository.save_ohlcv("AAPL", "1d", df)
+        # Rows without timestamp are skipped
+        assert result == 0
+
+    @pytest.mark.asyncio
+    async def test_save_ohlcv_string_timestamp(
+        self, repository: MarketDataRepository, mock_session: AsyncMock
+    ) -> None:
+        """Test saving OHLCV data with string timestamps."""
+        df = pd.DataFrame(
+            {
+                "timestamp": ["2024-01-01", "2024-01-02"],
+                "open": [100.0, 101.0],
+                "high": [105.0, 106.0],
+                "low": [99.0, 100.0],
+                "close": [104.0, 105.0],
+                "volume": [1000000, 1100000],
+            }
+        )
+
+        result = await repository.save_ohlcv("AAPL", "1d", df)
+        assert result == 2
+
+    @pytest.mark.asyncio
+    async def test_save_ohlcv_lowercase_symbol(
+        self, repository: MarketDataRepository, mock_session: AsyncMock
+    ) -> None:
+        """Test saving OHLCV data converts symbol to uppercase."""
+        df = pd.DataFrame(
+            {
+                "timestamp": [datetime(2024, 1, 1)],
+                "open": [100.0],
+                "high": [105.0],
+                "low": [99.0],
+                "close": [104.0],
+                "volume": [1000000],
+            }
+        )
+
+        result = await repository.save_ohlcv("aapl", "1d", df)
+        assert result == 1
+        # Verify insert was called with uppercase symbol
+        mock_session.execute.assert_called_once()
+
+
+class TestListSymbolsEdgeCases:
+    """Tests for list_symbols edge cases."""
+
+    @pytest.fixture
+    def mock_session(self) -> AsyncMock:
+        """Create a mock SQLAlchemy async session."""
+        session = AsyncMock()
+        session.execute = AsyncMock()
+        return session
+
+    @pytest.fixture
+    def mock_postgres(self, mock_session: AsyncMock) -> MagicMock:
+        """Create a mock PostgresClient with session context manager."""
+        mock = MagicMock()
+        mock.get_session = MagicMock(return_value=MockSessionContext(mock_session))
+        return mock
+
+    @pytest.fixture
+    def repository(self, mock_postgres: MagicMock) -> MarketDataRepository:
+        """Create a repository with mocked PostgresClient."""
+        return MarketDataRepository(mock_postgres)
+
+    @pytest.mark.asyncio
+    async def test_list_symbols_null_count(
+        self, repository: MarketDataRepository, mock_session: AsyncMock
+    ) -> None:
+        """Test list_symbols handles null count from database."""
+        # First call: count query returns None
+        mock_count_result = MagicMock()
+        mock_count_result.scalar.return_value = None
+
+        # Second call: symbols query
+        mock_symbols_result = MagicMock()
+        mock_symbols_result.all.return_value = []
+
+        mock_session.execute.side_effect = [mock_count_result, mock_symbols_result]
+
+        symbols, total = await repository.list_symbols()
+        assert symbols == []
+        assert total == 0

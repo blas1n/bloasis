@@ -1,10 +1,15 @@
 """Configuration for Risk Committee Service."""
 
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     """Service configuration loaded from environment."""
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        extra="ignore",
+    )
 
     # Service settings
     service_name: str = "risk-committee"
@@ -33,12 +38,6 @@ class Settings(BaseSettings):
     # VIX thresholds
     vix_high_threshold: float = 30.0
     vix_extreme_threshold: float = 40.0
-
-    class Config:
-        """Pydantic config."""
-
-        env_file = ".env"
-        extra = "ignore"
 
 
 config = Settings()

@@ -1,9 +1,9 @@
 """Tests for gRPC clients."""
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import grpc
+import pytest
 
 
 class TestClassificationClient:
