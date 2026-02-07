@@ -32,6 +32,7 @@ def wait_for_redpanda(timeout: int = 30) -> bool:
     Returns:
         True if Redpanda is ready, False otherwise.
     """
+
     async def check():
         try:
             admin = AIOKafkaAdminClient(bootstrap_servers=REDPANDA_BROKERS)
@@ -124,9 +125,7 @@ class TestEventPublishing:
     """Test event publishing to Redpanda."""
 
     @pytest.mark.asyncio
-    async def test_publish_to_regime_events(
-        self, producer: AIOKafkaProducer
-    ) -> None:
+    async def test_publish_to_regime_events(self, producer: AIOKafkaProducer) -> None:
         """Test publishing event to regime-events topic."""
         event = {
             "event_id": "test-123",
@@ -145,9 +144,7 @@ class TestEventPublishing:
         assert result.topic == "regime-events", "Should publish to correct topic"
 
     @pytest.mark.asyncio
-    async def test_publish_to_alert_events(
-        self, producer: AIOKafkaProducer
-    ) -> None:
+    async def test_publish_to_alert_events(self, producer: AIOKafkaProducer) -> None:
         """Test publishing event to alert-events topic."""
         event = {
             "event_id": "alert-456",
@@ -165,9 +162,7 @@ class TestEventPublishing:
         assert result.topic == "alert-events", "Should publish to correct topic"
 
     @pytest.mark.asyncio
-    async def test_publish_with_partition_key(
-        self, producer: AIOKafkaProducer
-    ) -> None:
+    async def test_publish_with_partition_key(self, producer: AIOKafkaProducer) -> None:
         """Test publishing with partition key for priority routing."""
         event = {
             "event_id": "critical-789",
@@ -235,9 +230,7 @@ class TestEventPriority:
     """Test event priority routing."""
 
     @pytest.mark.asyncio
-    async def test_priority_partitioning(
-        self, producer: AIOKafkaProducer
-    ) -> None:
+    async def test_priority_partitioning(self, producer: AIOKafkaProducer) -> None:
         """Test events with same priority go to same partition."""
         # Publish multiple HIGH priority events
         high_priority_events = []

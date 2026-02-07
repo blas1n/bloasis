@@ -41,6 +41,7 @@ def market_regime_stub(grpc_channel: grpc.Channel):
     # Import here to avoid issues if proto not generated
     try:
         from shared.generated import market_regime_pb2_grpc
+
         return market_regime_pb2_grpc.MarketRegimeServiceStub(grpc_channel)
     except ImportError:
         pytest.skip("Proto files not generated - run 'buf generate'")
@@ -60,9 +61,9 @@ class TestMarketRegimeGrpc:
 
         # Verify response has required fields
         assert response.regime, "Response should have a regime"
-        assert response.regime in [
-            "crisis", "bear", "bull", "sideways", "recovery"
-        ], f"Regime '{response.regime}' should be valid"
+        assert response.regime in ["crisis", "bear", "bull", "sideways", "recovery"], (
+            f"Regime '{response.regime}' should be valid"
+        )
 
         assert 0.0 <= response.confidence <= 1.0, (
             f"Confidence {response.confidence} should be between 0 and 1"
@@ -70,9 +71,7 @@ class TestMarketRegimeGrpc:
 
         assert response.timestamp, "Response should have a timestamp"
 
-    def test_get_current_regime_with_force_refresh(
-        self, market_regime_stub
-    ) -> None:
+    def test_get_current_regime_with_force_refresh(self, market_regime_stub) -> None:
         """Test GetCurrentRegime with force_refresh bypasses cache."""
         from shared.generated import market_regime_pb2
 
@@ -83,9 +82,7 @@ class TestMarketRegimeGrpc:
         assert response.regime, "Response should have a regime"
         assert response.confidence > 0, "Should have positive confidence"
 
-    def test_get_regime_history_returns_data(
-        self, market_regime_stub
-    ) -> None:
+    def test_get_regime_history_returns_data(self, market_regime_stub) -> None:
         """Test GetRegimeHistory returns historical regime data."""
         from shared.generated import market_regime_pb2, common_pb2
 
@@ -109,9 +106,7 @@ class TestMarketRegimeGrpc:
                 pytest.skip("Database table not set up in test environment")
             raise
 
-    def test_save_regime_persists_data(
-        self, market_regime_stub
-    ) -> None:
+    def test_save_regime_persists_data(self, market_regime_stub) -> None:
         """Test SaveRegime persists regime classification."""
         from shared.generated import market_regime_pb2
 
@@ -129,9 +124,7 @@ class TestMarketRegimeGrpc:
         assert response.regime.regime == "bull", "Saved regime should match"
         assert response.regime.confidence == 0.85, "Saved confidence should match"
 
-    def test_save_regime_validates_invalid_regime(
-        self, market_regime_stub
-    ) -> None:
+    def test_save_regime_validates_invalid_regime(self, market_regime_stub) -> None:
         """Test SaveRegime rejects invalid regime values."""
         from shared.generated import market_regime_pb2
 
@@ -145,9 +138,7 @@ class TestMarketRegimeGrpc:
 
         assert exc_info.value.code() == grpc.StatusCode.INVALID_ARGUMENT
 
-    def test_save_regime_validates_confidence_range(
-        self, market_regime_stub
-    ) -> None:
+    def test_save_regime_validates_confidence_range(self, market_regime_stub) -> None:
         """Test SaveRegime rejects out-of-range confidence values."""
         from shared.generated import market_regime_pb2
 
@@ -200,9 +191,7 @@ class TestMarketRegimeHealthCheck:
 class TestMarketRegimeCaching:
     """E2E tests for Redis caching behavior."""
 
-    def test_cached_response_is_consistent(
-        self, market_regime_stub
-    ) -> None:
+    def test_cached_response_is_consistent(self, market_regime_stub) -> None:
         """Test consecutive requests return consistent cached data."""
         from shared.generated import market_regime_pb2
 
@@ -216,12 +205,14 @@ class TestMarketRegimeCaching:
 
         # Responses should be identical (from cache)
         assert response1.regime == response2.regime, "Cached regime should match"
-        assert response1.confidence == response2.confidence, "Cached confidence should match"
-        assert response1.timestamp == response2.timestamp, "Cached timestamp should match"
+        assert response1.confidence == response2.confidence, (
+            "Cached confidence should match"
+        )
+        assert response1.timestamp == response2.timestamp, (
+            "Cached timestamp should match"
+        )
 
-    def test_force_refresh_updates_timestamp(
-        self, market_regime_stub
-    ) -> None:
+    def test_force_refresh_updates_timestamp(self, market_regime_stub) -> None:
         """Test force_refresh may update the timestamp."""
         from shared.generated import market_regime_pb2
 

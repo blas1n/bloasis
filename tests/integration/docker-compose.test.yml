@@ -1,0 +1,379 @@
+version: "3.8"
+
+# E2E Integration Test Docker Compose Configuration
+# This file defines the test environment for running integration tests
+# Run with: docker-compose -f tests/integration/docker-compose.test.yml up -d
+
+services:
+  # ============================================================================
+  # Infrastructure Services
+  # ============================================================================
+
+  postgres:
+    image: timescale/timescaledb:latest-pg16
+    container_name: test-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: bloasis_test
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - test-postgres-data:/var/lib/postgresql/data
+      - ../../infra/postgres:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d bloasis_test"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - test-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: test-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - test-network
+
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:v24.1.1
+    container_name: test-redpanda
+    restart: unless-stopped
+    command:
+      - redpanda
+      - start
+      - --kafka-addr internal://0.0.0.0:9092
+      - --advertise-kafka-addr internal://redpanda:9092
+      - --pandaproxy-addr internal://0.0.0.0:8082
+      - --advertise-pandaproxy-addr internal://redpanda:8082
+      - --schema-registry-addr internal://0.0.0.0:8081
+      - --rpc-addr redpanda:33145
+      - --advertise-rpc-addr redpanda:33145
+      - --mode dev-container
+      - --smp 1
+      - --memory 512M
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -E 'Healthy:.+true' || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    networks:
+      - test-network
+
+  consul:
+    image: hashicorp/consul:1.18
+    container_name: test-consul
+    restart: unless-stopped
+    command: agent -dev -ui -client=0.0.0.0
+    healthcheck:
+      test: ["CMD", "consul", "members"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - test-network
+
+  # ============================================================================
+  # Core Services
+  # ============================================================================
+
+  market-regime:
+    build:
+      context: ../..
+      dockerfile: .devcontainer/Dockerfile
+    container_name: test-market-regime
+    working_dir: /workspace
+    command: python -m services.market_regime.src.main
+    environment:
+      - SERVICE_NAME=market-regime
+      - GRPC_PORT=50051
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDPANDA_BROKERS=redpanda:9092
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/bloasis_test
+      - FINGPT_API_KEY=${FINGPT_API_KEY:-mock_key}
+      - PYTHONPATH=/workspace
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "grpc_health_probe", "-addr=:50051"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - test-network
+
+  market-data:
+    build:
+      context: ../..
+      dockerfile: .devcontainer/Dockerfile
+    container_name: test-market-data
+    working_dir: /workspace
+    command: python -m services.market_data.src.main
+    environment:
+      - SERVICE_NAME=market-data
+      - GRPC_PORT=50052
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/bloasis_test
+      - PYTHONPATH=/workspace
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "grpc_health_probe", "-addr=:50052"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - test-network
+
+  strategy:
+    build:
+      context: ../..
+      dockerfile: .devcontainer/Dockerfile
+    container_name: test-strategy
+    working_dir: /workspace
+    command: python -m services.strategy.src.main
+    environment:
+      - SERVICE_NAME=strategy
+      - GRPC_PORT=50054
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDPANDA_BROKERS=redpanda:9092
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/bloasis_test
+      - MARKET_REGIME_HOST=market-regime
+      - MARKET_REGIME_PORT=50051
+      - PYTHONPATH=/workspace
+    depends_on:
+      - market-regime
+      - redis
+    healthcheck:
+      test: ["CMD", "grpc_health_probe", "-addr=:50054"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - test-network
+
+  backtesting:
+    build:
+      context: ../..
+      dockerfile: .devcontainer/Dockerfile
+    container_name: test-backtesting
+    working_dir: /workspace
+    command: python -m services.backtesting.src.main
+    environment:
+      - SERVICE_NAME=backtesting
+      - GRPC_PORT=50055
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/bloasis_test
+      - MARKET_DATA_HOST=market-data
+      - MARKET_DATA_PORT=50052
+      - PYTHONPATH=/workspace
+    depends_on:
+      - market-data
+      - redis
+    healthcheck:
+      test: ["CMD", "grpc_health_probe", "-addr=:50055"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - test-network
+
+  risk-committee:
+    build:
+      context: ../..
+      dockerfile: .devcontainer/Dockerfile
+    container_name: test-risk-committee
+    working_dir: /workspace
+    command: python -m services.risk_committee.src.main
+    environment:
+      - SERVICE_NAME=risk-committee
+      - GRPC_PORT=50057
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDPANDA_BROKERS=redpanda:9092
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/bloasis_test
+      - MARKET_DATA_HOST=market-data
+      - MARKET_DATA_PORT=50052
+      - PORTFOLIO_HOST=portfolio
+      - PORTFOLIO_PORT=50059
+      - PYTHONPATH=/workspace
+    depends_on:
+      - market-data
+      - portfolio
+      - redis
+    healthcheck:
+      test: ["CMD", "grpc_health_probe", "-addr=:50057"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - test-network
+
+  executor:
+    build:
+      context: ../..
+      dockerfile: .devcontainer/Dockerfile
+    container_name: test-executor
+    working_dir: /workspace
+    command: python -m services.executor.src.main
+    environment:
+      - SERVICE_NAME=executor
+      - GRPC_PORT=50058
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDPANDA_BROKERS=redpanda:9092
+      - ALPACA_API_KEY=${ALPACA_API_KEY:-mock_key}
+      - ALPACA_SECRET_KEY=${ALPACA_SECRET_KEY:-mock_secret}
+      - ALPACA_BASE_URL=https://paper-api.alpaca.markets
+      - RISK_COMMITTEE_HOST=risk-committee
+      - RISK_COMMITTEE_PORT=50057
+      - PYTHONPATH=/workspace
+    depends_on:
+      - risk-committee
+      - redis
+    healthcheck:
+      test: ["CMD", "grpc_health_probe", "-addr=:50058"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - test-network
+
+  portfolio:
+    build:
+      context: ../..
+      dockerfile: .devcontainer/Dockerfile
+    container_name: test-portfolio
+    working_dir: /workspace
+    command: python -m services.portfolio.src.main
+    environment:
+      - SERVICE_NAME=portfolio
+      - GRPC_PORT=50059
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDPANDA_BROKERS=redpanda:9092
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/bloasis_test
+      - ALPACA_API_KEY=${ALPACA_API_KEY:-mock_key}
+      - ALPACA_SECRET_KEY=${ALPACA_SECRET_KEY:-mock_secret}
+      - PYTHONPATH=/workspace
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "grpc_health_probe", "-addr=:50059"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - test-network
+
+  user:
+    build:
+      context: ../..
+      dockerfile: .devcontainer/Dockerfile
+    container_name: test-user
+    working_dir: /workspace
+    command: python -m services.user.src.main
+    environment:
+      - SERVICE_NAME=user
+      - GRPC_PORT=50061
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/bloasis_test
+      - PYTHONPATH=/workspace
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "grpc_health_probe", "-addr=:50061"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - test-network
+
+  auth:
+    build:
+      context: ../..
+      dockerfile: .devcontainer/Dockerfile
+    container_name: test-auth
+    working_dir: /workspace
+    command: python -m services.auth.src.main
+    environment:
+      - SERVICE_NAME=auth
+      - GRPC_PORT=50062
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-test_jwt_secret_key_for_e2e_testing}
+      - JWT_ALGORITHM=HS256
+      - ACCESS_TOKEN_EXPIRE_MINUTES=30
+      - REFRESH_TOKEN_EXPIRE_DAYS=7
+      - USER_SERVICE_HOST=user
+      - USER_SERVICE_PORT=50061
+      - PYTHONPATH=/workspace
+    depends_on:
+      - user
+      - redis
+    healthcheck:
+      test: ["CMD", "grpc_health_probe", "-addr=:50062"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - test-network
+
+  notification:
+    build:
+      context: ../..
+      dockerfile: .devcontainer/Dockerfile
+    container_name: test-notification
+    working_dir: /workspace
+    command: python -m services.notification.src.main
+    environment:
+      - SERVICE_NAME=notification
+      - HTTP_PORT=8080
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDPANDA_BROKERS=redpanda:9092
+      - PYTHONPATH=/workspace
+    ports:
+      - "8080:8080"
+    depends_on:
+      redis:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - test-network
+
+volumes:
+  test-postgres-data:
+
+networks:
+  test-network:
+    driver: bridge

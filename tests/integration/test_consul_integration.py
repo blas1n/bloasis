@@ -52,9 +52,9 @@ class TestConsulServiceRegistration:
             "portfolio" in sid for sid in service_ids
         )
 
-        assert (
-            is_registered
-        ), f"Portfolio service should be registered. Found services: {service_names}"
+        assert is_registered, (
+            f"Portfolio service should be registered. Found services: {service_names}"
+        )
 
     def test_market_regime_health_check(self, consul_client: consul.Consul) -> None:
         """Verify Market Regime gRPC health check is passing."""
@@ -73,6 +73,7 @@ class TestConsulServiceRegistration:
             "Portfolio service should be healthy. "
             "Check if the service is running and gRPC health check is implemented."
         )
+
 
 class TestConsulHealthMonitoring:
     """Test Consul health monitoring capabilities."""
@@ -124,9 +125,9 @@ class TestConsulHealthMonitoring:
                 tags = service.get("Tags", [])
 
                 # Services should have 'grpc' tag for identification
-                assert (
-                    "grpc" in tags
-                ), f"Service {service_id} should have 'grpc' tag. Found tags: {tags}"
+                assert "grpc" in tags, (
+                    f"Service {service_id} should have 'grpc' tag. Found tags: {tags}"
+                )
 
     def test_all_services_healthy(self, consul_client: consul.Consul) -> None:
         """Verify all registered BLOASIS services are healthy."""
@@ -147,9 +148,9 @@ class TestConsulHealthMonitoring:
                 if len(health_data) == 0:
                     unhealthy_services.append(service_name)
 
-        assert (
-            len(unhealthy_services) == 0
-        ), f"All services should be healthy. Unhealthy services: {unhealthy_services}"
+        assert len(unhealthy_services) == 0, (
+            f"All services should be healthy. Unhealthy services: {unhealthy_services}"
+        )
 
     def test_service_addresses_configured(self, consul_client: consul.Consul) -> None:
         """Verify services have addresses configured for service discovery."""
@@ -162,12 +163,12 @@ class TestConsulHealthMonitoring:
                 address = service.get("Address", "")
                 port = service.get("Port", 0)
 
-                assert (
-                    address
-                ), f"Service {service_name} should have an address configured"
-                assert (
-                    port > 0
-                ), f"Service {service_name} should have a valid port configured"
+                assert address, (
+                    f"Service {service_name} should have an address configured"
+                )
+                assert port > 0, (
+                    f"Service {service_name} should have a valid port configured"
+                )
 
 
 class TestConsulServiceDiscovery:
@@ -185,9 +186,9 @@ class TestConsulServiceDiscovery:
         instance = health_data[0]
         service_info = instance.get("Service", {})
 
-        assert (
-            "Address" in service_info or "ID" in service_info
-        ), "Service instance should have address information"
+        assert "Address" in service_info or "ID" in service_info, (
+            "Service instance should have address information"
+        )
         assert "Port" in service_info, "Service instance should have port information"
 
     def test_get_healthy_portfolio_instances(
@@ -202,9 +203,9 @@ class TestConsulServiceDiscovery:
         instance = health_data[0]
         service_info = instance.get("Service", {})
 
-        assert (
-            "Address" in service_info or "ID" in service_info
-        ), "Service instance should have address information"
+        assert "Address" in service_info or "ID" in service_info, (
+            "Service instance should have address information"
+        )
         assert "Port" in service_info, "Service instance should have port information"
 
     def test_service_metadata(self, consul_client: consul.Consul) -> None:
@@ -217,12 +218,12 @@ class TestConsulServiceDiscovery:
             if service_name in ["market-regime", "portfolio"]:
                 # Check for service identification
                 assert "ID" in service, f"Service {service_name} should have an ID"
-                assert (
-                    "Service" in service
-                ), f"Service {service_name} should have a Service name"
+                assert "Service" in service, (
+                    f"Service {service_name} should have a Service name"
+                )
 
                 # Tags should exist for filtering
                 tags = service.get("Tags", [])
-                assert isinstance(
-                    tags, list
-                ), f"Service {service_name} tags should be a list"
+                assert isinstance(tags, list), (
+                    f"Service {service_name} tags should be a list"
+                )
