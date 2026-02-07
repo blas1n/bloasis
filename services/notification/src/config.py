@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     # Service settings
     service_name: str = "notification"
     ws_host: str = "0.0.0.0"
-    ws_port: int = 8000
+    ws_port: int = 8080
 
     # Redpanda Event Streaming
     redpanda_brokers: str = "redpanda:9092"

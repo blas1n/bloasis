@@ -285,7 +285,7 @@ services:
   # Rate limited to 100 req/min (connection establishment)
 
   - name: notification-ws
-    url: http://notification:8000
+    url: http://notification:8080
     routes:
       - name: notification-ws-route
         paths:

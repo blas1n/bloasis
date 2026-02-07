@@ -21,7 +21,7 @@ class ServiceConfig(BaseSettings):
 
     # Service identity
     service_name: str = "user"
-    grpc_port: int = 50058
+    grpc_port: int = 50052
 
     # Redis configuration
     redis_host: str = "localhost"

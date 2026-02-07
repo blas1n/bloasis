@@ -28,7 +28,7 @@ class ServiceConfig(BaseSettings):
 
     # Service identity
     service_name: str = "auth"
-    grpc_port: int = 50059
+    grpc_port: int = 50056
 
     # Redis configuration
     redis_host: str = "localhost"
@@ -36,7 +36,7 @@ class ServiceConfig(BaseSettings):
 
     # User Service configuration
     user_service_host: str = "localhost"
-    user_service_port: int = 50058
+    user_service_port: int = 50052
 
     # JWT configuration - RS256 (default, recommended)
     jwt_algorithm: str = "RS256"

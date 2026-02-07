@@ -1,0 +1,918 @@
+# =============================================================================
+# BLOASIS Production Docker Compose
+# =============================================================================
+# Complete production deployment for Mac Mini (Apple Silicon)
+#
+# Profiles:
+#   - default: Core infrastructure + microservices
+#   - monitoring: Prometheus + Grafana + exporters
+#   - full: Everything including frontend
+#
+# Usage:
+#   docker-compose up -d                           # Core services
+#   docker-compose --profile monitoring up -d      # With monitoring
+#   docker-compose --profile full up -d            # Everything
+#
+# Note: Build from parent directory (repository root)
+#   cd deploy && docker-compose up -d
+# =============================================================================
+
+version: '3.8'
+
+services:
+  # ===========================================================================
+  # Infrastructure Services
+  # ===========================================================================
+
+  # ---------------------------------------------------------------------------
+  # PostgreSQL with TimescaleDB Extension
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: timescale/timescaledb:latest-pg16
+    container_name: bloasis-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-bloasis}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ../infra/postgres:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
+    networks:
+      - bloasis-network
+
+  # ---------------------------------------------------------------------------
+  # Redis - Caching Layer
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: bloasis-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 128M
+    networks:
+      - bloasis-network
+
+  # ---------------------------------------------------------------------------
+  # Redpanda - Kafka-compatible Event Streaming
+  # ---------------------------------------------------------------------------
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:v24.1.1
+    container_name: bloasis-redpanda
+    restart: unless-stopped
+    command:
+      - redpanda start
+      - --smp 1
+      - --memory 512M
+      - --overprovisioned
+      - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr internal://redpanda:9092,external://localhost:19092
+      - --pandaproxy-addr internal://0.0.0.0:8082,external://0.0.0.0:18082
+      - --advertise-pandaproxy-addr internal://redpanda:8082,external://localhost:18082
+      - --schema-registry-addr internal://0.0.0.0:8081,external://0.0.0.0:18081
+      - --advertise-schema-registry-addr internal://redpanda:8081,external://localhost:18081
+    ports:
+      - "19092:19092"  # External Kafka API
+      - "18082:18082"  # HTTP Proxy
+      - "18081:18081"  # Schema Registry
+      - "9644:9644"    # Admin/Metrics
+    volumes:
+      - redpanda-data:/var/lib/redpanda/data
+    healthcheck:
+      test: ["CMD", "rpk", "cluster", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
+    networks:
+      - bloasis-network
+
+  # ---------------------------------------------------------------------------
+  # Consul - Service Discovery
+  # ---------------------------------------------------------------------------
+  consul:
+    image: hashicorp/consul:1.18
+    container_name: bloasis-consul
+    restart: unless-stopped
+    command: agent -server -ui -bootstrap-expect=1 -client=0.0.0.0
+    ports:
+      - "8500:8500"    # HTTP API + UI
+      - "8600:8600/udp" # DNS
+    healthcheck:
+      test: ["CMD", "consul", "members"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 128M
+    networks:
+      - bloasis-network
+
+  # ---------------------------------------------------------------------------
+  # Kong Gateway - API Gateway with gRPC-to-REST Transcoding
+  # ---------------------------------------------------------------------------
+  kong:
+    image: kong:3.6
+    container_name: bloasis-kong
+    restart: unless-stopped
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /kong/kong.yml
+      KONG_PROXY_LISTEN: 0.0.0.0:8000, 0.0.0.0:8443 ssl
+      KONG_ADMIN_LISTEN: 0.0.0.0:8001
+      KONG_LOG_LEVEL: info
+      KONG_PLUGINS: bundled,grpc-gateway
+    ports:
+      - "8000:8000"    # HTTP Proxy
+      - "8443:8443"    # HTTPS Proxy
+      - "8001:8001"    # Admin API
+    volumes:
+      - ../infra/kong:/kong:ro
+      - ../shared/proto:/kong/proto:ro
+    healthcheck:
+      test: ["CMD", "kong", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    depends_on:
+      consul:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+    networks:
+      - bloasis-network
+
+  # ===========================================================================
+  # Microservices - Tier 1 (Shared Data)
+  # ===========================================================================
+
+  # ---------------------------------------------------------------------------
+  # Market Regime Service (Port 50051)
+  # Tier 1 - Shared market regime classification (6h cache)
+  # ---------------------------------------------------------------------------
+  market-regime:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.service
+      args:
+        SERVICE_NAME: market-regime
+    container_name: bloasis-market-regime
+    restart: unless-stopped
+    environment:
+      SERVICE_NAME: market-regime
+      GRPC_PORT: "50051"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDPANDA_BROKERS: redpanda:9092
+      CONSUL_HOST: consul
+      CONSUL_PORT: "8500"
+      CONSUL_ENABLED: "true"
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://postgres:postgres@postgres:5432/bloasis}
+      HUGGINGFACE_TOKEN: ${HUGGINGFACE_TOKEN:-}
+      FRED_API_KEY: ${FRED_API_KEY:-}
+      USE_MOCK_FINGPT: ${USE_MOCK_FINGPT:-true}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      redis:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+      consul:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "grpc_health_probe", "-addr=:50051"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+    networks:
+      - bloasis-network
+
+  # ---------------------------------------------------------------------------
+  # Market Data Service (Port 50053)
+  # Tier 1 - Shared OHLCV data (5min cache)
+  # ---------------------------------------------------------------------------
+  market-data:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.service
+      args:
+        SERVICE_NAME: market-data
+    container_name: bloasis-market-data
+    restart: unless-stopped
+    environment:
+      SERVICE_NAME: market-data
+      GRPC_PORT: "50053"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDPANDA_BROKERS: redpanda:9092
+      CONSUL_HOST: consul
+      CONSUL_PORT: "8500"
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://postgres:postgres@postgres:5432/bloasis}
+      ALPHA_VANTAGE_KEY: ${ALPHA_VANTAGE_KEY:-}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      redis:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+      consul:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "grpc_health_probe", "-addr=:50053"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+    networks:
+      - bloasis-network
+
+  # ===========================================================================
+  # Microservices - Tier 2 (Strategy Computation)
+  # ===========================================================================
+
+  # ---------------------------------------------------------------------------
+  # Classification Service (Port 50054)
+  # Tier 2 - Sector classification and analysis
+  # ---------------------------------------------------------------------------
+  classification:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.service
+      args:
+        SERVICE_NAME: classification
+    container_name: bloasis-classification
+    restart: unless-stopped
+    environment:
+      SERVICE_NAME: classification
+      GRPC_PORT: "50054"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDPANDA_BROKERS: redpanda:9092
+      CONSUL_HOST: consul
+      CONSUL_PORT: "8500"
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://postgres:postgres@postgres:5432/bloasis}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      redis:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+      consul:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "grpc_health_probe", "-addr=:50054"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+    networks:
+      - bloasis-network
+
+  # ---------------------------------------------------------------------------
+  # Strategy Service (Port 50055)
+  # Tier 2 - Trading strategy generation
+  # ---------------------------------------------------------------------------
+  strategy:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.service
+      args:
+        SERVICE_NAME: strategy
+    container_name: bloasis-strategy
+    restart: unless-stopped
+    environment:
+      SERVICE_NAME: strategy
+      GRPC_PORT: "50055"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDPANDA_BROKERS: redpanda:9092
+      CONSUL_HOST: consul
+      CONSUL_PORT: "8500"
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://postgres:postgres@postgres:5432/bloasis}
+      # Upstream service connections
+      MARKET_REGIME_HOST: market-regime
+      MARKET_REGIME_PORT: "50051"
+      CLASSIFICATION_HOST: classification
+      CLASSIFICATION_PORT: "50054"
+      MARKET_DATA_HOST: market-data
+      MARKET_DATA_PORT: "50053"
+      # AI APIs
+      FINGPT_API_KEY: ${FINGPT_API_KEY:-}
+      CLAUDE_API_KEY: ${CLAUDE_API_KEY:-}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      market-regime:
+        condition: service_healthy
+      market-data:
+        condition: service_healthy
+      classification:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "grpc_health_probe", "-addr=:50055"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+        reservations:
+          memory: 384M
+    networks:
+      - bloasis-network
+
+  # ---------------------------------------------------------------------------
+  # Backtesting Service (Port 50058)
+  # Tier 2 - Strategy backtesting with VectorBT/FinRL
+  # ---------------------------------------------------------------------------
+  backtesting:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.service
+      args:
+        SERVICE_NAME: backtesting
+    container_name: bloasis-backtesting
+    restart: unless-stopped
+    environment:
+      SERVICE_NAME: backtesting
+      GRPC_PORT: "50058"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDPANDA_BROKERS: redpanda:9092
+      CONSUL_HOST: consul
+      CONSUL_PORT: "8500"
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://postgres:postgres@postgres:5432/bloasis}
+      # Backtesting configuration
+      DEFAULT_INITIAL_CASH: ${DEFAULT_INITIAL_CASH:-100000.00}
+      DEFAULT_COMMISSION: ${DEFAULT_COMMISSION:-0.001}
+      DEFAULT_SLIPPAGE: ${DEFAULT_SLIPPAGE:-0.001}
+      MIN_SHARPE_RATIO: ${MIN_SHARPE_RATIO:-0.5}
+      MAX_DRAWDOWN_THRESHOLD: ${MAX_DRAWDOWN_THRESHOLD:-0.30}
+      MIN_WIN_RATE: ${MIN_WIN_RATE:-0.40}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      redis:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+      consul:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "grpc_health_probe", "-addr=:50058"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
+    networks:
+      - bloasis-network
+
+  # ===========================================================================
+  # Microservices - Tier 3 (User-Specific)
+  # ===========================================================================
+
+  # ---------------------------------------------------------------------------
+  # User Service (Port 50052)
+  # User management and profiles
+  # ---------------------------------------------------------------------------
+  user:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.service
+      args:
+        SERVICE_NAME: user
+    container_name: bloasis-user
+    restart: unless-stopped
+    environment:
+      SERVICE_NAME: user
+      GRPC_PORT: "50052"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDPANDA_BROKERS: redpanda:9092
+      CONSUL_HOST: consul
+      CONSUL_PORT: "8500"
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://postgres:postgres@postgres:5432/bloasis}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      redis:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+      consul:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "grpc_health_probe", "-addr=:50052"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+    networks:
+      - bloasis-network
+
+  # ---------------------------------------------------------------------------
+  # Auth Service (Port 50056)
+  # JWT authentication with RS256
+  # ---------------------------------------------------------------------------
+  auth:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.service
+      args:
+        SERVICE_NAME: auth
+    container_name: bloasis-auth
+    restart: unless-stopped
+    environment:
+      SERVICE_NAME: auth
+      GRPC_PORT: "50056"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      CONSUL_HOST: consul
+      CONSUL_PORT: "8500"
+      # JWT configuration (RS256)
+      JWT_ALGORITHM: ${JWT_ALGORITHM:-RS256}
+      JWT_PRIVATE_KEY_PATH: /app/keys/jwt-private.pem
+      JWT_PUBLIC_KEY_PATH: /app/keys/jwt-public.pem
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-15}
+      REFRESH_TOKEN_EXPIRE_DAYS: ${REFRESH_TOKEN_EXPIRE_DAYS:-7}
+      # User service for authentication
+      USER_SERVICE_HOST: user
+      USER_SERVICE_PORT: "50052"
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes:
+      - ../infra/keys:/app/keys:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+      consul:
+        condition: service_healthy
+      user:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "grpc_health_probe", "-addr=:50056"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 128M
+    networks:
+      - bloasis-network
+
+  # ---------------------------------------------------------------------------
+  # Portfolio Service (Port 50057)
+  # Portfolio management and positions
+  # ---------------------------------------------------------------------------
+  portfolio:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.service
+      args:
+        SERVICE_NAME: portfolio
+    container_name: bloasis-portfolio
+    restart: unless-stopped
+    environment:
+      SERVICE_NAME: portfolio
+      GRPC_PORT: "50057"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDPANDA_BROKERS: redpanda:9092
+      CONSUL_HOST: consul
+      CONSUL_PORT: "8500"
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://postgres:postgres@postgres:5432/bloasis}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      redis:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+      consul:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "grpc_health_probe", "-addr=:50057"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+    networks:
+      - bloasis-network
+
+  # ---------------------------------------------------------------------------
+  # Risk Committee Service (Port 50059)
+  # Trade approval and risk management
+  # ---------------------------------------------------------------------------
+  risk-committee:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.service
+      args:
+        SERVICE_NAME: risk-committee
+    container_name: bloasis-risk-committee
+    restart: unless-stopped
+    environment:
+      SERVICE_NAME: risk-committee
+      GRPC_PORT: "50059"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDPANDA_BROKERS: redpanda:9092
+      CONSUL_HOST: consul
+      CONSUL_PORT: "8500"
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://postgres:postgres@postgres:5432/bloasis}
+      # Claude API for complex reasoning
+      CLAUDE_API_KEY: ${CLAUDE_API_KEY:-}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      redis:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+      consul:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "grpc_health_probe", "-addr=:50059"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+    networks:
+      - bloasis-network
+
+  # ---------------------------------------------------------------------------
+  # Executor Service (Port 50060)
+  # Trade execution via Alpaca
+  # ---------------------------------------------------------------------------
+  executor:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.service
+      args:
+        SERVICE_NAME: executor
+    container_name: bloasis-executor
+    restart: unless-stopped
+    environment:
+      SERVICE_NAME: executor
+      GRPC_PORT: "50060"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDPANDA_BOOTSTRAP_SERVERS: redpanda:9092
+      CONSUL_HOST: consul
+      CONSUL_PORT: "8500"
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://postgres:postgres@postgres:5432/bloasis}
+      # Alpaca API credentials
+      ALPACA_API_KEY: ${ALPACA_API_KEY:?ALPACA_API_KEY is required}
+      ALPACA_SECRET_KEY: ${ALPACA_SECRET_KEY:?ALPACA_SECRET_KEY is required}
+      ALPACA_PAPER: ${ALPACA_PAPER:-true}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      redis:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+      consul:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "grpc_health_probe", "-addr=:50060"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+    networks:
+      - bloasis-network
+
+  # ---------------------------------------------------------------------------
+  # Notification Service (Port 8080 - WebSocket)
+  # Real-time notifications via WebSocket
+  # ---------------------------------------------------------------------------
+  notification:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.service
+      args:
+        SERVICE_NAME: notification
+    container_name: bloasis-notification
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      SERVICE_NAME: notification
+      WS_HOST: "0.0.0.0"
+      WS_PORT: "8080"
+      REDPANDA_BROKERS: redpanda:9092
+      CONSUL_HOST: consul
+      CONSUL_PORT: "8500"
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      redpanda:
+        condition: service_healthy
+      consul:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 128M
+    networks:
+      - bloasis-network
+
+  # ===========================================================================
+  # Frontend (full profile only)
+  # ===========================================================================
+
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    container_name: bloasis-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+      NEXT_PUBLIC_WS_URL: ws://localhost:8080
+    depends_on:
+      - kong
+      - notification
+    profiles:
+      - full
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+    networks:
+      - bloasis-network
+
+  # ===========================================================================
+  # Monitoring Stack (monitoring/full profiles)
+  # ===========================================================================
+
+  # ---------------------------------------------------------------------------
+  # Prometheus - Metrics Collection
+  # ---------------------------------------------------------------------------
+  prometheus:
+    image: prom/prometheus:v2.48.0
+    container_name: bloasis-prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    volumes:
+      - ../infra/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ../infra/monitoring/alert_rules.yml:/etc/prometheus/alert_rules.yml:ro
+      - prometheus-data:/prometheus
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    profiles:
+      - monitoring
+      - full
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+    networks:
+      - bloasis-network
+
+  # ---------------------------------------------------------------------------
+  # Grafana - Visualization
+  # ---------------------------------------------------------------------------
+  grafana:
+    image: grafana/grafana:10.2.2
+    container_name: bloasis-grafana
+    restart: unless-stopped
+    ports:
+      - "3001:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SERVER_ROOT_URL: http://localhost:3001
+      GF_INSTALL_PLUGINS: grafana-piechart-panel
+    volumes:
+      - ../infra/monitoring/grafana/provisioning/datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
+      - ../infra/monitoring/grafana/provisioning/dashboards.yml:/etc/grafana/provisioning/dashboards/dashboards.yml:ro
+      - ../infra/monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    depends_on:
+      - prometheus
+    profiles:
+      - monitoring
+      - full
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 128M
+    networks:
+      - bloasis-network
+
+  # ---------------------------------------------------------------------------
+  # Redis Exporter - Redis Metrics
+  # ---------------------------------------------------------------------------
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.55.0
+    container_name: bloasis-redis-exporter
+    restart: unless-stopped
+    ports:
+      - "9121:9121"
+    environment:
+      REDIS_ADDR: redis:6379
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9121/metrics"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    depends_on:
+      redis:
+        condition: service_healthy
+    profiles:
+      - monitoring
+      - full
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+        reservations:
+          memory: 32M
+    networks:
+      - bloasis-network
+
+  # ---------------------------------------------------------------------------
+  # PostgreSQL Exporter - Database Metrics
+  # ---------------------------------------------------------------------------
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.15.0
+    container_name: bloasis-postgres-exporter
+    restart: unless-stopped
+    ports:
+      - "9187:9187"
+    environment:
+      DATA_SOURCE_NAME: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-bloasis}?sslmode=disable
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9187/metrics"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    depends_on:
+      postgres:
+        condition: service_healthy
+    profiles:
+      - monitoring
+      - full
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+        reservations:
+          memory: 32M
+    networks:
+      - bloasis-network
+
+# =============================================================================
+# Volumes - Persistent Data
+# =============================================================================
+volumes:
+  postgres-data:
+    name: bloasis-postgres-data
+  redis-data:
+    name: bloasis-redis-data
+  redpanda-data:
+    name: bloasis-redpanda-data
+  prometheus-data:
+    name: bloasis-prometheus-data
+  grafana-data:
+    name: bloasis-grafana-data
+
+# =============================================================================
+# Networks
+# =============================================================================
+networks:
+  bloasis-network:
+    driver: bridge
+    name: bloasis-network

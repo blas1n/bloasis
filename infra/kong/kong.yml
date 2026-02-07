@@ -100,7 +100,7 @@ services:
   # Provides real-time notifications via WebSocket
   # WebSocket Upgrade headers are passed through Kong
   - name: notification-ws
-    url: http://notification:8000
+    url: http://notification:8080
     routes:
       - name: notification-ws-route
         paths:

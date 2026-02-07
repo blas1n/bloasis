@@ -47,7 +47,7 @@ The User Service manages:
 See `.env.example` for all configuration options.
 
 Key settings:
-- `GRPC_PORT`: gRPC server port (default: 50058)
+- `GRPC_PORT`: gRPC server port (default: 50052)
 - `DATABASE_URL`: PostgreSQL connection string
 - `REDIS_HOST/PORT`: Redis for caching
 - `PREFERENCES_CACHE_TTL`: Cache TTL in seconds (default: 3600)

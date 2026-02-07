@@ -1,0 +1,187 @@
+# =============================================================================
+# BLOASIS Python Microservice Dockerfile
+# =============================================================================
+# Multi-stage build for Python gRPC microservices
+#
+# Usage:
+#   docker build --build-arg SERVICE_NAME=market-regime -f deploy/Dockerfile.service .
+#
+# Build from repository root to access shared/ directory
+# =============================================================================
+
+# =============================================================================
+# Stage 1: Builder - Install dependencies and generate proto files
+# =============================================================================
+FROM python:3.11-slim AS builder
+
+# Build argument for service name
+ARG SERVICE_NAME
+ENV SERVICE_NAME=${SERVICE_NAME}
+
+# Validate SERVICE_NAME is provided
+RUN if [ -z "$SERVICE_NAME" ]; then \
+      echo "ERROR: SERVICE_NAME build argument is required"; \
+      echo "Usage: docker build --build-arg SERVICE_NAME=market-regime ..."; \
+      exit 1; \
+    fi
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    curl \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install uv for fast dependency management
+RUN pip install --no-cache-dir uv
+
+WORKDIR /app
+
+# =============================================================================
+# Copy dependency files first (for Docker layer caching)
+# =============================================================================
+
+# Copy shared package dependencies
+COPY shared/pyproject.toml shared/
+
+# Copy service dependencies
+COPY services/${SERVICE_NAME}/pyproject.toml services/${SERVICE_NAME}/
+
+# =============================================================================
+# Install Python dependencies
+# =============================================================================
+
+# Install shared package dependencies
+RUN cd /app/shared && uv pip install --system .
+
+# Install service dependencies
+RUN cd /app/services/${SERVICE_NAME} && uv pip install --system .
+
+# Install grpcio-health-checking for health checks
+RUN pip install --no-cache-dir grpcio-health-checking>=1.59.0
+
+# =============================================================================
+# Install buf and generate proto files
+# =============================================================================
+
+# Install buf CLI (multi-arch support)
+ARG TARGETARCH
+RUN ARCH=$([ "$TARGETARCH" = "arm64" ] && echo "aarch64" || echo "x86_64") && \
+    curl -sSL "https://github.com/bufbuild/buf/releases/download/v1.28.1/buf-Linux-${ARCH}" \
+    -o /usr/local/bin/buf && \
+    chmod +x /usr/local/bin/buf
+
+# Copy proto files and buf configuration
+COPY shared/proto shared/proto/
+
+# Generate proto files
+RUN cd /app/shared/proto && buf generate
+
+# Create __init__.py for generated package
+RUN echo '"""Generated Protocol Buffer files."""' > /app/shared/generated/__init__.py
+
+# =============================================================================
+# Stage 2: Runtime - Minimal production image
+# =============================================================================
+FROM python:3.11-slim AS runtime
+
+# Build argument for service name (needed again in this stage)
+ARG SERVICE_NAME
+ENV SERVICE_NAME=${SERVICE_NAME}
+
+# =============================================================================
+# Install grpc_health_probe (multi-arch support for ARM64/AMD64)
+# =============================================================================
+ARG TARGETARCH
+RUN apt-get update && apt-get install -y --no-install-recommends wget ca-certificates && \
+    GRPC_HEALTH_PROBE_VERSION=v0.4.24 && \
+    ARCH=$([ "$TARGETARCH" = "arm64" ] && echo "arm64" || echo "amd64") && \
+    wget -qO /bin/grpc_health_probe \
+    "https://github.com/grpc-ecosystem/grpc-health-probe/releases/download/${GRPC_HEALTH_PROBE_VERSION}/grpc_health_probe-linux-${ARCH}" && \
+    chmod +x /bin/grpc_health_probe && \
+    apt-get purge -y wget && \
+    apt-get autoremove -y && \
+    rm -rf /var/lib/apt/lists/*
+
+# =============================================================================
+# Create non-root user for security
+# =============================================================================
+RUN groupadd -g 1000 bloasis && \
+    useradd -m -u 1000 -g bloasis bloasis
+
+WORKDIR /app
+
+# =============================================================================
+# Copy installed Python packages from builder
+# =============================================================================
+COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
+
+# =============================================================================
+# Copy generated proto files
+# =============================================================================
+COPY --from=builder /app/shared/generated shared/generated/
+
+# =============================================================================
+# Copy shared package (utils, prompts, models, ai_clients)
+# =============================================================================
+COPY --chown=bloasis:bloasis shared/__init__.py shared/
+COPY --chown=bloasis:bloasis shared/pyproject.toml shared/
+COPY --chown=bloasis:bloasis shared/utils shared/utils/
+COPY --chown=bloasis:bloasis shared/prompts shared/prompts/
+COPY --chown=bloasis:bloasis shared/models shared/models/
+COPY --chown=bloasis:bloasis shared/ai_clients shared/ai_clients/
+
+# =============================================================================
+# Copy service source code
+# =============================================================================
+COPY --chown=bloasis:bloasis services/${SERVICE_NAME}/src services/${SERVICE_NAME}/src/
+COPY --chown=bloasis:bloasis services/${SERVICE_NAME}/pyproject.toml services/${SERVICE_NAME}/
+
+# Copy prompts directory if it exists (some services have their own prompts)
+# Use shell to handle optional directory
+RUN mkdir -p /app/services/${SERVICE_NAME}/src/prompts
+
+# =============================================================================
+# Environment configuration
+# =============================================================================
+
+# Python path for imports
+# - /app: Root for absolute imports
+# - /app/shared: For shared module imports
+# - /app/shared/generated: For generated proto imports
+# - /app/services/${SERVICE_NAME}: For service-specific imports
+ENV PYTHONPATH=/app:/app/shared:/app/shared/generated:/app/services/${SERVICE_NAME}
+
+# Python optimizations
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+
+# Service identification
+ENV BLOASIS_SERVICE=${SERVICE_NAME}
+
+# Default gRPC port
+ENV GRPC_PORT=50051
+
+# =============================================================================
+# Switch to non-root user
+# =============================================================================
+USER bloasis
+
+# =============================================================================
+# Health check using grpc_health_probe
+# =============================================================================
+# Note: GRPC_PORT env var is evaluated at runtime
+HEALTHCHECK --interval=10s --timeout=5s --start-period=30s --retries=3 \
+    CMD /bin/grpc_health_probe -addr=:${GRPC_PORT:-50051}
+
+# =============================================================================
+# Expose gRPC port
+# =============================================================================
+EXPOSE ${GRPC_PORT:-50051}
+
+# =============================================================================
+# Default command - run the service
+# =============================================================================
+# Services are expected to have src/main.py with a main() function
+CMD ["python", "-m", "src.main"]

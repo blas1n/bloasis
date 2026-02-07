@@ -106,6 +106,10 @@ data/
 .devcontainer/.env
 docker-compose.override.yml
 
+# Production Deployment
+deploy/.env
+deploy/backups/
+
 # MacOS
 .DS_Store
 .AppleDouble
