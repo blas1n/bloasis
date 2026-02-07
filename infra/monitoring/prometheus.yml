@@ -1,0 +1,158 @@
+# Prometheus Configuration for BLOASIS Trading Platform
+# Scrapes metrics from all gRPC services, Redis, PostgreSQL, and Redpanda
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    monitor: 'bloasis-monitor'
+
+# Alertmanager configuration (optional, for future use)
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: []
+          # - alertmanager:9093
+
+# Load alert rules
+rule_files:
+  - /etc/prometheus/alert_rules.yml
+
+scrape_configs:
+  # =============================================================================
+  # Prometheus Self-Monitoring
+  # =============================================================================
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+        labels:
+          service: 'prometheus'
+
+  # =============================================================================
+  # gRPC Services (Core Trading Services)
+  # =============================================================================
+  # All gRPC services expose metrics on port 9100
+  - job_name: 'grpc-services'
+    static_configs:
+      # Market Regime Service - Tier 1 shared data
+      - targets: ['market-regime:9100']
+        labels:
+          service: 'market-regime'
+          tier: 'tier-1'
+          type: 'grpc'
+
+      # Market Data Service - Tier 1 shared data
+      - targets: ['market-data:9100']
+        labels:
+          service: 'market-data'
+          tier: 'tier-1'
+          type: 'grpc'
+
+      # Strategy Service - Tier 2 strategy computation
+      - targets: ['strategy:9100']
+        labels:
+          service: 'strategy'
+          tier: 'tier-2'
+          type: 'grpc'
+
+      # Backtesting Service - Strategy backtesting
+      - targets: ['backtesting:9100']
+        labels:
+          service: 'backtesting'
+          tier: 'tier-2'
+          type: 'grpc'
+
+      # Risk Committee Service - Trade approval
+      - targets: ['risk-committee:9100']
+        labels:
+          service: 'risk-committee'
+          tier: 'tier-3'
+          type: 'grpc'
+
+      # Executor Service - Trade execution
+      - targets: ['executor:9100']
+        labels:
+          service: 'executor'
+          tier: 'tier-3'
+          type: 'grpc'
+
+      # Portfolio Service - Portfolio management
+      - targets: ['portfolio:9100']
+        labels:
+          service: 'portfolio'
+          tier: 'tier-3'
+          type: 'grpc'
+
+      # User Service - User management
+      - targets: ['user:9100']
+        labels:
+          service: 'user'
+          tier: 'tier-3'
+          type: 'grpc'
+
+      # Auth Service - Authentication
+      - targets: ['auth:9100']
+        labels:
+          service: 'auth'
+          tier: 'tier-3'
+          type: 'grpc'
+
+    # Metrics path for prometheus-client Python library
+    metrics_path: /metrics
+    scrape_interval: 15s
+    scrape_timeout: 10s
+
+  # =============================================================================
+  # Notification Service (HTTP/WebSocket)
+  # =============================================================================
+  - job_name: 'notification'
+    static_configs:
+      - targets: ['notification:9100']
+        labels:
+          service: 'notification'
+          tier: 'tier-3'
+          type: 'http'
+    metrics_path: /metrics
+    scrape_interval: 15s
+
+  # =============================================================================
+  # Infrastructure Services
+  # =============================================================================
+
+  # Redis Exporter
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['redis-exporter:9121']
+        labels:
+          service: 'redis'
+          type: 'cache'
+    scrape_interval: 15s
+
+  # PostgreSQL Exporter
+  - job_name: 'postgres'
+    static_configs:
+      - targets: ['postgres-exporter:9187']
+        labels:
+          service: 'postgres'
+          type: 'database'
+    scrape_interval: 15s
+
+  # Redpanda (Kafka-compatible metrics)
+  - job_name: 'redpanda'
+    static_configs:
+      - targets: ['redpanda:9644']
+        labels:
+          service: 'redpanda'
+          type: 'messaging'
+    metrics_path: /public_metrics
+    scrape_interval: 15s
+
+  # Kong Gateway (if metrics enabled)
+  - job_name: 'kong'
+    static_configs:
+      - targets: ['kong:8001']
+        labels:
+          service: 'kong'
+          type: 'gateway'
+    metrics_path: /metrics
+    scrape_interval: 15s

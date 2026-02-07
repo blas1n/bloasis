@@ -1,0 +1,253 @@
+# Prometheus Alert Rules for BLOASIS Trading Platform
+# Defines critical alerts for service health, performance, and trading operations
+
+groups:
+  # =============================================================================
+  # Service Health Alerts
+  # =============================================================================
+  - name: service_health
+    interval: 30s
+    rules:
+      # Critical: Service is down
+      - alert: ServiceDown
+        expr: up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Service {{ $labels.job }} is down"
+          description: "{{ $labels.instance }} of job {{ $labels.job }} has been down for more than 1 minute."
+
+      # Warning: Service is flapping (restarting frequently)
+      - alert: ServiceFlapping
+        expr: changes(up[10m]) > 3
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Service {{ $labels.job }} is flapping"
+          description: "{{ $labels.instance }} has restarted more than 3 times in the last 10 minutes."
+
+  # =============================================================================
+  # gRPC Performance Alerts
+  # =============================================================================
+  - name: grpc_performance
+    interval: 30s
+    rules:
+      # Warning: High gRPC latency (p99 > 1s)
+      - alert: HighLatency
+        expr: histogram_quantile(0.99, sum(rate(grpc_request_duration_seconds_bucket[5m])) by (le, service, method)) > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High gRPC latency on {{ $labels.service }}"
+          description: "gRPC method {{ $labels.method }} on {{ $labels.service }} has p99 latency > 1s for 5 minutes. Current: {{ $value | humanizeDuration }}"
+
+      # Critical: Very high gRPC latency (p99 > 5s)
+      - alert: CriticalLatency
+        expr: histogram_quantile(0.99, sum(rate(grpc_request_duration_seconds_bucket[5m])) by (le, service, method)) > 5
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Critical gRPC latency on {{ $labels.service }}"
+          description: "gRPC method {{ $labels.method }} on {{ $labels.service }} has p99 latency > 5s. Current: {{ $value | humanizeDuration }}"
+
+      # Warning: High error rate (> 10%)
+      - alert: HighErrorRate
+        expr: |
+          sum(rate(grpc_requests_total{status="error"}[5m])) by (service, method)
+          /
+          sum(rate(grpc_requests_total[5m])) by (service, method)
+          > 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High error rate on {{ $labels.service }}"
+          description: "gRPC method {{ $labels.method }} on {{ $labels.service }} has error rate > 10% for 5 minutes. Current: {{ $value | humanizePercentage }}"
+
+      # Critical: Very high error rate (> 50%)
+      - alert: CriticalErrorRate
+        expr: |
+          sum(rate(grpc_requests_total{status="error"}[5m])) by (service, method)
+          /
+          sum(rate(grpc_requests_total[5m])) by (service, method)
+          > 0.5
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Critical error rate on {{ $labels.service }}"
+          description: "gRPC method {{ $labels.method }} on {{ $labels.service }} has error rate > 50%. Current: {{ $value | humanizePercentage }}"
+
+  # =============================================================================
+  # Trading Operations Alerts
+  # =============================================================================
+  - name: trading_operations
+    interval: 1m
+    rules:
+      # Warning: No trades executed during market hours (9:30 AM - 4:00 PM ET)
+      # Uses UTC time, market hours are 14:30-21:00 UTC
+      - alert: NoTradesExecuted
+        expr: |
+          increase(orders_executed_total[2h]) == 0
+          and on() (hour() >= 14 and hour() < 21)
+          and on() (day_of_week() >= 1 and day_of_week() <= 5)
+        for: 2h
+        labels:
+          severity: warning
+        annotations:
+          summary: "No trades executed in 2 hours during market hours"
+          description: "No orders have been executed in the last 2 hours during US market hours. This may indicate a trading system issue."
+
+      # Warning: High risk committee rejection rate (> 50%)
+      - alert: HighRejectionRate
+        expr: |
+          sum(rate(risk_committee_decisions_total{decision="rejected"}[1h]))
+          /
+          sum(rate(risk_committee_decisions_total[1h]))
+          > 0.5
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High risk committee rejection rate"
+          description: "Risk committee is rejecting more than 50% of trade proposals for 30 minutes. Current: {{ $value | humanizePercentage }}"
+
+      # Warning: No trading signals generated
+      - alert: NoTradingSignals
+        expr: |
+          increase(trading_signals_generated_total[1h]) == 0
+          and on() (hour() >= 14 and hour() < 21)
+          and on() (day_of_week() >= 1 and day_of_week() <= 5)
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "No trading signals generated in 1 hour"
+          description: "Strategy service has not generated any trading signals in the last hour during market hours."
+
+      # Critical: Large portfolio value drop
+      - alert: PortfolioValueDrop
+        expr: |
+          (portfolio_value_total - portfolio_value_total offset 1h)
+          /
+          portfolio_value_total offset 1h
+          < -0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Significant portfolio value drop detected"
+          description: "Portfolio value has dropped more than 5% in the last hour. Current change: {{ $value | humanizePercentage }}"
+
+  # =============================================================================
+  # Infrastructure Alerts
+  # =============================================================================
+  - name: infrastructure
+    interval: 30s
+    rules:
+      # Warning: Redis cache hit rate low
+      - alert: LowCacheHitRate
+        expr: |
+          rate(redis_keyspace_hits_total[5m])
+          /
+          (rate(redis_keyspace_hits_total[5m]) + rate(redis_keyspace_misses_total[5m]))
+          < 0.7
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Low Redis cache hit rate"
+          description: "Redis cache hit rate is below 70% for 10 minutes. Current: {{ $value | humanizePercentage }}"
+
+      # Warning: Redis memory usage high
+      - alert: RedisHighMemoryUsage
+        expr: redis_memory_used_bytes / redis_memory_max_bytes > 0.8
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High Redis memory usage"
+          description: "Redis is using more than 80% of available memory. Current: {{ $value | humanizePercentage }}"
+
+      # Warning: PostgreSQL connection pool exhaustion
+      - alert: PostgresConnectionPoolExhausted
+        expr: pg_stat_activity_count / pg_settings_max_connections > 0.8
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "PostgreSQL connection pool near exhaustion"
+          description: "PostgreSQL is using more than 80% of max connections. Current: {{ $value | humanizePercentage }}"
+
+      # Warning: PostgreSQL slow queries
+      - alert: PostgresSlowQueries
+        expr: rate(pg_stat_statements_seconds_total[5m]) / rate(pg_stat_statements_calls_total[5m]) > 1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "PostgreSQL slow queries detected"
+          description: "Average query time is above 1 second for 10 minutes."
+
+      # Warning: Redpanda consumer lag high
+      - alert: RedpandaHighConsumerLag
+        expr: kafka_consumer_group_lag > 10000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High Redpanda consumer lag"
+          description: "Consumer group {{ $labels.group }} has lag > 10000 messages on topic {{ $labels.topic }}. Current: {{ $value }}"
+
+      # Critical: Redpanda broker down
+      - alert: RedpandaBrokerDown
+        expr: up{job="redpanda"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Redpanda broker is down"
+          description: "Redpanda broker is not responding for more than 1 minute."
+
+  # =============================================================================
+  # Resource Usage Alerts
+  # =============================================================================
+  - name: resource_usage
+    interval: 30s
+    rules:
+      # Warning: High CPU usage (if node exporter is available)
+      - alert: HighCPUUsage
+        expr: |
+          100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High CPU usage on {{ $labels.instance }}"
+          description: "CPU usage is above 80% for 10 minutes. Current: {{ $value | humanize }}%"
+
+      # Warning: High memory usage
+      - alert: HighMemoryUsage
+        expr: |
+          (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 85
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High memory usage on {{ $labels.instance }}"
+          description: "Memory usage is above 85% for 10 minutes. Current: {{ $value | humanize }}%"
+
+      # Warning: Disk space running low
+      - alert: DiskSpaceLow
+        expr: |
+          (1 - (node_filesystem_avail_bytes{fstype!="tmpfs"} / node_filesystem_size_bytes{fstype!="tmpfs"})) * 100 > 80
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Disk space running low on {{ $labels.instance }}"
+          description: "Disk usage is above 80% on {{ $labels.mountpoint }}. Current: {{ $value | humanize }}%"

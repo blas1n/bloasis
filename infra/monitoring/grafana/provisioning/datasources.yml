@@ -1,0 +1,28 @@
+# Grafana Datasources Provisioning for BLOASIS
+# Automatically configures Prometheus as the default datasource
+
+apiVersion: 1
+
+# Delete datasources before importing (useful for updates)
+deleteDatasources: []
+
+# Datasource configuration
+datasources:
+  # Prometheus - Primary metrics datasource
+  - name: Prometheus
+    type: prometheus
+    uid: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+    jsonData:
+      # Time interval for data fetching
+      timeInterval: "15s"
+      # Query timeout
+      queryTimeout: "60s"
+      # HTTP method for queries
+      httpMethod: POST
+      # Enable exemplars (if supported)
+      exemplarTraceIdDestinations: []
+    version: 1
