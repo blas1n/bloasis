@@ -1,16 +1,16 @@
 # buf.yaml - Protocol Buffer dependency management
-# https://buf.build/docs/configuration/v2/buf-yaml
+# https://buf.build/docs/configuration/v1/buf-yaml
 
-version: v2
+version: v1
 
-# Dependencies - automatically managed by buf
+# Dependencies
 deps:
   - buf.build/googleapis/googleapis
 
 # Lint rules
 lint:
   use:
-    - STANDARD
+    - DEFAULT
   except:
     - PACKAGE_VERSION_SUFFIX    # Allow packages without version suffix (e.g., bloasis.common vs bloasis.common.v1)
     - PACKAGE_DIRECTORY_MATCH   # Allow flat directory structure (shared/proto/ instead of bloasis/common/)

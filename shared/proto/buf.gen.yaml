@@ -1,7 +1,7 @@
 # buf.gen.yaml - Code generation configuration
-# https://buf.build/docs/configuration/v2/buf-gen-yaml
+# https://buf.build/docs/configuration/v1/buf-gen-yaml
 
-version: v2
+version: v1
 
 # Managed mode - automatic package/import management
 managed:
@@ -10,17 +10,13 @@ managed:
 # Code generation plugins
 plugins:
   # Python protobuf
-  - remote: buf.build/protocolbuffers/python
+  - plugin: buf.build/protocolbuffers/python
     out: ../generated
 
   # Python gRPC
-  - remote: buf.build/grpc/python
+  - plugin: buf.build/grpc/python
     out: ../generated
 
   # Python type stubs (.pyi) for IDE support
-  - remote: buf.build/community/nipunn1313-mypy
+  - plugin: buf.build/community/nipunn1313-mypy
     out: ../generated
-
-# Input proto files
-inputs:
-  - directory: .

@@ -74,11 +74,14 @@ RUN ARCH=$([ "$TARGETARCH" = "arm64" ] && echo "aarch64" || echo "x86_64") && \
 # Copy proto files and buf configuration
 COPY shared/proto shared/proto/
 
-# Generate proto files
-RUN cd /app/shared/proto && buf generate
+# Copy pre-generated proto files (skip buf generate to avoid rate limit)
+COPY shared/generated shared/generated/
 
-# Create __init__.py for generated package
-RUN echo '"""Generated Protocol Buffer files."""' > /app/shared/generated/__init__.py
+# Generate proto files (commented out to avoid BSR rate limit)
+# RUN cd /app/shared/proto && buf generate
+
+# __init__.py already exists in generated folder
+# RUN echo '"""Generated Protocol Buffer files."""' > /app/shared/generated/__init__.py
 
 # =============================================================================
 # Stage 2: Runtime - Minimal production image

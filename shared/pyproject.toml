@@ -31,6 +31,12 @@ dependencies = [
 
     # YAML parsing - Prompt management
     "pyyaml>=6.0.1",
+
+    # Metrics - Prometheus client
+    "prometheus-client>=0.19.0",
+
+    # AI - Anthropic Claude API
+    "anthropic>=0.18.0",
 ]
 
 [project.optional-dependencies]
