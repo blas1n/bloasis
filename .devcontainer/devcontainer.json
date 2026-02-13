@@ -37,7 +37,8 @@
         // Git
         "eamodio.gitlens",
         // Claude
-        "anthropic.claude-code"
+        "anthropic.claude-code",
+        "highagency.pencildev"
       ],
       "settings": {
         "python.defaultInterpreterPath": "/usr/local/bin/python",
