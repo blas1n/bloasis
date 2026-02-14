@@ -18,8 +18,8 @@ export function PortfolioSummary({ userId }: PortfolioSummaryProps) {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {[...Array(4)].map((_, i) => (
           <Card key={i} className="animate-pulse">
-            <div className="h-4 bg-gray-200 rounded w-24 mb-2" />
-            <div className="h-8 bg-gray-200 rounded w-32" />
+            <div className="h-4 bg-bg-surface rounded w-24 mb-2" />
+            <div className="h-8 bg-bg-surface rounded w-32" />
           </Card>
         ))}
       </div>
@@ -37,17 +37,17 @@ export function PortfolioSummary({ userId }: PortfolioSummaryProps) {
   return (
     <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
       <Card>
-        <h3 className="text-sm text-gray-500">Total Equity</h3>
-        <p className="text-2xl font-bold text-gray-900">
+        <h3 className="text-sm text-text-secondary">Total Equity</h3>
+        <p className="text-2xl font-bold text-text-primary">
           {formatCurrency(summary.totalEquity)}
         </p>
       </Card>
 
       <Card>
-        <h3 className="text-sm text-gray-500">Today&apos;s P&amp;L</h3>
+        <h3 className="text-sm text-text-secondary">Today&apos;s P&amp;L</h3>
         <p
           className={`text-2xl font-bold ${
-            summary.dailyPnl >= 0 ? "text-green-600" : "text-red-600"
+            summary.dailyPnl >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"
           }`}
         >
           {formatCurrency(summary.dailyPnl)}
@@ -58,10 +58,10 @@ export function PortfolioSummary({ userId }: PortfolioSummaryProps) {
       </Card>
 
       <Card>
-        <h3 className="text-sm text-gray-500">Unrealized P&amp;L</h3>
+        <h3 className="text-sm text-text-secondary">Unrealized P&amp;L</h3>
         <p
           className={`text-2xl font-bold ${
-            summary.unrealizedPnl >= 0 ? "text-green-600" : "text-red-600"
+            summary.unrealizedPnl >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"
           }`}
         >
           {formatCurrency(summary.unrealizedPnl)}
@@ -69,8 +69,8 @@ export function PortfolioSummary({ userId }: PortfolioSummaryProps) {
       </Card>
 
       <Card>
-        <h3 className="text-sm text-gray-500">Buying Power</h3>
-        <p className="text-2xl font-bold text-gray-900">
+        <h3 className="text-sm text-text-secondary">Buying Power</h3>
+        <p className="text-2xl font-bold text-text-primary">
           {formatCurrency(summary.buyingPower)}
         </p>
       </Card>

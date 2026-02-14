@@ -15,7 +15,6 @@ services:
       - claude-code-bashhistory:/commandhistory
       - claude-code-config:/home/vscode/.claude
     ports:
-      - "8000:8000"
       - "3000:3000"
     environment:
       - PYTHONUNBUFFERED=1
@@ -140,6 +139,7 @@ services:
       - ../infra/kong:/kong
       - ../shared/proto:/kong/proto
     ports:
+      - "8000:8000"  # Proxy (API traffic)
       - "8001:8001"  # Admin API
     healthcheck:
       test: ["CMD", "kong", "health"]

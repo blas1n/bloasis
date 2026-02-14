@@ -3,3 +3,4 @@ export { PnLChart } from "./PnLChart";
 export { PortfolioSummary } from "./PortfolioSummary";
 export { PositionsList } from "./PositionsList";
 export { SignalsList } from "./SignalsList";
+export { TradeHistoryTable } from "./TradeHistoryTable";

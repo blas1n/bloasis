@@ -46,16 +46,25 @@ const navigation: NavItem[] = [
       </svg>
     ),
   },
+  {
+    name: "Trade History",
+    href: "/dashboard/trade-history",
+    icon: (
+      <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+      </svg>
+    ),
+  },
 ];
 
 export function Sidebar() {
   const pathname = usePathname();
 
   return (
-    <div className="flex flex-col w-64 bg-gray-900 min-h-screen">
+    <div className="flex flex-col w-64 bg-bg-base min-h-screen">
       {/* Logo */}
-      <div className="flex items-center h-16 px-4 bg-gray-900">
-        <span className="text-xl font-bold text-white">BLOASIS</span>
+      <div className="flex items-center h-16 px-4 bg-bg-base">
+        <span className="text-xl font-bold text-text-primary">BLOASIS</span>
       </div>
 
       {/* Navigation */}
@@ -68,8 +77,8 @@ export function Sidebar() {
               href={item.href}
               className={`flex items-center px-4 py-2 text-sm font-medium rounded-md transition-colors ${
                 isActive
-                  ? "bg-gray-800 text-white"
-                  : "text-gray-300 hover:bg-gray-700 hover:text-white"
+                  ? "bg-bg-elevated text-text-primary"
+                  : "text-text-secondary hover:bg-bg-elevated hover:text-text-primary"
               }`}
             >
               <span className="mr-3">{item.icon}</span>
@@ -80,15 +89,15 @@ export function Sidebar() {
       </nav>
 
       {/* User Section */}
-      <div className="flex items-center px-4 py-4 border-t border-gray-700">
+      <div className="flex items-center px-4 py-4 border-t border-border-custom">
         <div className="flex-shrink-0">
-          <div className="h-8 w-8 rounded-full bg-gray-600 flex items-center justify-center">
-            <span className="text-sm font-medium text-white">U</span>
+          <div className="h-8 w-8 rounded-full bg-bg-elevated flex items-center justify-center">
+            <span className="text-sm font-medium text-text-primary">U</span>
           </div>
         </div>
         <div className="ml-3">
-          <p className="text-sm font-medium text-white">Demo User</p>
-          <p className="text-xs text-gray-400">Paper Trading</p>
+          <p className="text-sm font-medium text-text-primary">Demo User</p>
+          <p className="text-xs text-text-secondary">Paper Trading</p>
         </div>
       </div>
     </div>

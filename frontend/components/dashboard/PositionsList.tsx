@@ -30,7 +30,7 @@ export function PositionsList({ userId }: PositionsListProps) {
     return (
       <Card>
         <h3 className="text-lg font-semibold mb-4">Positions</h3>
-        <p className="text-gray-500 text-center py-8">No open positions</p>
+        <p className="text-text-secondary text-center py-8">No open positions</p>
       </Card>
     );
   }
@@ -40,55 +40,55 @@ export function PositionsList({ userId }: PositionsListProps) {
       <h3 className="text-lg font-semibold mb-4">Positions</h3>
 
       <div className="overflow-x-auto">
-        <table className="min-w-full divide-y divide-gray-200">
+        <table className="min-w-full divide-y divide-border-custom">
           <thead>
             <tr>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <th className="px-4 py-3 text-left text-xs font-medium text-text-secondary uppercase tracking-wider">
                 Symbol
               </th>
-              <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <th className="px-4 py-3 text-right text-xs font-medium text-text-secondary uppercase tracking-wider">
                 Qty
               </th>
-              <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <th className="px-4 py-3 text-right text-xs font-medium text-text-secondary uppercase tracking-wider">
                 Avg Cost
               </th>
-              <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <th className="px-4 py-3 text-right text-xs font-medium text-text-secondary uppercase tracking-wider">
                 Price
               </th>
-              <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <th className="px-4 py-3 text-right text-xs font-medium text-text-secondary uppercase tracking-wider">
                 Value
               </th>
-              <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <th className="px-4 py-3 text-right text-xs font-medium text-text-secondary uppercase tracking-wider">
                 P&amp;L
               </th>
             </tr>
           </thead>
-          <tbody className="bg-white divide-y divide-gray-200">
+          <tbody className="bg-bg-elevated divide-y divide-border-custom">
             {positions.map((position) => (
-              <tr key={position.symbol} className="hover:bg-gray-50">
+              <tr key={position.symbol} className="hover:bg-bg-surface">
                 <td className="px-4 py-3 whitespace-nowrap">
-                  <span className="font-medium text-gray-900">
+                  <span className="font-medium text-text-primary">
                     {position.symbol}
                   </span>
                 </td>
-                <td className="px-4 py-3 whitespace-nowrap text-right text-gray-600">
+                <td className="px-4 py-3 whitespace-nowrap text-right text-text-secondary">
                   {position.quantity}
                 </td>
-                <td className="px-4 py-3 whitespace-nowrap text-right text-gray-600">
+                <td className="px-4 py-3 whitespace-nowrap text-right text-text-secondary">
                   {formatCurrency(position.avgCost)}
                 </td>
-                <td className="px-4 py-3 whitespace-nowrap text-right text-gray-600">
+                <td className="px-4 py-3 whitespace-nowrap text-right text-text-secondary">
                   {formatCurrency(position.currentPrice)}
                 </td>
-                <td className="px-4 py-3 whitespace-nowrap text-right text-gray-900 font-medium">
+                <td className="px-4 py-3 whitespace-nowrap text-right text-text-primary font-medium">
                   {formatCurrency(position.currentValue)}
                 </td>
                 <td className="px-4 py-3 whitespace-nowrap text-right">
                   <div
                     className={
                       position.unrealizedPnl >= 0
-                        ? "text-green-600"
-                        : "text-red-600"
+                        ? "text-green-600 dark:text-green-400"
+                        : "text-red-600 dark:text-red-400"
                     }
                   >
                     <span className="font-medium">

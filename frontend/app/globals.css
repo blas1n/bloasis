@@ -2,18 +2,35 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  --foreground-rgb: 0, 0, 0;
-  --background-start-rgb: 249, 250, 251;
-  --background-end-rgb: 255, 255, 255;
-}
+@layer base {
+  :root {
+    /* Light theme (default) */
+    --bg-base: #1E293B;
+    --bg-elevated: #FFFFFF;
+    --bg-surface: #F8FAFC;
+    --border: #E5E7EB;
+    --text-primary: #111827;
+    --text-secondary: #6B7280;
+    --theme-primary: #2563EB;
+    --theme-success: #059669;
+    --theme-danger: #DC2626;
+  }
 
-body {
-  color: rgb(var(--foreground-rgb));
-  background: linear-gradient(
-      to bottom,
-      transparent,
-      rgb(var(--background-end-rgb))
-    )
-    rgb(var(--background-start-rgb));
+  .dark {
+    /* Dark theme overrides */
+    --bg-base: #0A0E14;
+    --bg-elevated: #1A1F2E;
+    --bg-surface: #0F1419;
+    --border: #242B3D;
+    --text-primary: #F9FAFB;
+    --text-secondary: #9CA3AF;
+    --theme-primary: #3B82F6;
+    --theme-success: #10B981;
+    --theme-danger: #EF4444;
+  }
+
+  /* Smooth theme transitions */
+  * {
+    @apply transition-colors duration-200;
+  }
 }
