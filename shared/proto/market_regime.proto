@@ -40,6 +40,21 @@ message GetCurrentRegimeRequest {
   bool force_refresh = 1;
 }
 
+// Market indicators used in regime classification
+message MarketIndicators {
+  // VIX volatility index
+  double vix = 1;
+
+  // S&P 500 trend direction
+  string sp500_trend = 2;
+
+  // Yield curve spread (10Y - 2Y)
+  string yield_curve = 3;
+
+  // Credit spreads indicator
+  string credit_spreads = 4;
+}
+
 // GetCurrentRegimeResponse - Current market regime classification
 message GetCurrentRegimeResponse {
   // Market regime classification:
@@ -65,6 +80,15 @@ message GetCurrentRegimeResponse {
   // - "earnings_season": Major earnings period affecting sentiment
   // - "geopolitical": Major geopolitical event
   string trigger = 4;
+
+  // AI-generated reasoning explaining the regime classification
+  string reasoning = 5;
+
+  // Risk level assessment: "low", "medium", or "high"
+  string risk_level = 6;
+
+  // Market indicators used in this classification
+  MarketIndicators indicators = 7;
 }
 
 // GetRegimeHistoryRequest - Request for historical regime data

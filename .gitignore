@@ -132,6 +132,7 @@ temp/
 
 # Proto Generated Files
 shared/generated/
+/infra/envoy/proto.pb
 
 # Backtest Results
 backtest_results/

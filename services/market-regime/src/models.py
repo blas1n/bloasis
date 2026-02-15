@@ -63,12 +63,18 @@ class RegimeData:
         timestamp: ISO 8601 timestamp of classification.
         trigger: What triggered the classification (baseline, fomc, circuit_breaker,
                 earnings_season, geopolitical).
+        reasoning: AI-generated explanation of the regime classification.
+        risk_level: Risk assessment (low, medium, high).
+        indicators: Market indicators used in classification.
     """
 
     regime: str
     confidence: float
     timestamp: str
     trigger: str
+    reasoning: str = ""
+    risk_level: str = "medium"
+    indicators: Optional[dict] = None
 
 
 class RegimeClassifier:
@@ -137,15 +143,28 @@ class RegimeClassifier:
                 )
 
                 timestamp = datetime.now(timezone.utc).isoformat()
+
+                # Determine risk level based on regime and VIX
+                vix = market_data.get("vix", 20.0)
+                risk_level = self._calculate_risk_level(result.get("regime", "sideways"), vix)
+
                 regime_data = RegimeData(
                     regime=result.get("regime", "sideways"),
                     confidence=float(result.get("confidence", 0.5)),
                     timestamp=timestamp,
                     trigger=result.get("reasoning", "baseline")[:50],
+                    reasoning=result.get("reasoning", "AI-generated market analysis"),
+                    risk_level=risk_level,
+                    indicators={
+                        "vix": vix,
+                        "sp500_trend": market_data.get("sp500_trend", "neutral"),
+                        "yield_curve": str(macro_indicators.get("yield_curve_10y_2y", 0.0)),
+                        "credit_spreads": market_data.get("credit_spreads", "normal"),
+                    },
                 )
                 logger.info(
                     f"Classified regime: {regime_data.regime} "
-                    f"(confidence: {regime_data.confidence})"
+                    f"(confidence: {regime_data.confidence}, risk: {risk_level})"
                 )
                 return regime_data
 
@@ -154,6 +173,15 @@ class RegimeClassifier:
 
         # Fallback: Simple rule-based classification
         return self._fallback_classify(market_data, macro_indicators)
+
+    def _calculate_risk_level(self, regime: str, vix: float) -> str:
+        """Calculate risk level based on regime and VIX."""
+        if regime == "crisis" or vix > 30:
+            return "high"
+        elif regime == "bear" or vix > 20:
+            return "medium"
+        else:
+            return "low"
 
     def _fallback_classify(
         self,
@@ -165,30 +193,37 @@ class RegimeClassifier:
         timestamp = datetime.now(timezone.utc).isoformat()
 
         if vix > 30:
-            return RegimeData(
-                regime="crisis",
-                confidence=0.85,
-                timestamp=timestamp,
-                trigger="high_vix",
-            )
+            regime = "crisis"
+            confidence = 0.85
+            trigger = "high_vix"
+            reasoning = f"High volatility detected (VIX: {vix:.1f}), indicating crisis conditions"
         elif vix > 25:
-            return RegimeData(
-                regime="bear",
-                confidence=0.75,
-                timestamp=timestamp,
-                trigger="elevated_vix",
-            )
+            regime = "bear"
+            confidence = 0.75
+            trigger = "elevated_vix"
+            reasoning = f"Elevated volatility (VIX: {vix:.1f}), bearish market conditions"
         elif vix < 15:
-            return RegimeData(
-                regime="bull",
-                confidence=0.80,
-                timestamp=timestamp,
-                trigger="low_vix",
-            )
+            regime = "bull"
+            confidence = 0.80
+            trigger = "low_vix"
+            reasoning = f"Low volatility (VIX: {vix:.1f}), bullish market conditions"
         else:
-            return RegimeData(
-                regime="sideways",
-                confidence=0.65,
-                timestamp=timestamp,
-                trigger="baseline",
-            )
+            regime = "sideways"
+            confidence = 0.65
+            trigger = "baseline"
+            reasoning = f"Moderate volatility (VIX: {vix:.1f}), range-bound market"
+
+        return RegimeData(
+            regime=regime,
+            confidence=confidence,
+            timestamp=timestamp,
+            trigger=trigger,
+            reasoning=reasoning,
+            risk_level=self._calculate_risk_level(regime, vix),
+            indicators={
+                "vix": vix,
+                "sp500_trend": market_data.get("sp500_trend", "neutral"),
+                "yield_curve": str(macro_indicators.get("yield_curve_10y_2y", 0.0)),
+                "credit_spreads": market_data.get("credit_spreads", "normal"),
+            },
+        )

@@ -68,7 +68,9 @@ export function MarketRegime() {
       </div>
 
       <div className="mt-4">
-        <p className="text-sm text-gray-600">{regime.reasoning}</p>
+        <p className="text-sm text-gray-600">
+          {regime.reasoning || regime.trigger || "Market analysis"}
+        </p>
       </div>
 
       <div className="mt-4 grid grid-cols-2 gap-4">
@@ -78,12 +80,14 @@ export function MarketRegime() {
             {regime.indicators?.vix?.toFixed(1) ?? "N/A"}
           </p>
         </div>
-        <div>
-          <p className="text-xs text-gray-500">Risk Level</p>
-          <Badge variant={riskLevelVariant[regime.riskLevel]}>
-            {regime.riskLevel.toUpperCase()}
-          </Badge>
-        </div>
+        {regime.riskLevel && (
+          <div>
+            <p className="text-xs text-gray-500">Risk Level</p>
+            <Badge variant={riskLevelVariant[regime.riskLevel]}>
+              {regime.riskLevel.toUpperCase()}
+            </Badge>
+          </div>
+        )}
       </div>
     </Card>
   );

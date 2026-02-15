@@ -103,16 +103,40 @@ class MarketRegimeServicer(market_regime_pb2_grpc.MarketRegimeServiceServicer):
                 cached = await self.redis.get(CACHE_KEY)
                 if cached and isinstance(cached, dict):
                     logger.info("Cache hit for current regime")
+                    # Build indicators message if present
+                    indicators = None
+                    if cached.get("indicators"):
+                        ind = cached["indicators"]
+                        indicators = market_regime_pb2.MarketIndicators(
+                            vix=ind.get("vix", 0.0),
+                            sp500_trend=ind.get("sp500_trend", ""),
+                            yield_curve=ind.get("yield_curve", ""),
+                            credit_spreads=ind.get("credit_spreads", ""),
+                        )
+
                     return market_regime_pb2.GetCurrentRegimeResponse(
                         regime=cached.get("regime", ""),
                         confidence=cached.get("confidence", 0.0),
                         timestamp=cached.get("timestamp", ""),
                         trigger=cached.get("trigger", ""),
+                        reasoning=cached.get("reasoning", ""),
+                        risk_level=cached.get("risk_level", "medium"),
+                        indicators=indicators,
                     )
 
             # Cache miss or force_refresh - classify regime
             logger.info("Classifying market regime...")
             regime_data: RegimeData = await self.classifier.classify()
+
+            # Build indicators message
+            indicators = None
+            if regime_data.indicators:
+                indicators = market_regime_pb2.MarketIndicators(
+                    vix=regime_data.indicators.get("vix", 0.0),
+                    sp500_trend=regime_data.indicators.get("sp500_trend", ""),
+                    yield_curve=regime_data.indicators.get("yield_curve", ""),
+                    credit_spreads=regime_data.indicators.get("credit_spreads", ""),
+                )
 
             # Create response
             response = market_regime_pb2.GetCurrentRegimeResponse(
@@ -120,6 +144,9 @@ class MarketRegimeServicer(market_regime_pb2_grpc.MarketRegimeServiceServicer):
                 confidence=regime_data.confidence,
                 timestamp=regime_data.timestamp,
                 trigger=regime_data.trigger,
+                reasoning=regime_data.reasoning,
+                risk_level=regime_data.risk_level,
+                indicators=indicators,
             )
 
             # Get previous regime for change detection
@@ -136,6 +163,9 @@ class MarketRegimeServicer(market_regime_pb2_grpc.MarketRegimeServiceServicer):
                     "confidence": regime_data.confidence,
                     "timestamp": regime_data.timestamp,
                     "trigger": regime_data.trigger,
+                    "reasoning": regime_data.reasoning,
+                    "risk_level": regime_data.risk_level,
+                    "indicators": regime_data.indicators,
                 }
                 await self.redis.setex(CACHE_KEY, CACHE_TTL, cache_data)
                 logger.info(f"Cached regime data with TTL {CACHE_TTL}s")
@@ -207,6 +237,10 @@ class MarketRegimeServicer(market_regime_pb2_grpc.MarketRegimeServiceServicer):
                     confidence=record.confidence,
                     timestamp=record.timestamp.isoformat() if record.timestamp else "",
                     trigger=record.trigger,
+                    reasoning=getattr(record, "analysis", "") or "",
+                    risk_level=getattr(record, "risk_level", "medium"),
+                    # Indicators not stored in historical records yet
+                    indicators=None,
                 )
                 regimes.append(regime_response)
 
@@ -320,6 +354,9 @@ class MarketRegimeServicer(market_regime_pb2_grpc.MarketRegimeServiceServicer):
                     "confidence": regime_data.confidence,
                     "timestamp": regime_data.timestamp,
                     "trigger": regime_data.trigger,
+                    "reasoning": regime_data.reasoning,
+                    "risk_level": regime_data.risk_level,
+                    "indicators": regime_data.indicators,
                 }
                 await self.redis.setex(CACHE_KEY, CACHE_TTL, cache_data)
                 logger.info(f"Updated cache with new regime: {regime_data.regime}")
@@ -331,12 +368,25 @@ class MarketRegimeServicer(market_regime_pb2_grpc.MarketRegimeServiceServicer):
                 event_type="regime_saved",
             )
 
+            # Build indicators message
+            indicators = None
+            if regime_data.indicators:
+                indicators = market_regime_pb2.MarketIndicators(
+                    vix=regime_data.indicators.get("vix", 0.0),
+                    sp500_trend=regime_data.indicators.get("sp500_trend", ""),
+                    yield_curve=regime_data.indicators.get("yield_curve", ""),
+                    credit_spreads=regime_data.indicators.get("credit_spreads", ""),
+                )
+
             # Build response
             regime_response = market_regime_pb2.GetCurrentRegimeResponse(
                 regime=regime_data.regime,
                 confidence=regime_data.confidence,
                 timestamp=regime_data.timestamp,
                 trigger=regime_data.trigger,
+                reasoning=regime_data.reasoning,
+                risk_level=regime_data.risk_level,
+                indicators=indicators,
             )
 
             logger.info(

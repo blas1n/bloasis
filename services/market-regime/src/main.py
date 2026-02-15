@@ -18,7 +18,6 @@ from shared.utils import (
     PostgresClient,
     RedisClient,
     RedpandaClient,
-    get_local_ip,
     setup_logger,
 )
 
@@ -66,7 +65,8 @@ async def serve() -> None:
             host=config.consul_host,
             port=config.consul_port,
         )
-        service_host = get_local_ip(config.consul_host, config.consul_port)
+        # Use configured service address (host.docker.internal for dev, actual IP for production)
+        service_host = config.service_address
         registered = await consul_client.register_grpc_service(
             service_name=config.service_name,
             service_id=f"{config.service_name}-{socket.gethostname()}",

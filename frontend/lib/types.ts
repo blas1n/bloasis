@@ -46,10 +46,11 @@ export interface MarketRegimeIndicators {
 export interface MarketRegimeResponse {
   regime: RegimeType;
   confidence: number;
-  reasoning: string;
-  riskLevel: RiskLevel;
-  indicators: MarketRegimeIndicators;
   timestamp: string;
+  trigger: string; // What triggered this classification
+  reasoning: string; // AI-generated explanation
+  riskLevel: RiskLevel; // Note: API returns "risk_level" (snake_case), Kong transcodes to camelCase
+  indicators: MarketRegimeIndicators;
 }
 
 // Classification Types

@@ -22,6 +22,7 @@ class ServiceConfig(BaseSettings):
     # Service identity
     service_name: str = "market-regime"
     grpc_port: int = 50051
+    service_address: str = "host.docker.internal"  # For Consul registration (Envoy in Docker)
 
     # Redis configuration
     redis_host: str = "localhost"

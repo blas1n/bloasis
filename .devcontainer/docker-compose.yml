@@ -120,32 +120,18 @@ services:
     networks:
       - bloasis-network
 
-  kong:
-    image: kong:3.6
-    container_name: bloasis-kong
-    restart: unless-stopped
-    environment:
-      KONG_DATABASE: "off"
-      KONG_DECLARATIVE_CONFIG: /kong/kong.yml
-      KONG_PROXY_LISTEN: 0.0.0.0:8000
-      KONG_ADMIN_LISTEN: 0.0.0.0:8001
-      KONG_PROXY_ACCESS_LOG: /dev/stdout
-      KONG_ADMIN_ACCESS_LOG: /dev/stdout
-      KONG_PROXY_ERROR_LOG: /dev/stderr
-      KONG_ADMIN_ERROR_LOG: /dev/stderr
-      # JWT Secret for token verification (must match Auth Service JWT_SECRET_KEY)
-      KONG_JWT_SECRET: ${KONG_JWT_SECRET:-your_jwt_secret_key_here}
+  envoy:
+    image: envoyproxy/envoy:v1.29-latest
+    container_name: bloasis-envoy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"  # Access host's localhost
     volumes:
-      - ../infra/kong:/kong
-      - ../shared/proto:/kong/proto
+      - ../infra/envoy/envoy.yaml:/etc/envoy/envoy.yaml:ro
+      - ../infra/envoy/proto.pb:/etc/envoy/proto.pb:ro
     ports:
-      - "8000:8000"  # Proxy (API traffic)
-      - "8001:8001"  # Admin API
-    healthcheck:
-      test: ["CMD", "kong", "health"]
-      interval: 10s
-      timeout: 10s
-      retries: 5
+      - "8081:8000"  # API Gateway (gRPC-JSON transcoding)
+      - "9901:9901"  # Admin interface
+    command: ["-c", "/etc/envoy/envoy.yaml"]
     networks:
       - bloasis-network
 
