@@ -147,12 +147,12 @@ scrape_configs:
     metrics_path: /public_metrics
     scrape_interval: 15s
 
-  # Kong Gateway (if metrics enabled)
-  - job_name: 'kong'
+  # Envoy Gateway (if metrics enabled)
+  - job_name: 'envoy'
     static_configs:
-      - targets: ['kong:8001']
+      - targets: ['envoy:8001']
         labels:
-          service: 'kong'
+          service: 'envoy'
           type: 'gateway'
-    metrics_path: /metrics
+    metrics_path: /stats/prometheus
     scrape_interval: 15s

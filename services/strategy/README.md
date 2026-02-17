@@ -40,7 +40,7 @@ The Strategy Service implements Stage 3 of the Stock Selection Pipeline, perform
 ### Service Information
 
 - **Port**: 50055 (gRPC)
-- **Protocol**: gRPC with HTTP annotations (Kong Gateway transcoding)
+- **Protocol**: gRPC with HTTP annotations (Envoy Gateway transcoding)
 - **Caching**: Layer 3 (user-specific)
 
 ### Dependencies
@@ -191,7 +191,7 @@ Key messages:
 
 ## Architecture Rules
 
-- **gRPC only**: No HTTP endpoints (Kong handles transcoding)
+- **gRPC only**: No HTTP endpoints (Envoy handles transcoding)
 - **No direct service imports**: Use gRPC clients only
 - **Decimal for money**: No float for financial calculations
 - **Type hints required**: All public functions

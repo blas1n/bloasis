@@ -16,7 +16,7 @@ The `shared/` directory exists to prevent code duplication between services.
 
 - All .proto files for inter-service communication
 - Services create symlinks to this directory: `ln -s ../../shared/proto proto`
-- All .proto files must include HTTP annotations for Kong Gateway
+- All .proto files must include HTTP annotations for Envoy Gateway
 - Examples: market_regime.proto, ai_analysis.proto, common.proto
 
 **Important**: .proto files must always include HTTP annotations.

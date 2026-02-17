@@ -93,20 +93,20 @@ class StrategyRequest(BaseModel):
 
 **All external endpoints MUST require authentication.**
 
-**Kong JWT verification:**
+**Envoy JWT verification:**
 
 ```yaml
-# Kong config (Phase 2)
+# Envoy config (Phase 2)
 plugins:
   - name: jwt
     config:
       key_claim_name: sub
 ```
 
-**Backend trusts Kong:**
+**Backend trusts Envoy:**
 
 ```python
-# Backend receives authenticated user_id from Kong header
+# Backend receives authenticated user_id from Envoy header
 user_id = request.headers.get('X-User-Id')
 ```
 
@@ -115,7 +115,7 @@ user_id = request.headers.get('X-User-Id')
 **Prevent abuse with rate limits:**
 
 ```yaml
-# Kong config
+# Envoy config
 plugins:
   - name: rate-limiting
     config:

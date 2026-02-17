@@ -119,17 +119,17 @@ grep -r "time.sleep\|requests\." services/{service}/src/ | grep -v test
 grep -A 10 "{service}:" docker-compose.yml
 ```
 
-### 7. Kong Gateway (if external)
+### 7. Envoy Gateway (if external)
 
-- [ ] Route configured in kong.yml
+- [ ] Route configured in envoy.yaml
 - [ ] gRPC-gateway plugin enabled
 - [ ] Rate limiting configured
 - [ ] Proto file mounted
 
 **Check:**
 ```bash
-# Verify Kong routing
-grep -A 10 "{service}" infra/kong/kong.yml
+# Verify Envoy routing
+grep -A 10 "{service}" infra/envoy/envoy.yaml
 ```
 
 ### 8. Monitoring
@@ -197,7 +197,7 @@ After automated checks, manually verify:
      localhost:50051 bloasis.market_regime.MarketRegimeService/GetCurrentRegime
    ```
 
-4. **Verify Kong transcoding** (if external)
+4. **Verify Envoy transcoding** (if external)
    ```bash
    curl http://localhost:8000/v1/market-regime/current
    ```

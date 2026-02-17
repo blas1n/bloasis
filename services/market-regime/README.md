@@ -37,7 +37,7 @@ This is a **Tier 1 shared service**, meaning:
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-**Note**: This service exposes only gRPC. Kong Gateway handles HTTP-to-gRPC transcoding for external REST API access.
+**Note**: This service exposes only gRPC. Envoy Gateway handles HTTP-to-gRPC transcoding for external REST API access.
 
 ## API Endpoints
 
@@ -118,9 +118,9 @@ grpcurl -plaintext -d '{"service": "bloasis.market_regime.MarketRegimeService"}'
   localhost:50051 grpc.health.v1.Health/Check
 ```
 
-### REST via Kong Gateway
+### REST via Envoy Gateway
 
-Kong automatically transcodes gRPC to REST:
+Envoy Gateway automatically transcodes gRPC to REST:
 
 ```bash
 # Get current regime
@@ -247,7 +247,7 @@ ON market_data.market_regimes(timestamp);
 3. **Tests required** - minimum 80% coverage
 4. **gRPC for internal communication** - no HTTP between services
 5. **Redpanda for events** - not Redis Pub/Sub
-6. **gRPC-only exposure** - no HTTP endpoints, Kong handles REST transcoding
+6. **gRPC-only exposure** - no HTTP endpoints, Envoy handles REST transcoding
 
 ## Related Services
 
