@@ -15,7 +15,7 @@ services:
       - claude-code-bashhistory:/commandhistory
       - claude-code-config:/home/vscode/.claude
     ports:
-      - "3000:3000"
+      - "3000:3000"   # Next.js frontend
     environment:
       - PYTHONUNBUFFERED=1
       - PYTHONDONTWRITEBYTECODE=1
