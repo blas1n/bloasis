@@ -12,10 +12,16 @@ import type {
   SectorAnalysisResponse,
   StockPicksResponse,
   TradeHistoryResponse,
+  TradingStatus,
+  TradingControlResponse,
+  UserPreferences,
+  RiskProfile,
 } from "./types";
 
+// In browser: go through Next.js API proxy (/api/[...path] → Envoy Gateway)
+// NEXT_PUBLIC_API_URL can override (e.g. for production direct access)
 const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+  process.env.NEXT_PUBLIC_API_URL || "/api";
 
 class ApiClient {
   private baseUrl: string;
@@ -71,10 +77,6 @@ class ApiClient {
   }
 
   // Market Regime endpoints
-  async getMarketRegime(): Promise<ApiResponse<MarketRegimeResponse>> {
-    return this.request<MarketRegimeResponse>("/v1/market-regime/current");
-  }
-
   async getCurrentRegime(): Promise<ApiResponse<MarketRegimeResponse>> {
     return this.request<MarketRegimeResponse>("/v1/market-regime/current");
   }
@@ -106,6 +108,57 @@ class ApiClient {
       method: "POST",
       body: JSON.stringify({ user_id: userId, max_picks: maxPicks }),
     });
+  }
+
+  // ========================================================================
+  // Trading Control APIs
+  // ========================================================================
+
+  async startTrading(userId: string): Promise<ApiResponse<TradingControlResponse>> {
+    return this.request<TradingControlResponse>(
+      `/v1/users/${userId}/trading/start`,
+      { method: "POST" }
+    );
+  }
+
+  async stopTrading(
+    userId: string,
+    stopMode: "hard" | "soft" = "soft"
+  ): Promise<ApiResponse<TradingControlResponse>> {
+    return this.request<TradingControlResponse>(
+      `/v1/users/${userId}/trading/stop`,
+      {
+        method: "POST",
+        body: JSON.stringify({ stop_mode: stopMode }),
+      }
+    );
+  }
+
+  async getTradingStatus(userId: string): Promise<ApiResponse<TradingStatus>> {
+    return this.request<TradingStatus>(`/v1/users/${userId}/trading/status`);
+  }
+
+  // ========================================================================
+  // User Preferences APIs
+  // ========================================================================
+
+  async getUserPreferences(userId: string): Promise<ApiResponse<UserPreferences>> {
+    return this.request<UserPreferences>(`/v1/users/${userId}/preferences`);
+  }
+
+  async updateRiskProfile(
+    userId: string,
+    riskProfile: RiskProfile
+  ): Promise<ApiResponse<UserPreferences>> {
+    return this.request<UserPreferences>(
+      `/v1/users/${userId}/preferences`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({
+          preferences: { risk_profile: riskProfile },
+        }),
+      }
+    );
   }
 }
 

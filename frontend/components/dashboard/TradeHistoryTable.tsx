@@ -24,7 +24,7 @@ export function TradeHistoryTable({
   }
 
   if (error) {
-    return <ErrorMessage message={error} />;
+    return <ErrorMessage error={error} />;
   }
 
   if (trades.length === 0) {
@@ -52,17 +52,17 @@ export function TradeHistoryTable({
           </thead>
           <tbody className="divide-y divide-border-custom">
             {trades.map((trade) => (
-              <tr key={trade.trade_id} className="text-sm">
+              <tr key={trade.orderId} className="text-sm">
                 <td className="px-4 py-3 font-medium text-text-primary">
                   {trade.symbol}
                 </td>
                 <td className="px-4 py-3">
-                  <Badge variant={trade.side === "BUY" ? "success" : "danger"}>
-                    {trade.side}
+                  <Badge variant={trade.side === "buy" ? "success" : "danger"}>
+                    {trade.side.toUpperCase()}
                   </Badge>
                 </td>
                 <td className="px-4 py-3 text-text-primary">
-                  {trade.quantity}
+                  {trade.qty}
                 </td>
                 <td className="px-4 py-3 text-text-primary">
                   {formatCurrency(trade.price)}
@@ -71,18 +71,18 @@ export function TradeHistoryTable({
                   {formatCurrency(trade.commission)}
                 </td>
                 <td className="px-4 py-3 text-text-secondary">
-                  {formatDateTime(trade.executed_at)}
+                  {formatDateTime(trade.executedAt)}
                 </td>
                 <td className="px-4 py-3 text-right">
-                  {trade.realized_pnl !== null && (
+                  {trade.realizedPnl !== 0 && (
                     <span
                       className={
-                        trade.realized_pnl >= 0
+                        trade.realizedPnl >= 0
                           ? "text-green-600 dark:text-green-400"
                           : "text-red-600 dark:text-red-400"
                       }
                     >
-                      {formatCurrency(trade.realized_pnl)}
+                      {formatCurrency(trade.realizedPnl)}
                     </span>
                   )}
                 </td>

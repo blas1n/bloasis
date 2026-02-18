@@ -49,7 +49,7 @@ export interface MarketRegimeResponse {
   timestamp: string;
   trigger: string; // What triggered this classification
   reasoning: string; // AI-generated explanation
-  riskLevel: RiskLevel; // Note: API returns "risk_level" (snake_case), Kong transcodes to camelCase
+  riskLevel: RiskLevel; // Note: API returns "risk_level" (snake_case), Envoy transcodes to camelCase
   indicators: MarketRegimeIndicators;
 }
 
@@ -121,15 +121,51 @@ export interface Trade {
   commission: number;
   executedAt: string;
   realizedPnl: number;
+  aiReason?: string;  // AI-generated reasoning for this trade
 }
 
 export interface TradeHistoryResponse {
   trades: Trade[];
   totalRealizedPnl: number;
+  nextPollMs?: number;
 }
 
 // API Response wrapper
 export interface ApiResponse<T> {
   data: T;
   error?: string;
+}
+
+// ============================================================================
+// AI Trading Control Types
+// ============================================================================
+
+export interface TradingStatus {
+  tradingEnabled: boolean;
+  status: "active" | "soft_stopped" | "hard_stopped" | "inactive";
+  lastChanged: string;
+  nextPollMs?: number;
+}
+
+export interface TradingControlResponse {
+  success: boolean;
+  message: string;
+  ordersCancelled?: number;
+  timestamp: string;
+}
+
+// ============================================================================
+// User Preferences Extension
+// ============================================================================
+
+export type RiskProfile = "conservative" | "moderate" | "aggressive";
+
+export interface UserPreferences {
+  userId: string;
+  riskProfile: RiskProfile;
+  maxPortfolioRisk: string;
+  maxPositionSize: string;
+  preferredSectors: string[];
+  enableNotifications: boolean;
+  tradingEnabled: boolean;
 }
