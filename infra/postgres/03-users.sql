@@ -31,6 +31,7 @@ CREATE TABLE user_data.user_preferences (
     max_position_size DECIMAL(5,4) DEFAULT 0.10 CHECK (max_position_size BETWEEN 0 AND 1),
     preferred_sectors TEXT[] DEFAULT '{}',
     enable_notifications BOOLEAN DEFAULT true,
+    trading_enabled BOOLEAN DEFAULT false,
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -40,6 +41,7 @@ COMMENT ON COLUMN user_data.user_preferences.max_portfolio_risk IS 'Maximum port
 COMMENT ON COLUMN user_data.user_preferences.max_position_size IS 'Maximum single position size as decimal (0-1)';
 COMMENT ON COLUMN user_data.user_preferences.preferred_sectors IS 'Preferred trading sectors';
 COMMENT ON COLUMN user_data.user_preferences.enable_notifications IS 'Whether to receive trading notifications';
+COMMENT ON COLUMN user_data.user_preferences.trading_enabled IS 'AI 자동 거래 활성화 여부';
 
 -- Indexes
 CREATE INDEX idx_users_email ON user_data.users(email);

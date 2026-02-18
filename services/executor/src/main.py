@@ -16,6 +16,7 @@ import sys
 import grpc
 from grpc_health.v1 import health, health_pb2, health_pb2_grpc
 from shared.generated import executor_pb2_grpc
+from shared.utils.event_consumer import EventConsumer
 
 from .alpaca_client import AlpacaClient
 from .config import config
@@ -35,11 +36,12 @@ logger = logging.getLogger(__name__)
 alpaca_client: AlpacaClient | None = None
 event_publisher: EventPublisher | None = None
 redis_client: RedisClient | None = None
+trading_control_consumer: EventConsumer | None = None
 
 
 async def serve() -> None:
     """Start and run the gRPC server."""
-    global alpaca_client, event_publisher, redis_client
+    global alpaca_client, event_publisher, redis_client, trading_control_consumer
 
     logger.info(f"Starting {config.service_name} service on port {config.grpc_port}...")
 
@@ -80,6 +82,14 @@ async def serve() -> None:
     )
     executor_pb2_grpc.add_ExecutorServiceServicer_to_server(servicer, server)
 
+    # Start trading control event consumer
+    try:
+        await servicer.start_trading_control_consumer(config.redpanda_bootstrap_servers)
+        logger.info("Trading control consumer started")
+    except Exception as e:
+        logger.error(f"Failed to start trading control consumer: {e}")
+        raise
+
     # Add gRPC health check service
     health_servicer = health.HealthServicer()
     health_servicer.set("", health_pb2.HealthCheckResponse.SERVING)
@@ -99,6 +109,11 @@ async def serve() -> None:
     async def shutdown() -> None:
         logger.info("Shutting down...")
         await server.stop(grace=5)
+
+        # Stop trading control consumer
+        if servicer and hasattr(servicer, 'stop_trading_control_consumer'):
+            await servicer.stop_trading_control_consumer()
+            logger.info("Trading control consumer stopped")
 
         if event_publisher:
             await event_publisher.close()

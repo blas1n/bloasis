@@ -181,4 +181,5 @@ message GetTradingStatusResponse {
   bool trading_enabled = 1;
   string status = 2;  // "active", "inactive", "soft_stopped", "hard_stopped"
   string last_changed = 3;
+  int32 next_poll_ms = 4;  // Client should wait this many ms before next poll (server-directed)
 }

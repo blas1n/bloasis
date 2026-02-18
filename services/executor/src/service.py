@@ -41,6 +41,8 @@ class ExecutorServicer(executor_pb2_grpc.ExecutorServiceServicer):
         self.alpaca = alpaca_client
         self.publisher = event_publisher
         self.redis = redis_client
+        self.user_trading_status: dict[str, dict] = {}  # {user_id: {enabled, stop_mode, timestamp}}
+        self.trading_control_consumer = None
 
     async def ExecuteOrder(
         self,
@@ -78,6 +80,15 @@ class ExecutorServicer(executor_pb2_grpc.ExecutorServiceServicer):
             return executor_pb2.ExecuteOrderResponse(
                 success=False,
                 error_message="qty must be positive",
+            )
+
+        # Check if trading is enabled for this user
+        if not self._is_trading_enabled(request.user_id):
+            status = self.user_trading_status.get(request.user_id, {})
+            stop_mode = status.get("stop_mode", "unknown")
+            return executor_pb2.ExecuteOrderResponse(
+                success=False,
+                error_message=f"Trading disabled for user (mode: {stop_mode})",
             )
 
         # Verify risk approval
@@ -333,3 +344,123 @@ class ExecutorServicer(executor_pb2_grpc.ExecutorServiceServicer):
             )
         except Exception as e:
             logger.warning(f"Failed to publish execution event: {e}")
+
+    # ==================== Trading Control Methods ====================
+
+    async def start_trading_control_consumer(self, brokers: str) -> None:
+        """Start trading control event consumer.
+
+        Args:
+            brokers: Redpanda broker addresses
+        """
+        from shared.utils.event_consumer import EventConsumer
+
+        self.trading_control_consumer = EventConsumer(
+            brokers=brokers,
+            group_id="executor-service",
+            topics=["trading-control-events"],
+        )
+        self.trading_control_consumer.register_handler(
+            "trading_control",
+            self._handle_trading_control_event
+        )
+        await self.trading_control_consumer.start()
+        logger.info("Trading control consumer started")
+
+    async def stop_trading_control_consumer(self) -> None:
+        """Stop trading control event consumer."""
+        if self.trading_control_consumer:
+            await self.trading_control_consumer.stop()
+            logger.info("Trading control consumer stopped")
+
+    async def _handle_trading_control_event(self, event: dict) -> None:
+        """Handle trading control event.
+
+        Args:
+            event: Trading control event from Redpanda
+        """
+        user_id = event.get("user_id")
+        action = event.get("action")
+        stop_mode = event.get("stop_mode", "soft")
+
+        if not user_id:
+            return
+
+        if action == "stopped":
+            self.user_trading_status[user_id] = {
+                "enabled": False,
+                "stop_mode": stop_mode,
+                "stopped_at": event.get("timestamp")
+            }
+
+            # Hard Stop: Cancel all pending orders immediately
+            if stop_mode == "hard":
+                cancelled = await self._cancel_all_user_orders(user_id)
+                logger.info(f"Hard stop for user {user_id}: cancelled {cancelled} orders")
+            else:
+                logger.info(f"Soft stop for user {user_id}: protective orders only")
+
+        elif action == "started":
+            self.user_trading_status[user_id] = {
+                "enabled": True,
+                "stop_mode": "",
+                "started_at": event.get("timestamp")
+            }
+            logger.info(f"Trading started for user {user_id}")
+
+    async def _cancel_all_user_orders(self, user_id: str) -> int:
+        """Cancel all pending orders for a user (hard stop).
+
+        Args:
+            user_id: User identifier
+
+        Returns:
+            Number of orders cancelled
+        """
+        cancelled = 0
+
+        # Find all user orders in Redis
+        try:
+            # Scan for order keys
+            pattern = "order:*"
+            cursor = 0
+            keys_to_check = []
+
+            while True:
+                cursor, keys = await self.redis.scan(cursor, match=pattern, count=100)
+                keys_to_check.extend(keys)
+                if cursor == 0:
+                    break
+
+            # Check each order
+            for key in keys_to_check:
+                try:
+                    order_data = await self.redis.hgetall(key)
+                    if (order_data.get("user_id") == user_id and
+                        order_data.get("status") in ["new", "partially_filled"]):
+                        order_id = (key.decode("utf-8") if isinstance(key, bytes) else key).split(":")[-1]
+
+                        # Cancel via Alpaca
+                        if await self.alpaca.cancel_order(order_id):
+                            cancelled += 1
+                            await self.redis.hset(key, "status", "cancelled")
+                            logger.info(f"Cancelled order {order_id} for user {user_id}")
+                except Exception as e:
+                    logger.warning(f"Failed to cancel order {key}: {e}")
+
+        except Exception as e:
+            logger.error(f"Failed to cancel user orders: {e}")
+
+        return cancelled
+
+    def _is_trading_enabled(self, user_id: str) -> bool:
+        """Check if trading is enabled for a user.
+
+        Args:
+            user_id: User identifier
+
+        Returns:
+            True if trading is enabled, False otherwise
+        """
+        status = self.user_trading_status.get(user_id, {"enabled": True})
+        return status.get("enabled", True)
