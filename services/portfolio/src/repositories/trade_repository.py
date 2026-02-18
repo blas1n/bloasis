@@ -36,6 +36,7 @@ class TradeRepository:
         commission: Decimal = Decimal("0"),
         realized_pnl: Decimal = Decimal("0"),
         executed_at: Optional[datetime] = None,
+        ai_reason: Optional[str] = None,
     ) -> Trade:
         """Save a new trade record.
 
@@ -49,6 +50,7 @@ class TradeRepository:
             commission: Commission paid.
             realized_pnl: Realized P&L for sell trades.
             executed_at: Execution timestamp (defaults to now).
+            ai_reason: AI-generated reasoning for this trade (optional, max 500 chars).
 
         Returns:
             Trade domain object.
@@ -72,6 +74,7 @@ class TradeRepository:
             commission=commission,
             realized_pnl=realized_pnl,
             executed_at=executed_at,
+            ai_reason=ai_reason,
         )
 
         self.session.add(record)

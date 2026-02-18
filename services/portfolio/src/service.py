@@ -838,6 +838,13 @@ class PortfolioServicer(portfolio_pb2_grpc.PortfolioServiceServicer):
                         commission=Decimal(str(request.commission)),
                     )
 
+            # Process ai_reason (XSS protection and length limit)
+            ai_reason = None
+            if request.ai_reason:
+                from html import escape
+
+                ai_reason = escape(request.ai_reason.strip())[:500]
+
             # Save trade
             await self.trade_repository.save_trade(
                 user_id=user_id,
@@ -848,6 +855,7 @@ class PortfolioServicer(portfolio_pb2_grpc.PortfolioServiceServicer):
                 price=Decimal(str(request.price)),
                 commission=Decimal(str(request.commission)),
                 realized_pnl=realized_pnl,
+                ai_reason=ai_reason,
             )
 
             # Update position based on trade
@@ -918,7 +926,7 @@ class PortfolioServicer(portfolio_pb2_grpc.PortfolioServiceServicer):
             # Convert to proto
             proto_trades = [
                 portfolio_pb2.Trade(
-                    order_id=t.order_id,
+                    order_id=t.order_id or "",
                     symbol=t.symbol,
                     side=t.side,
                     qty=float(t.qty),
@@ -926,13 +934,17 @@ class PortfolioServicer(portfolio_pb2_grpc.PortfolioServiceServicer):
                     commission=float(t.commission),
                     executed_at=t.executed_at.isoformat(),
                     realized_pnl=float(t.realized_pnl),
+                    ai_reason=t.ai_reason or "",
                 )
                 for t in trades
             ]
 
+            next_poll_ms = 3000 if len(trades) > 5 else 10000
+
             return portfolio_pb2.GetTradeHistoryResponse(
                 trades=proto_trades,
                 total_realized_pnl=float(total_realized_pnl),
+                next_poll_ms=next_poll_ms,
             )
 
         except Exception as e:

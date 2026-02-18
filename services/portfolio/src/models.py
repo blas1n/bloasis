@@ -102,6 +102,7 @@ class TradeRecord(Base):
     executed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=datetime.utcnow
     )
+    ai_reason: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
 
 
 # Domain Models
@@ -277,6 +278,7 @@ class Trade:
         commission: Commission paid.
         realized_pnl: Realized P&L for this trade.
         executed_at: Execution timestamp.
+        ai_reason: AI-generated reasoning for this trade (optional).
     """
 
     order_id: Optional[str]
@@ -287,6 +289,7 @@ class Trade:
     commission: Decimal
     realized_pnl: Decimal
     executed_at: datetime
+    ai_reason: Optional[str] = None
 
     @classmethod
     def from_record(cls, record: TradeRecord) -> "Trade":
@@ -310,4 +313,5 @@ class Trade:
             commission=Decimal(str(record.commission)) if record.commission else Decimal("0"),
             realized_pnl=Decimal(str(record.realized_pnl)) if record.realized_pnl else Decimal("0"),
             executed_at=record.executed_at,
+            ai_reason=record.ai_reason,
         )
