@@ -1,7 +1,7 @@
 """
 Portfolio Service - gRPC only.
 
-Kong Gateway handles HTTP-to-gRPC transcoding.
+Envoy Gateway handles HTTP-to-gRPC transcoding.
 """
 
 import asyncio

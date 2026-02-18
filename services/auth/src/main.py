@@ -1,7 +1,7 @@
 """
 Auth Service - gRPC only.
 
-Kong Gateway handles HTTP-to-gRPC transcoding.
+Envoy Gateway handles HTTP-to-gRPC transcoding.
 Manages JWT authentication, token validation, and refresh.
 """
 
@@ -111,7 +111,7 @@ async def serve() -> None:
 
     # Log public key availability for RS256
     if config.jwt_algorithm == "RS256" and jwt_handler.get_public_key():
-        logger.info("RS256 public key available for Kong Gateway configuration")
+        logger.info("RS256 public key available for Envoy Gateway configuration")
 
     # Create gRPC server
     server = grpc.aio.server()

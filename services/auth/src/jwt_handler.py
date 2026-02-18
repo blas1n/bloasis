@@ -249,7 +249,7 @@ class JWTHandler:
     def get_public_key(self) -> str | None:
         """Get the public key for RS256 algorithm.
 
-        This can be used to share the public key with Kong Gateway
+        This can be used to share the public key with Envoy Gateway
         and other services for token verification.
 
         Returns:

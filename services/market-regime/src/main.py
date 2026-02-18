@@ -1,7 +1,7 @@
 """
 Market Regime Service - gRPC only.
 
-Kong Gateway handles HTTP-to-gRPC transcoding.
+Envoy Gateway handles HTTP-to-gRPC transcoding.
 Integrates FinGPT for AI-powered market regime classification.
 """
 

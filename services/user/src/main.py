@@ -1,7 +1,7 @@
 """
 User Service - gRPC only.
 
-Kong Gateway handles HTTP-to-gRPC transcoding.
+Envoy Gateway handles HTTP-to-gRPC transcoding.
 Manages user profiles and trading preferences.
 """
 
