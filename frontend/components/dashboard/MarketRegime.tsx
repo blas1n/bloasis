@@ -53,16 +53,21 @@ export function MarketRegime() {
         Confidence: {(regime.confidence * 100).toFixed(0)}%
       </p>
 
-      {(regime.reasoning || regime.trigger) && (
-        <div>
-          <p className="text-xs font-semibold mb-1 text-theme-primary">
-            AI Analysis:
-          </p>
-          <p className="text-sm text-text-secondary">
-            {regime.reasoning || regime.trigger}
-          </p>
-        </div>
-      )}
+      {(regime.reasoning || regime.trigger) && (() => {
+        const raw = regime.reasoning || regime.trigger;
+        const isError = raw?.startsWith("Error:") || raw?.startsWith("error:");
+        const displayText = isError
+          ? "AI analysis temporarily unavailable. Showing rule-based assessment."
+          : raw;
+        return (
+          <div>
+            <p className="text-xs font-semibold mb-1 text-theme-primary">
+              AI Analysis:
+            </p>
+            <p className="text-sm text-text-secondary">{displayText}</p>
+          </div>
+        );
+      })()}
     </Card>
   );
 }

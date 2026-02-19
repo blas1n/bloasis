@@ -1,5 +1,5 @@
 ---
-always: true
+description: gRPC communication rules for internal MSA services
 ---
 
 # gRPC Communication Rules
