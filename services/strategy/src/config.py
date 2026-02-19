@@ -4,7 +4,11 @@ This module provides centralized configuration management for the Strategy Servi
 All environment variables are validated at startup.
 """
 
+from pathlib import Path
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_WORKSPACE_ENV = Path(__file__).resolve().parent.parent.parent.parent / ".env"
 
 
 class ServiceConfig(BaseSettings):
@@ -14,9 +18,9 @@ class ServiceConfig(BaseSettings):
     """
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=str(_WORKSPACE_ENV),
         env_file_encoding="utf-8",
-        extra="ignore",  # Allow extra env vars from root .env
+        extra="ignore",
     )
 
     # Service identity
@@ -44,9 +48,8 @@ class ServiceConfig(BaseSettings):
     # Redpanda (Event Publishing)
     redpanda_brokers: str = "localhost:9092"
 
-    # Claude AI configuration (for macro/regime analysis)
+    # Claude API key (model is configured in prompts/*.yaml)
     anthropic_api_key: str = ""
-    claude_model: str = "claude-haiku-4-5-20251001"
 
     # Sentiment caching
     sentiment_cache_ttl: int = 3600  # 1 hour TTL for sentiment cache

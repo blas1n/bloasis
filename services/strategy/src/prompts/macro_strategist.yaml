@@ -61,10 +61,9 @@ response_schema:
   required: [risk_level, sector_outlook, macro_indicators, rationale]
 
 model_parameters:
-  max_new_tokens: 800
+  model: claude-haiku-4-5-20251001
+  max_tokens: 800
   temperature: 0.1
-  top_p: 0.9
-  return_full_text: false
 
 default_values:
   regime: "unknown"
@@ -96,4 +95,5 @@ regime_risk:
     }}
 
   model_parameters:
+    model: claude-haiku-4-5-20251001
     temperature: 0.1

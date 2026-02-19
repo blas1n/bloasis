@@ -4,7 +4,11 @@ This module provides centralized configuration management for the Classification
 All environment variables are validated at startup.
 """
 
+from pathlib import Path
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_WORKSPACE_ENV = Path(__file__).resolve().parent.parent.parent.parent / ".env"
 
 
 class ServiceConfig(BaseSettings):
@@ -14,9 +18,9 @@ class ServiceConfig(BaseSettings):
     """
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=str(_WORKSPACE_ENV),
         env_file_encoding="utf-8",
-        extra="ignore",  # Allow extra env vars from root .env
+        extra="ignore",
     )
 
     # Service identity
@@ -32,9 +36,8 @@ class ServiceConfig(BaseSettings):
     market_regime_host: str = "market-regime"
     market_regime_port: int = 50051
 
-    # Claude AI configuration (for sector/theme analysis)
-    anthropic_api_key: str = ""  # Anthropic API key
-    claude_model: str = "claude-haiku-4-5-20251001"  # Model for classification
+    # Claude API key (model is configured in prompts/*.yaml)
+    anthropic_api_key: str = ""
 
 
 # Global config instance - validated at import time

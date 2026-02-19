@@ -60,10 +60,9 @@ response_schema:
   required: [themes]
 
 model_parameters:
-  max_new_tokens: 1500
+  model: claude-haiku-4-5-20251001
+  max_tokens: 1500
   temperature: 0.7
-  top_p: 0.9
-  return_full_text: false
 
 default_values:
   regime: "unknown"

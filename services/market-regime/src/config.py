@@ -4,7 +4,11 @@ This module provides centralized configuration management for the Market Regime 
 All environment variables are validated at startup.
 """
 
+from pathlib import Path
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_WORKSPACE_ENV = Path(__file__).resolve().parent.parent.parent.parent / ".env"
 
 
 class ServiceConfig(BaseSettings):
@@ -14,9 +18,9 @@ class ServiceConfig(BaseSettings):
     """
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=str(_WORKSPACE_ENV),
         env_file_encoding="utf-8",
-        extra="ignore",  # Allow extra env vars from root .env
+        extra="ignore",
     )
 
     # Service identity
@@ -34,9 +38,8 @@ class ServiceConfig(BaseSettings):
     # Database configuration
     database_url: str = ""
 
-    # Claude configuration (via Anthropic API)
-    anthropic_api_key: str = ""  # Anthropic API key (leave empty to use rule-based fallback)
-    claude_model: str = "claude-haiku-4-5-20251001"  # Claude model for regime classification
+    # Claude API key (model is configured in prompts/regime_classification.yaml)
+    anthropic_api_key: str = ""
 
     # FRED API (for macro data)
     fred_api_key: str = ""

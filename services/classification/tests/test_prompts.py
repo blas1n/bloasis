@@ -246,24 +246,24 @@ class TestGetSectorModelParameters:
         params = get_sector_model_parameters()
         assert isinstance(params, dict)
 
-    def test_has_max_new_tokens(self) -> None:
-        """Test has max_new_tokens parameter."""
+    def test_has_max_tokens(self) -> None:
+        """Test has max_tokens parameter (Claude API)."""
         params = get_sector_model_parameters()
-        assert "max_new_tokens" in params
-        assert isinstance(params["max_new_tokens"], int)
-        assert params["max_new_tokens"] > 0
+        assert "max_tokens" in params
+        assert isinstance(params["max_tokens"], int)
+        assert params["max_tokens"] > 0
+
+    def test_has_model(self) -> None:
+        """Test has model parameter."""
+        params = get_sector_model_parameters()
+        assert "model" in params
+        assert isinstance(params["model"], str)
 
     def test_has_temperature(self) -> None:
         """Test has temperature parameter."""
         params = get_sector_model_parameters()
         assert "temperature" in params
         assert 0.0 <= params["temperature"] <= 2.0
-
-    def test_has_top_p(self) -> None:
-        """Test has top_p parameter."""
-        params = get_sector_model_parameters()
-        assert "top_p" in params
-        assert 0.0 <= params["top_p"] <= 1.0
 
 
 class TestGetThemeModelParameters:
@@ -274,12 +274,18 @@ class TestGetThemeModelParameters:
         params = get_theme_model_parameters()
         assert isinstance(params, dict)
 
-    def test_has_max_new_tokens(self) -> None:
-        """Test has max_new_tokens parameter."""
+    def test_has_max_tokens(self) -> None:
+        """Test has max_tokens parameter (Claude API)."""
         params = get_theme_model_parameters()
-        assert "max_new_tokens" in params
-        assert isinstance(params["max_new_tokens"], int)
-        assert params["max_new_tokens"] > 0
+        assert "max_tokens" in params
+        assert isinstance(params["max_tokens"], int)
+        assert params["max_tokens"] > 0
+
+    def test_has_model(self) -> None:
+        """Test has model parameter."""
+        params = get_theme_model_parameters()
+        assert "model" in params
+        assert isinstance(params["model"], str)
 
     def test_has_temperature(self) -> None:
         """Test has temperature parameter."""
@@ -287,15 +293,9 @@ class TestGetThemeModelParameters:
         assert "temperature" in params
         assert 0.0 <= params["temperature"] <= 2.0
 
-    def test_has_top_p(self) -> None:
-        """Test has top_p parameter."""
-        params = get_theme_model_parameters()
-        assert "top_p" in params
-        assert 0.0 <= params["top_p"] <= 1.0
-
     def test_theme_has_more_tokens_than_sector(self) -> None:
         """Test theme analysis allows more tokens than sector analysis."""
         sector_params = get_sector_model_parameters()
         theme_params = get_theme_model_parameters()
         # Theme analysis is typically longer output
-        assert theme_params["max_new_tokens"] >= sector_params["max_new_tokens"]
+        assert theme_params["max_tokens"] >= sector_params["max_tokens"]

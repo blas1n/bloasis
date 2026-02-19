@@ -1,13 +1,17 @@
 """Service configuration using Pydantic BaseSettings."""
 
+from pathlib import Path
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_WORKSPACE_ENV = Path(__file__).resolve().parent.parent.parent.parent / ".env"
 
 
 class ServiceConfig(BaseSettings):
     """Configuration for Market Data Service."""
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=str(_WORKSPACE_ENV),
         env_file_encoding="utf-8",
         extra="ignore",
     )

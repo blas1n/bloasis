@@ -4,7 +4,11 @@ This module provides centralized configuration management for the Auth Service.
 All environment variables are validated at startup.
 """
 
+from pathlib import Path
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_WORKSPACE_ENV = Path(__file__).resolve().parent.parent.parent.parent / ".env"
 
 
 class ServiceConfig(BaseSettings):
@@ -12,18 +16,16 @@ class ServiceConfig(BaseSettings):
 
     All settings can be overridden via environment variables.
 
-    JWT Algorithm Configuration:
-    - RS256 (default, recommended): Uses asymmetric RSA keys
-        - Set jwt_private_key_path for signing
-        - Set jwt_public_key_path for verification
-    - HS256 (legacy): Uses symmetric secret key
-        - Set jwt_secret_key for both signing and verification
+    JWT uses RS256 (asymmetric RSA keys):
+    - Private key path for signing tokens (Auth Service only)
+    - Public key path for verification (shared with Envoy Gateway)
+    Generate keys with: ./scripts/generate_jwt_keys.sh
     """
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=str(_WORKSPACE_ENV),
         env_file_encoding="utf-8",
-        extra="ignore",  # Allow extra env vars from root .env
+        extra="ignore",
     )
 
     # Service identity
@@ -38,14 +40,9 @@ class ServiceConfig(BaseSettings):
     user_service_host: str = "localhost"
     user_service_port: int = 50052
 
-    # JWT configuration - RS256 (default, recommended)
-    jwt_algorithm: str = "RS256"
+    # JWT configuration - RS256 (asymmetric RSA keys)
     jwt_private_key_path: str = "infra/keys/jwt-private.pem"
     jwt_public_key_path: str = "infra/keys/jwt-public.pem"
-
-    # JWT configuration - HS256 (legacy support)
-    # If jwt_secret_key is set and jwt_algorithm is HS256, uses symmetric key
-    jwt_secret_key: str = ""
 
     # Token expiry settings
     access_token_expire_minutes: int = 15

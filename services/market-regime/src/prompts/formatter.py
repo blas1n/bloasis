@@ -82,7 +82,7 @@ def get_model_parameters() -> dict[str, Any]:
     Get model generation parameters.
 
     Returns:
-        Dictionary of model parameters (max_new_tokens, temperature, etc.).
+        Dictionary of model parameters (model, max_tokens, temperature, etc.).
     """
     config = get_classification_prompt()
-    return config.get("parameters", {})
+    return config.get("model_parameters", {})
