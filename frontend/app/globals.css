@@ -4,21 +4,23 @@
 
 @layer base {
   :root {
-    /* Light theme (default) */
-    --bg-base: #1E293B;
+    /* Light theme — BLOASIS Pencil design */
+    --bg-base: #F0F4F8;
     --bg-elevated: #FFFFFF;
-    --bg-surface: #F8FAFC;
-    --border: #E5E7EB;
-    --text-primary: #111827;
-    --text-secondary: #6B7280;
-    --text-muted: #9CA3AF;
-    --theme-primary: #2563EB;
+    --bg-surface: #E4EBF3;
+    --border: #CBD5E1;
+    --text-primary: #0F172A;
+    --text-secondary: #475569;
+    --text-muted: #94A3B8;
+    --theme-primary: #0891B2;
     --theme-success: #059669;
-    --theme-danger: #DC2626;
+    --theme-danger: #E11D48;
+    --bg-nav-active: rgba(8, 145, 178, 0.12);
+    --bg-nav-hover: rgba(8, 145, 178, 0.06);
   }
 
   .dark {
-    /* Dark theme overrides — BLOASIS brand colors */
+    /* Dark theme — BLOASIS brand colors */
     --bg-base: #0A1628;
     --bg-elevated: #1A2332;
     --bg-surface: #0F1A2A;
@@ -29,6 +31,8 @@
     --theme-primary: #00D9FF;
     --theme-success: #00E676;
     --theme-danger: #FF3D71;
+    --bg-nav-active: rgba(0, 217, 255, 0.1);
+    --bg-nav-hover: rgba(0, 217, 255, 0.05);
   }
 
   /* Smooth theme transitions */

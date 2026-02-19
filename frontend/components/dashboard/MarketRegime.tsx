@@ -15,7 +15,7 @@ const regimeLabels: Record<RegimeType, string> = {
 
 const regimeTextColors: Record<RegimeType, string> = {
   risk_on: "text-theme-success",
-  risk_off: "text-yellow-400",
+  risk_off: "text-yellow-600 dark:text-yellow-400",
   crisis: "text-theme-danger",
   recovery: "text-theme-primary",
 };
@@ -55,7 +55,7 @@ export function MarketRegime() {
 
       {(regime.reasoning || regime.trigger) && (
         <div>
-          <p className="text-xs font-semibold mb-1" style={{ color: "#00D9FF" }}>
+          <p className="text-xs font-semibold mb-1 text-theme-primary">
             AI Analysis:
           </p>
           <p className="text-sm text-text-secondary">

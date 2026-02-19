@@ -26,11 +26,11 @@ export function AITradingControl({ userId }: { userId: string }) {
   const isActive = status?.tradingEnabled && status.status === "active";
 
   return (
-    <div className="bg-slate-800 p-6 rounded-lg border border-slate-700">
+    <div className="bg-bg-elevated p-6 rounded-lg border border-border-custom">
       <div className="flex items-center justify-between mb-4">
         <div>
-          <h3 className="text-lg font-semibold text-white">🤖 AI Auto Trading</h3>
-          <p className="text-sm text-slate-400 mt-1">
+          <h3 className="text-lg font-semibold text-text-primary">🤖 AI Auto Trading</h3>
+          <p className="text-sm text-text-muted mt-1">
             AI analyzes market and executes trades automatically
           </p>
         </div>
@@ -40,10 +40,9 @@ export function AITradingControl({ userId }: { userId: string }) {
           disabled={isLoading}
           className={`px-8 py-3 rounded-full font-bold text-lg transition-colors disabled:opacity-50 ${
             isActive
-              ? "hover:opacity-90"
-              : "bg-slate-600 text-slate-200 hover:bg-slate-500"
+              ? "bg-theme-success text-white hover:opacity-90"
+              : "bg-bg-surface text-text-secondary border border-border-custom hover:bg-bg-nav-hover"
           }`}
-          style={isActive ? { backgroundColor: "#00E676", color: "#ffffff" } : undefined}
         >
           {isLoading ? "..." : isActive ? "ON" : "OFF"}
         </button>
@@ -55,7 +54,7 @@ export function AITradingControl({ userId }: { userId: string }) {
             isActive ? "bg-green-500 animate-pulse" : "bg-red-500"
           }`}
         />
-        <span className="text-sm text-slate-300">
+        <span className="text-sm text-text-secondary">
           System is currently {isActive ? "ACTIVE" : "INACTIVE"}
         </span>
       </div>
@@ -63,38 +62,38 @@ export function AITradingControl({ userId }: { userId: string }) {
       {/* Stop Mode Dialog */}
       {showStopDialog && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-slate-800 p-6 rounded-lg border border-slate-700 max-w-md">
-            <h3 className="text-lg font-semibold text-white mb-4">
+          <div className="bg-bg-elevated p-6 rounded-lg border border-border-custom max-w-md">
+            <h3 className="text-lg font-semibold text-text-primary mb-4">
               Stop AI Trading
             </h3>
-            <p className="text-sm text-slate-400 mb-6">
+            <p className="text-sm text-text-muted mb-6">
               Choose how to stop trading:
             </p>
 
             <div className="space-y-3">
               <button
                 onClick={() => handleStopConfirm("soft")}
-                className="w-full p-4 bg-slate-700 rounded border border-blue-500 text-left hover:bg-slate-600"
+                className="w-full p-4 bg-bg-surface rounded border border-theme-primary text-left hover:bg-bg-nav-active"
               >
-                <div className="font-semibold text-white">🛡️ Soft Stop</div>
-                <div className="text-sm text-slate-400 mt-1">
+                <div className="font-semibold text-text-primary">🛡️ Soft Stop</div>
+                <div className="text-sm text-text-muted mt-1">
                   Protect open positions with stop-loss/take-profit before stopping
                 </div>
               </button>
 
               <button
                 onClick={() => handleStopConfirm("hard")}
-                className="w-full p-4 bg-slate-700 rounded border border-red-500 text-left hover:bg-slate-600"
+                className="w-full p-4 bg-bg-surface rounded border border-theme-danger text-left hover:bg-bg-nav-hover"
               >
-                <div className="font-semibold text-white">⛔ Hard Stop</div>
-                <div className="text-sm text-slate-400 mt-1">
+                <div className="font-semibold text-text-primary">⛔ Hard Stop</div>
+                <div className="text-sm text-text-muted mt-1">
                   Cancel all pending orders immediately (emergency stop)
                 </div>
               </button>
 
               <button
                 onClick={() => setShowStopDialog(false)}
-                className="w-full p-2 text-sm text-slate-400 hover:text-white"
+                className="w-full p-2 text-sm text-text-muted hover:text-text-primary"
               >
                 Cancel
               </button>

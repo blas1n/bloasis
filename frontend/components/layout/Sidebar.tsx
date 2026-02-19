@@ -59,8 +59,8 @@ export function Sidebar() {
               href={item.href}
               className={`flex items-center px-4 py-3 text-sm rounded-lg transition-colors ${
                 isActive
-                  ? "bg-[rgba(0,217,255,0.1)] text-theme-primary font-semibold"
-                  : "text-text-secondary font-medium hover:bg-[rgba(0,217,255,0.05)] hover:text-text-primary"
+                  ? "bg-bg-nav-active text-theme-primary font-semibold"
+                  : "text-text-secondary font-medium hover:bg-bg-nav-hover hover:text-text-primary"
               }`}
             >
               <span className="mr-3">{item.icon}</span>

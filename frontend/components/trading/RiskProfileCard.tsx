@@ -45,23 +45,14 @@ export function RiskProfileCard({ userId }: { userId: string }) {
               disabled={isLoading}
               className={`w-full p-4 rounded-lg border text-left transition-all disabled:opacity-50 ${
                 isSelected
-                  ? "border-2"
-                  : "bg-bg-surface border-border-custom hover:border-[#00D9FF]"
+                  ? "border-2 border-theme-primary bg-bg-nav-active"
+                  : "bg-bg-surface border-border-custom hover:border-theme-primary"
               }`}
-              style={
-                isSelected
-                  ? {
-                      backgroundColor: "rgba(0,217,255,0.1)",
-                      borderColor: "#00D9FF",
-                    }
-                  : undefined
-              }
             >
               <div className="flex items-center gap-3">
                 <span className="text-2xl">{profile.icon}</span>
                 <div
-                  className={`font-semibold ${isSelected ? "" : "text-text-primary"}`}
-                  style={isSelected ? { color: "#00D9FF" } : undefined}
+                  className={`font-semibold ${isSelected ? "text-theme-primary" : "text-text-primary"}`}
                 >
                   {profile.label}
                 </div>
