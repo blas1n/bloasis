@@ -365,6 +365,9 @@ message RecordTradeRequest {
 
   // Commission paid
   double commission = 7;
+
+  // AI-generated reasoning for this trade
+  string ai_reason = 8;
 }
 
 // RecordTradeResponse - Result of recording trade
@@ -419,6 +422,9 @@ message Trade {
 
   // Realized P&L for this trade (for sell trades)
   double realized_pnl = 8;
+
+  // AI-generated reasoning for this trade (max 500 characters)
+  string ai_reason = 9;
 }
 
 // GetTradeHistoryResponse - Trade history response
@@ -428,4 +434,7 @@ message GetTradeHistoryResponse {
 
   // Total realized P&L for the period
   double total_realized_pnl = 2;
+
+  // Client should wait this many ms before next poll (server-directed)
+  int32 next_poll_ms = 3;
 }

@@ -62,6 +62,12 @@ RUN brew install openssl@3 --force-bottle
 RUN brew install git-delta --force-bottle
 RUN brew install bufbuild/buf/buf
 
+# Install uv (fast Python package installer)
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Add uv to PATH
+ENV PATH=/home/$USERNAME/.local/bin:$PATH
+
 # Copy and set up firewall script (for Claude Code)
 COPY scripts/init-firewall.sh /usr/local/bin/
 USER root

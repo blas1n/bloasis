@@ -29,7 +29,7 @@ export function PositionsList({ userId }: PositionsListProps) {
   if (!positions || positions.length === 0) {
     return (
       <Card>
-        <h3 className="text-lg font-semibold mb-4">Positions</h3>
+        <h3 className="text-lg font-semibold text-text-primary mb-4">Positions (0 Holdings)</h3>
         <p className="text-text-secondary text-center py-8">No open positions</p>
       </Card>
     );
@@ -37,7 +37,7 @@ export function PositionsList({ userId }: PositionsListProps) {
 
   return (
     <Card>
-      <h3 className="text-lg font-semibold mb-4">Positions</h3>
+      <h3 className="text-lg font-semibold text-text-primary mb-4">Positions ({positions.length} Holdings)</h3>
 
       <div className="overflow-x-auto">
         <table className="min-w-full divide-y divide-border-custom">
@@ -87,8 +87,8 @@ export function PositionsList({ userId }: PositionsListProps) {
                   <div
                     className={
                       position.unrealizedPnl >= 0
-                        ? "text-green-600 dark:text-green-400"
-                        : "text-red-600 dark:text-red-400"
+                        ? "text-theme-success"
+                        : "text-theme-danger"
                     }
                   >
                     <span className="font-medium">

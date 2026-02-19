@@ -31,7 +31,7 @@ BLOASIS is built on a microservices architecture (MSA) with the following core s
   - Claude Sonnet 4 (complex reasoning)
   - LangGraph (multi-agent orchestration)
 - **Backtesting**: VectorBT (technical strategies), FinRL (reinforcement learning)
-- **API Gateway**: Kong OSS (gRPC-to-REST transcoding)
+- **API Gateway**: Envoy Gateway (gRPC-to-REST transcoding)
 
 ### Infrastructure
 - **Communication**: gRPC (internal MSA), REST (external clients)
@@ -65,7 +65,7 @@ code /path/to/bloasis
 DevContainer automatically sets up:
 - Python 3.11, uv package manager
 - Redpanda, PostgreSQL, TimescaleDB, Redis
-- Kong Gateway, Consul
+- Envoy Gateway, Consul
 
 ### Manual Setup
 
@@ -97,7 +97,7 @@ bloasis/
 │   ├── risk-management/
 │   └── executor/
 ├── frontend/                # React dashboard
-├── infra/                   # Infrastructure config (Docker, Kong, Consul)
+├── infra/                   # Infrastructure config (Docker, Envoy, Consul)
 ├── shared/                  # Shared libraries
 │   ├── proto/               # gRPC .proto definitions
 │   ├── models/              # Common data models

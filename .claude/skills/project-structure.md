@@ -12,7 +12,7 @@ bloasis/
 ├── services/           # Backend microservices (Python/FastAPI + gRPC)
 ├── frontend/           # Frontend (TypeScript/React)
 ├── shared/             # Shared code (.proto, models, utils)
-├── infra/              # Infrastructure configs (Kong, Consul, Docker)
+├── infra/              # Infrastructure configs (Envoy, Consul, Docker)
 ├── tests/              # Integration and E2E tests
 ├── .devcontainer/      # DevContainer setup
 ├── .claude/            # Claude skills and config
@@ -63,7 +63,7 @@ shared/
 
 ## Proto Files
 
-All .proto files must include HTTP annotations for Kong transcoding:
+All .proto files must include HTTP annotations for Envoy transcoding:
 
 ```protobuf
 syntax = "proto3";
@@ -130,4 +130,4 @@ service MarketRegimeService {
 
 4. **HTTP annotations required**:
    - All .proto services need HTTP annotations
-   - Kong requires them for gRPC-to-REST transcoding
+   - Envoy requires them for gRPC-to-REST transcoding

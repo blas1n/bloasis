@@ -137,14 +137,6 @@ static_resources:
                             cluster: risk-committee-service
                             timeout: 30s
 
-                        # WebSocket (no transcoding)
-                        - match:
-                            prefix: "/ws"
-                          route:
-                            cluster: notification-ws
-                            timeout: 0s
-                            upgrade_configs:
-                              - upgrade_type: websocket
 
                 http_filters:
                   # CORS filter (must be before transcoder)
@@ -383,17 +375,3 @@ static_resources:
                       address: app
                       port_value: 50059
 
-    # Notification WebSocket (HTTP, not gRPC)
-    - name: notification-ws
-      connect_timeout: 5s
-      type: STRICT_DNS
-      lb_policy: ROUND_ROBIN
-      load_assignment:
-        cluster_name: notification-ws
-        endpoints:
-          - lb_endpoints:
-              - endpoint:
-                  address:
-                    socket_address:
-                      address: app
-                      port_value: 8080

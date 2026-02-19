@@ -31,7 +31,7 @@ services/<service-name>/
 - requirements.txt (use pyproject.toml + uv only)
 - proto symlink (access via PYTHONPATH)
 - shared code copies
-- FastAPI or HTTP endpoints (Kong handles HTTP-to-gRPC transcoding)
+- FastAPI or HTTP endpoints (Envoy handles HTTP-to-gRPC transcoding)
 
 ---
 
@@ -65,7 +65,7 @@ class ServiceConfig(BaseSettings):
         extra="ignore",
     )
 
-    # Service identity (no http_port - Kong handles HTTP)
+    # Service identity (no http_port - Envoy handles HTTP)
     service_name: str = "market-regime"
     grpc_port: int = 50051
 
@@ -79,7 +79,7 @@ class ServiceConfig(BaseSettings):
     fingpt_api_key: str = ""
 ```
 
-**Note**: Services expose only gRPC. Kong Gateway handles HTTP-to-gRPC transcoding.
+**Note**: Services expose only gRPC. Envoy Gateway handles HTTP-to-gRPC transcoding.
 
 ---
 
@@ -133,7 +133,7 @@ message RegimeResponse {
 """
 Service - gRPC only.
 
-Kong Gateway handles HTTP-to-gRPC transcoding.
+Envoy Gateway handles HTTP-to-gRPC transcoding.
 """
 
 import asyncio
@@ -313,7 +313,7 @@ class RegimeClassifier:
 
 **services/market-regime/.env.example**:
 ```bash
-# Service config (no HTTP_PORT - Kong handles HTTP)
+# Service config (no HTTP_PORT - Envoy handles HTTP)
 SERVICE_NAME=market-regime
 GRPC_PORT=50051
 
@@ -684,7 +684,7 @@ signal.signal(signal.SIGTERM, handle_sigterm)
 - [ ] gRPC service implemented (src/service.py)
 - [ ] Proto HTTP annotations verified
 - [ ] gRPC Health Check implemented (grpc.health.v1)
-- [ ] No HTTP endpoints (Kong handles HTTP-to-gRPC transcoding)
+- [ ] No HTTP endpoints (Envoy handles HTTP-to-gRPC transcoding)
 - [ ] Pydantic config.py created and validated (no http_port)
 - [ ] Environment variables validated (.env.example)
 - [ ] Logging configured (structured logging)
@@ -701,7 +701,7 @@ signal.signal(signal.SIGTERM, handle_sigterm)
 
 - [ ] Added to root docker-compose.yml
 - [ ] Consul service registration
-- [ ] Kong routing configured (if external)
+- [ ] Envoy routing configured (if external)
 
 ### Operations
 

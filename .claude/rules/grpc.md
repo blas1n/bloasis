@@ -18,9 +18,9 @@ always: true
 
 ### Implementation
 
-1. **All .proto files MUST include HTTP annotations** (for Kong transcoding)
+1. **All .proto files MUST include HTTP annotations** (for Envoy Gateway transcoding)
 2. **Backend services implement gRPC only** (not HTTP)
-3. **Kong Gateway handles REST for external clients** (automatic transcoding)
+3. **Envoy Gateway handles REST for external clients** (automatic transcoding)
 
 ### Example
 

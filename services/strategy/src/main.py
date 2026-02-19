@@ -5,7 +5,7 @@ This service implements Stage 3 of the Stock Selection Pipeline:
 - User preferences management
 - Layer 3 caching (user-specific, 1-hour TTL)
 
-Kong Gateway handles HTTP-to-gRPC transcoding.
+Envoy Gateway handles HTTP-to-gRPC transcoding.
 """
 
 import asyncio

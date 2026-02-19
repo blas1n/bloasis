@@ -29,29 +29,11 @@ const navigation: NavItem[] = [
     ),
   },
   {
-    name: "Signals",
-    href: "/dashboard/signals",
+    name: "Trading",
+    href: "/dashboard/trading",
     icon: (
       <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
-      </svg>
-    ),
-  },
-  {
-    name: "Analysis",
-    href: "/dashboard/analysis",
-    icon: (
-      <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-      </svg>
-    ),
-  },
-  {
-    name: "Trade History",
-    href: "/dashboard/trade-history",
-    icon: (
-      <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
       </svg>
     ),
   },
@@ -61,24 +43,24 @@ export function Sidebar() {
   const pathname = usePathname();
 
   return (
-    <div className="flex flex-col w-64 bg-bg-base min-h-screen">
+    <div className="flex flex-col w-[180px] bg-bg-base min-h-screen">
       {/* Logo */}
-      <div className="flex items-center h-16 px-4 bg-bg-base">
+      <div className="flex items-center h-16 px-6 bg-bg-base">
         <span className="text-xl font-bold text-text-primary">BLOASIS</span>
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 px-2 py-4 space-y-1">
+      <nav className="flex-1 px-3 py-6 space-y-3">
         {navigation.map((item) => {
           const isActive = pathname === item.href;
           return (
             <Link
               key={item.name}
               href={item.href}
-              className={`flex items-center px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+              className={`flex items-center px-4 py-3 text-sm rounded-lg transition-colors ${
                 isActive
-                  ? "bg-bg-elevated text-text-primary"
-                  : "text-text-secondary hover:bg-bg-elevated hover:text-text-primary"
+                  ? "bg-bg-nav-active text-theme-primary font-semibold"
+                  : "text-text-secondary font-medium hover:bg-bg-nav-hover hover:text-text-primary"
               }`}
             >
               <span className="mr-3">{item.icon}</span>

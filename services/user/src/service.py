@@ -8,8 +8,10 @@ Implements the UserService gRPC interface with:
 """
 
 import logging
+from datetime import datetime
 from decimal import Decimal
 from typing import Optional
+from uuid import uuid4
 
 import grpc
 from shared.generated import user_pb2, user_pb2_grpc
@@ -70,6 +72,7 @@ def _preferences_to_proto(preferences: UserPreferences) -> user_pb2.UserPreferen
         max_position_size=str(preferences.max_position_size),
         preferred_sectors=preferences.preferred_sectors,
         enable_notifications=preferences.enable_notifications,
+        trading_enabled=preferences.trading_enabled,
     )
 
 
@@ -86,6 +89,7 @@ class UserServicer(user_pb2_grpc.UserServiceServicer):
         redis_client: Optional[RedisClient] = None,
         postgres_client: Optional[PostgresClient] = None,
         repository: Optional[UserRepository] = None,
+        redpanda_client=None,
     ) -> None:
         """
         Initialize the servicer with required clients.
@@ -94,10 +98,12 @@ class UserServicer(user_pb2_grpc.UserServiceServicer):
             redis_client: Redis client for caching.
             postgres_client: PostgreSQL client for persistence.
             repository: Repository for database operations.
+            redpanda_client: Redpanda client for event publishing.
         """
         self.redis = redis_client
         self.postgres = postgres_client
         self.repository = repository or UserRepository(postgres_client)
+        self.redpanda = redpanda_client
 
     async def GetUser(
         self,
@@ -401,3 +407,222 @@ class UserServicer(user_pb2_grpc.UserServiceServicer):
         if self.redis:
             await self.redis.delete(_preferences_cache_key(user_id))
             logger.info(f"Invalidated cache for user {user_id}")
+
+    async def StartTrading(
+        self,
+        request: user_pb2.StartTradingRequest,
+        context: grpc.aio.ServicerContext,
+    ) -> user_pb2.StartTradingResponse:
+        """
+        Start AI auto-trading for a user.
+
+        Updates database, invalidates cache, and publishes trading-control event.
+
+        Args:
+            request: The gRPC request containing user_id.
+            context: The gRPC servicer context.
+
+        Returns:
+            StartTradingResponse with success status.
+        """
+        try:
+            user_id = request.user_id
+            if not user_id:
+                context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
+                context.set_details("user_id is required")
+                return user_pb2.StartTradingResponse(
+                    success=False,
+                    message="user_id is required",
+                    timestamp="",
+                )
+
+            # Update preferences to enable trading
+            updated = await self.repository.update_preferences(
+                user_id=user_id,
+                trading_enabled=True,
+            )
+
+            if not updated:
+                context.set_code(grpc.StatusCode.NOT_FOUND)
+                context.set_details(f"User {user_id} not found")
+                return user_pb2.StartTradingResponse(
+                    success=False,
+                    message=f"User {user_id} not found",
+                    timestamp="",
+                )
+
+            # Invalidate cache
+            await self._invalidate_cache(user_id)
+
+            # Publish Redpanda event
+            if self.redpanda:
+                event = {
+                    "event_id": str(uuid4()),
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "user_id": user_id,
+                    "action": "started",
+                    "stop_mode": "",
+                }
+                await self.redpanda.publish("trading-control-events", event)
+
+            timestamp = datetime.utcnow().isoformat()
+            logger.info(f"AI trading started for user {user_id}")
+            return user_pb2.StartTradingResponse(
+                success=True,
+                message="AI trading started successfully",
+                timestamp=timestamp,
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to start trading: {e}")
+            context.set_code(grpc.StatusCode.INTERNAL)
+            return user_pb2.StartTradingResponse(
+                success=False,
+                message="Internal error occurred",
+                timestamp="",
+            )
+
+    async def StopTrading(
+        self,
+        request: user_pb2.StopTradingRequest,
+        context: grpc.aio.ServicerContext,
+    ) -> user_pb2.StopTradingResponse:
+        """
+        Stop AI auto-trading for a user.
+
+        Supports two modes:
+        - soft: Allows protective orders to complete before stopping
+        - hard: Immediately cancels all pending orders
+
+        Args:
+            request: The gRPC request containing user_id and stop_mode.
+            context: The gRPC servicer context.
+
+        Returns:
+            StopTradingResponse with success status and cancellation count.
+        """
+        try:
+            user_id = request.user_id
+            if not user_id:
+                context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
+                context.set_details("user_id is required")
+                return user_pb2.StopTradingResponse(
+                    success=False,
+                    message="user_id is required",
+                    orders_cancelled=0,
+                    timestamp="",
+                )
+
+            stop_mode = request.stop_mode or "soft"
+
+            # Validate stop_mode
+            if stop_mode not in ["hard", "soft"]:
+                context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
+                context.set_details("stop_mode must be 'hard' or 'soft'")
+                return user_pb2.StopTradingResponse(
+                    success=False,
+                    message="stop_mode must be 'hard' or 'soft'",
+                    orders_cancelled=0,
+                    timestamp="",
+                )
+
+            # Update preferences to disable trading
+            updated = await self.repository.update_preferences(
+                user_id=user_id,
+                trading_enabled=False,
+            )
+
+            if not updated:
+                context.set_code(grpc.StatusCode.NOT_FOUND)
+                context.set_details(f"User {user_id} not found")
+                return user_pb2.StopTradingResponse(
+                    success=False,
+                    message=f"User {user_id} not found",
+                    orders_cancelled=0,
+                    timestamp="",
+                )
+
+            # Invalidate cache
+            await self._invalidate_cache(user_id)
+
+            # Publish Redpanda event (Executor Service will handle order cancellation)
+            if self.redpanda:
+                event = {
+                    "event_id": str(uuid4()),
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "user_id": user_id,
+                    "action": "stopped",
+                    "stop_mode": stop_mode,
+                }
+                await self.redpanda.publish("trading-control-events", event)
+
+            message = (
+                "AI trading stopped immediately (hard stop)"
+                if stop_mode == "hard"
+                else "AI trading will stop after current positions are protected (soft stop)"
+            )
+            timestamp = datetime.utcnow().isoformat()
+
+            logger.info(f"AI trading stopped for user {user_id} (mode: {stop_mode})")
+            return user_pb2.StopTradingResponse(
+                success=True,
+                message=message,
+                orders_cancelled=0,  # Executor Service updates this
+                timestamp=timestamp,
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to stop trading: {e}")
+            context.set_code(grpc.StatusCode.INTERNAL)
+            return user_pb2.StopTradingResponse(
+                success=False,
+                message="Internal error occurred",
+                orders_cancelled=0,
+                timestamp="",
+            )
+
+    async def GetTradingStatus(
+        self,
+        request: user_pb2.GetTradingStatusRequest,
+        context: grpc.aio.ServicerContext,
+    ) -> user_pb2.GetTradingStatusResponse:
+        """
+        Get trading status for a user.
+
+        Args:
+            request: The gRPC request containing user_id.
+            context: The gRPC servicer context.
+
+        Returns:
+            GetTradingStatusResponse with trading status.
+        """
+        try:
+            user_id = request.user_id
+            if not user_id:
+                context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
+                context.set_details("user_id is required")
+                return user_pb2.GetTradingStatusResponse()
+
+            preferences = await self.repository.get_preferences(user_id)
+
+            if not preferences:
+                context.set_code(grpc.StatusCode.NOT_FOUND)
+                context.set_details(f"Preferences for user {user_id} not found")
+                return user_pb2.GetTradingStatusResponse()
+
+            status = "active" if preferences.trading_enabled else "inactive"
+            last_changed = preferences.updated_at.isoformat() if preferences.updated_at else ""
+            next_poll_ms = 3000 if preferences.trading_enabled else 10000
+
+            return user_pb2.GetTradingStatusResponse(
+                trading_enabled=preferences.trading_enabled,
+                status=status,
+                last_changed=last_changed,
+                next_poll_ms=next_poll_ms,
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to get trading status: {e}")
+            context.set_code(grpc.StatusCode.INTERNAL)
+            context.set_details(f"Failed to get trading status: {str(e)}")
+            return user_pb2.GetTradingStatusResponse()

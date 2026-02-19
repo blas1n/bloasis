@@ -20,7 +20,7 @@ export function useMarketRegime(): UseMarketRegimeResult {
     setIsLoading(true);
     setError(null);
 
-    const result = await api.getMarketRegime();
+    const result = await api.getCurrentRegime();
 
     if (result.error) {
       setError(result.error);

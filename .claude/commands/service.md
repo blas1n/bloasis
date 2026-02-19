@@ -136,7 +136,7 @@ After generation:
 2. **Write tests** in tests/
 3. **Update .proto** with actual RPC methods
 4. **Add to docker-compose.yml**
-5. **Configure Kong routing** (if external)
+5. **Configure Envoy routing** (if external)
 
 ## Reference
 

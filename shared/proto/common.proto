@@ -25,7 +25,7 @@ message Symbol {
 // Uses string format (not google.protobuf.Timestamp) for:
 // - ISO 8601 compatibility across all client languages
 // - Easier serialization/deserialization without timezone complexity
-// - Consistent format in REST API responses via Kong transcoding
+// - Consistent format in REST API responses via Envoy Gateway transcoding
 message TimeRange {
   string start_date = 1;        // ISO 8601 format: "2025-01-15T00:00:00Z"
   string end_date = 2;          // ISO 8601 format: "2025-01-20T23:59:59Z"

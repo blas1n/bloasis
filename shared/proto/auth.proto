@@ -1,6 +1,6 @@
 // Auth Service - gRPC Protocol Buffer Definition
 // Handles JWT authentication, token validation, and refresh
-// Kong Gateway handles HTTP-to-gRPC transcoding via annotations
+// Envoy Gateway handles HTTP-to-gRPC transcoding via annotations
 
 syntax = "proto3";
 

@@ -2,29 +2,22 @@
 
 import { useMarketRegime } from "@/hooks/useMarketRegime";
 import { Card } from "@/components/ui/Card";
-import { Badge } from "@/components/ui/Badge";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import { ErrorMessage } from "@/components/ui/ErrorMessage";
-import type { RegimeType, RiskLevel } from "@/lib/types";
-
-const regimeColors: Record<RegimeType, string> = {
-  risk_on: "bg-green-100 text-green-800",
-  risk_off: "bg-yellow-100 text-yellow-800",
-  crisis: "bg-red-100 text-red-800",
-  recovery: "bg-blue-100 text-blue-800",
-};
+import type { RegimeType } from "@/lib/types";
 
 const regimeLabels: Record<RegimeType, string> = {
-  risk_on: "RISK ON",
-  risk_off: "RISK OFF",
-  crisis: "CRISIS",
+  risk_on: "BULL MARKET",
+  risk_off: "BEAR MARKET",
+  crisis: "CRISIS MODE",
   recovery: "RECOVERY",
 };
 
-const riskLevelVariant: Record<RiskLevel, "success" | "warning" | "danger"> = {
-  low: "success",
-  medium: "warning",
-  high: "danger",
+const regimeTextColors: Record<RegimeType, string> = {
+  risk_on: "text-theme-success",
+  risk_off: "text-yellow-600 dark:text-yellow-400",
+  crisis: "text-theme-danger",
+  recovery: "text-theme-primary",
 };
 
 export function MarketRegime() {
@@ -48,47 +41,28 @@ export function MarketRegime() {
 
   return (
     <Card>
-      <div className="flex items-center justify-between">
+      <p className="text-sm font-semibold text-text-primary mb-3 tracking-wider">
+        MARKET REGIME
+      </p>
+
+      <p className={`text-2xl font-bold mb-2 ${regimeTextColors[regime.regime]}`}>
+        {regimeLabels[regime.regime]}
+      </p>
+
+      <p className="text-sm text-text-secondary mb-4">
+        Confidence: {(regime.confidence * 100).toFixed(0)}%
+      </p>
+
+      {(regime.reasoning || regime.trigger) && (
         <div>
-          <h3 className="text-lg font-semibold text-gray-900">Market Regime</h3>
-          <span
-            className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium mt-2 ${
-              regimeColors[regime.regime]
-            }`}
-          >
-            {regimeLabels[regime.regime]}
-          </span>
-        </div>
-        <div className="text-right">
-          <p className="text-sm text-gray-500">Confidence</p>
-          <p className="text-xl font-bold text-gray-900">
-            {(regime.confidence * 100).toFixed(0)}%
+          <p className="text-xs font-semibold mb-1 text-theme-primary">
+            AI Analysis:
+          </p>
+          <p className="text-sm text-text-secondary">
+            {regime.reasoning || regime.trigger}
           </p>
         </div>
-      </div>
-
-      <div className="mt-4">
-        <p className="text-sm text-gray-600">
-          {regime.reasoning || regime.trigger || "Market analysis"}
-        </p>
-      </div>
-
-      <div className="mt-4 grid grid-cols-2 gap-4">
-        <div>
-          <p className="text-xs text-gray-500">VIX</p>
-          <p className="font-medium text-gray-900">
-            {regime.indicators?.vix?.toFixed(1) ?? "N/A"}
-          </p>
-        </div>
-        {regime.riskLevel && (
-          <div>
-            <p className="text-xs text-gray-500">Risk Level</p>
-            <Badge variant={riskLevelVariant[regime.riskLevel]}>
-              {regime.riskLevel.toUpperCase()}
-            </Badge>
-          </div>
-        )}
-      </div>
+      )}
     </Card>
   );
 }

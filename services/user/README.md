@@ -12,7 +12,7 @@ The User Service manages:
 
 ## Architecture
 
-- **gRPC only** - Kong Gateway handles HTTP-to-gRPC transcoding
+- **gRPC only** - Envoy Gateway handles HTTP-to-gRPC transcoding
 - **PostgreSQL** - User data persistence
 - **Redis** - Preferences caching (1-hour TTL)
 - **bcrypt** - Password hashing
@@ -21,7 +21,7 @@ The User Service manages:
 
 ### gRPC Methods
 
-| Method | Description | HTTP (via Kong) |
+| Method | Description | HTTP (via Envoy) |
 |--------|-------------|-----------------|
 | `GetUser` | Get user by ID | `GET /v1/users/{user_id}` |
 | `CreateUser` | Create new user | `POST /v1/users` |

@@ -62,6 +62,15 @@ topics:
       retention.ms: 2592000000   # 30 days retention
       cleanup.policy: delete
 
+  # Trading Control Events - Published by User Service
+  # Consumers: Executor Service, Notification Service
+  - name: trading-control-events
+    partitions: 3
+    replication_factor: 1
+    config:
+      retention.ms: 2592000000   # 30 days retention
+      cleanup.policy: delete
+
 # Consumer Groups Configuration
 consumer_groups:
   # Risk Committee - Highest priority, processes CRITICAL events first
@@ -78,11 +87,12 @@ consumer_groups:
       - regime-events
     min_priority: 1  # MEDIUM and above
 
-  # Executor Service - Processes signals and risk alerts
+  # Executor Service - Processes signals, risk alerts, and trading control
   - group_id: executor-service
     topics:
       - strategy-events
       - risk-events
+      - trading-control-events
     min_priority: 1  # MEDIUM and above
 
   # Portfolio Service - Tracks all relevant events
@@ -100,4 +110,5 @@ consumer_groups:
       - risk-events
       - execution-events
       - portfolio-events
+      - trading-control-events
     min_priority: 0  # All priorities

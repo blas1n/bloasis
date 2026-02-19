@@ -6,7 +6,7 @@ This service provides backtesting capabilities:
 - Performance metrics calculation
 - Strategy comparison
 
-Kong Gateway handles HTTP-to-gRPC transcoding.
+Envoy Gateway handles HTTP-to-gRPC transcoding.
 """
 
 import asyncio

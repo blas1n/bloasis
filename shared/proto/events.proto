@@ -72,3 +72,16 @@ message RiskAlertEvent {
   EventPriority priority = 7;    // Event priority for routing
   map<string, string> metrics = 8;  // Risk metrics
 }
+
+// TradingControlEvent - Published when user starts/stops trading
+// Topic: trading-control-events
+// Consumers: Executor Service, Notification Service
+message TradingControlEvent {
+  string event_id = 1;           // UUID for event tracking
+  string timestamp = 2;          // ISO 8601 format
+  string user_id = 3;            // User identifier
+  string action = 4;             // Action: "started" or "stopped"
+  string stop_mode = 5;          // Stop mode: "hard", "soft", or "" (empty if action is "started")
+  EventPriority priority = 6;    // Event priority for routing
+  map<string, string> metadata = 7;  // Additional context
+}

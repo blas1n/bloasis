@@ -115,6 +115,7 @@ class UserRepository:
                 max_position_size=Decimal("0.10"),
                 preferred_sectors=[],
                 enable_notifications=True,
+                trading_enabled=False,
             )
             session.add(preferences_record)
             await session.commit()
@@ -179,6 +180,7 @@ class UserRepository:
         max_position_size: Optional[Decimal] = None,
         preferred_sectors: Optional[list[str]] = None,
         enable_notifications: Optional[bool] = None,
+        trading_enabled: Optional[bool] = None,
     ) -> Optional[UserPreferences]:
         """
         Update user preferences.
@@ -190,6 +192,7 @@ class UserRepository:
             max_position_size: New max position size (optional).
             preferred_sectors: New preferred sectors (optional).
             enable_notifications: New notification setting (optional).
+            trading_enabled: New trading enabled setting (optional).
 
         Returns:
             Updated UserPreferences domain object if found, None otherwise.
@@ -237,6 +240,8 @@ class UserRepository:
                 record.preferred_sectors = preferred_sectors
             if enable_notifications is not None:
                 record.enable_notifications = enable_notifications
+            if trading_enabled is not None:
+                record.trading_enabled = trading_enabled
 
             await session.commit()
             await session.refresh(record)
@@ -267,6 +272,7 @@ class UserRepository:
                 max_position_size=Decimal("0.10"),
                 preferred_sectors=[],
                 enable_notifications=True,
+                trading_enabled=False,
             )
             session.add(record)
             await session.commit()

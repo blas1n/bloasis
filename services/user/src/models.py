@@ -69,6 +69,7 @@ class UserPreferencesRecord(Base):
         ARRAY(String), nullable=False, default=list
     )
     enable_notifications: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    trading_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
     )
@@ -138,6 +139,7 @@ class UserPreferences:
     max_position_size: Decimal = Decimal("0.10")
     preferred_sectors: list[str] = field(default_factory=list)
     enable_notifications: bool = True
+    trading_enabled: bool = False
 
     @classmethod
     def from_record(cls, record: UserPreferencesRecord) -> "UserPreferences":
@@ -157,6 +159,7 @@ class UserPreferences:
             max_position_size=Decimal(str(record.max_position_size)),
             preferred_sectors=list(record.preferred_sectors) if record.preferred_sectors else [],
             enable_notifications=record.enable_notifications,
+            trading_enabled=record.trading_enabled,
         )
 
     @classmethod
@@ -197,6 +200,7 @@ def preferences_to_cache_dict(preferences: UserPreferences) -> dict:
         "max_position_size": str(preferences.max_position_size),
         "preferred_sectors": preferences.preferred_sectors,
         "enable_notifications": preferences.enable_notifications,
+        "trading_enabled": preferences.trading_enabled,
     }
 
 
@@ -217,4 +221,5 @@ def cache_dict_to_preferences(data: dict) -> UserPreferences:
         max_position_size=Decimal(data["max_position_size"]),
         preferred_sectors=data.get("preferred_sectors", []),
         enable_notifications=data.get("enable_notifications", True),
+        trading_enabled=data.get("trading_enabled", False),
     )

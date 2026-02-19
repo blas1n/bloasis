@@ -35,7 +35,7 @@ This is a **user-specific service** (not Tier 1 shared), meaning:
 +---------------------------------------------------------------------+
 ```
 
-**Note**: This service exposes only gRPC. Kong Gateway handles HTTP-to-gRPC transcoding for external REST API access.
+**Note**: This service exposes only gRPC. Envoy Gateway handles HTTP-to-gRPC transcoding for external REST API access.
 
 ## API Endpoints
 
@@ -68,9 +68,9 @@ grpcurl -plaintext -d '{"service": "bloasis.portfolio.PortfolioService"}' \
   localhost:50057 grpc.health.v1.Health/Check
 ```
 
-### REST via Kong Gateway (Read Operations Only)
+### REST via Envoy Gateway (Read Operations Only)
 
-Kong automatically transcodes gRPC to REST for **read operations only**:
+Envoy Gateway automatically transcodes gRPC to REST for **read operations only**:
 
 ```bash
 GET /v1/portfolio/{user_id}                    # Get portfolio summary
@@ -370,7 +370,7 @@ message Money {
 2. **Decimal for money** - never use float for financial calculations
 3. **Tests required** - minimum 80% coverage
 4. **gRPC for internal communication** - no HTTP between services
-5. **gRPC-only exposure** - no HTTP endpoints, Kong handles REST transcoding
+5. **gRPC-only exposure** - no HTTP endpoints, Envoy handles REST transcoding
 
 ## MSA Integration
 

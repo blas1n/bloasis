@@ -1,7 +1,7 @@
 """
 Classification Service - gRPC only.
 
-Kong Gateway handles HTTP-to-gRPC transcoding.
+Envoy Gateway handles HTTP-to-gRPC transcoding.
 Implements Stock Selection Pipeline Stage 1-2.
 """
 

@@ -1,7 +1,7 @@
 """
 Market Data Service - gRPC only.
 
-Kong Gateway handles HTTP-to-gRPC transcoding.
+Envoy Gateway handles HTTP-to-gRPC transcoding.
 Uses yfinance for stock market data with Redis caching.
 """
 

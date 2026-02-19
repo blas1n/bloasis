@@ -8,15 +8,15 @@ BLOASIS is an AI-powered multi-asset trading platform combining LLMs and Reinfor
 - Backend: Python 3.11+ (FastAPI), gRPC internal communication
 - AI/ML: FinGPT (financial analysis), Claude Sonnet 4 (complex reasoning), LangGraph (multi-agent)
 - Backtesting: VectorBT, FinRL
-- Infrastructure: Kong Gateway (gRPC-to-REST), Redpanda (messaging), PostgreSQL/TimescaleDB
+- Infrastructure: Envoy Gateway (gRPC-to-REST), Redpanda (messaging), PostgreSQL/TimescaleDB
 - Frontend: TypeScript (React/Next.js)
 
 ## Architecture Principles
 
 ### 1. MSA Communication
 - **Internal**: gRPC only (10x faster than HTTP)
-- **External**: Kong transcodes gRPC → REST
-- **.proto files**: Include HTTP annotations for Kong
+- **External**: Envoy Gateway transcodes gRPC → REST
+- **.proto files**: Include HTTP annotations for Envoy Gateway
 
 ### 2. Event Messaging
 - **Redpanda** (not RabbitMQ or Redis Pub/Sub)

@@ -4,3 +4,4 @@ export { PortfolioSummary } from "./PortfolioSummary";
 export { PositionsList } from "./PositionsList";
 export { SignalsList } from "./SignalsList";
 export { TradeHistoryTable } from "./TradeHistoryTable";
+export { MetricCard } from "./MetricCard";

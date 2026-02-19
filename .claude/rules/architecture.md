@@ -111,7 +111,7 @@ cache_key = f"user:{user_id}:portfolio"  # Per-user
 
 **ALL .proto services MUST have HTTP annotations.**
 
-**Why**: Kong requires them for gRPC-to-REST transcoding.
+**Why**: Envoy Gateway requires them for gRPC-to-REST transcoding.
 
 ```protobuf
 // Correct
@@ -133,7 +133,7 @@ service MarketRegimeService {
 
 **Services MUST expose gRPC only. NO HTTP endpoints.**
 
-**Why**: Kong Gateway handles HTTP-to-gRPC transcoding. Services don't need HTTP.
+**Why**: Envoy Gateway handles HTTP-to-gRPC transcoding. Services don't need HTTP.
 
 ```python
 # Correct - gRPC only with gRPC Health Check

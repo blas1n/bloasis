@@ -1,6 +1,6 @@
 // User Service - gRPC Protocol Buffer Definition
 // Manages user profiles and trading preferences
-// Kong Gateway handles HTTP-to-gRPC transcoding via annotations
+// Envoy Gateway handles HTTP-to-gRPC transcoding via annotations
 
 syntax = "proto3";
 
@@ -43,6 +43,29 @@ service UserService {
       body: "*"
     };
   }
+
+  // AI 자동 거래 시작
+  rpc StartTrading(StartTradingRequest) returns (StartTradingResponse) {
+    option (google.api.http) = {
+      post: "/v1/users/{user_id}/trading/start"
+      body: "*"
+    };
+  }
+
+  // AI 자동 거래 중지 (Hard/Soft)
+  rpc StopTrading(StopTradingRequest) returns (StopTradingResponse) {
+    option (google.api.http) = {
+      post: "/v1/users/{user_id}/trading/stop"
+      body: "*"
+    };
+  }
+
+  // 거래 상태 조회
+  rpc GetTradingStatus(GetTradingStatusRequest) returns (GetTradingStatusResponse) {
+    option (google.api.http) = {
+      get: "/v1/users/{user_id}/trading/status"
+    };
+  }
 }
 
 // User represents a user account
@@ -63,6 +86,7 @@ message UserPreferences {
   string max_position_size = 4;      // Decimal as string (e.g., "0.10")
   repeated string preferred_sectors = 5;  // e.g., ["Technology", "Healthcare"]
   bool enable_notifications = 6;
+  bool trading_enabled = 7;          // AI 자동 거래 활성화 여부
 }
 
 // GetUserRequest - request to get a user by ID
@@ -119,4 +143,43 @@ message UpdatePreferencesRequest {
 // UpdatePreferencesResponse - response after update
 message UpdatePreferencesResponse {
   UserPreferences preferences = 1;
+}
+
+// StartTradingRequest - request to start AI auto-trading
+message StartTradingRequest {
+  string user_id = 1;
+}
+
+// StartTradingResponse - response after starting trading
+message StartTradingResponse {
+  bool success = 1;
+  string message = 2;
+  string timestamp = 3;
+}
+
+// StopTradingRequest - request to stop AI auto-trading
+message StopTradingRequest {
+  string user_id = 1;
+  string stop_mode = 2;  // "hard" or "soft" (default: "soft")
+}
+
+// StopTradingResponse - response after stopping trading
+message StopTradingResponse {
+  bool success = 1;
+  string message = 2;
+  int32 orders_cancelled = 3;
+  string timestamp = 4;
+}
+
+// GetTradingStatusRequest - request to get trading status
+message GetTradingStatusRequest {
+  string user_id = 1;
+}
+
+// GetTradingStatusResponse - trading status response
+message GetTradingStatusResponse {
+  bool trading_enabled = 1;
+  string status = 2;  // "active", "inactive", "soft_stopped", "hard_stopped"
+  string last_changed = 3;
+  int32 next_poll_ms = 4;  // Client should wait this many ms before next poll (server-directed)
 }
