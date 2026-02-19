@@ -1,7 +1,7 @@
 """
 Unit tests for Market Regime Service.
 
-All external dependencies (Redis, Redpanda, PostgreSQL, FinGPT) are mocked.
+All external dependencies (Redis, Redpanda, PostgreSQL, Claude) are mocked.
 Target: 80%+ code coverage.
 """
 
@@ -34,33 +34,33 @@ class TestRegimeClassifier:
     """Tests for RegimeClassifier."""
 
     @pytest.mark.asyncio
-    async def test_classify_with_fingpt_success(self) -> None:
-        """Should use FinGPT result when available."""
+    async def test_classify_with_claude_success(self) -> None:
+        """Should use Claude result when analyst returns valid response."""
         from src.models import RegimeClassifier
 
-        mock_fingpt = AsyncMock()
-        mock_fingpt.classify_regime = AsyncMock(return_value={
+        mock_analyst = AsyncMock()
+        mock_analyst.analyze = AsyncMock(return_value={
             "regime": "crisis",
             "confidence": 0.95,
             "reasoning": "circuit_breaker",
         })
 
-        classifier = RegimeClassifier(fingpt_client=mock_fingpt)
+        classifier = RegimeClassifier(analyst=mock_analyst)
         result = await classifier.classify()
 
         assert result.regime == "crisis"
         assert result.confidence == 0.95
-        mock_fingpt.classify_regime.assert_called_once()
+        mock_analyst.analyze.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_classify_fingpt_failure_fallback(self) -> None:
-        """Should fall back to rule-based when FinGPT fails."""
+    async def test_classify_claude_failure_fallback(self) -> None:
+        """Should fall back to rule-based when Claude raises an exception."""
         from src.models import RegimeClassifier
 
-        mock_fingpt = AsyncMock()
-        mock_fingpt.classify_regime = AsyncMock(side_effect=Exception("API error"))
+        mock_analyst = AsyncMock()
+        mock_analyst.analyze = AsyncMock(side_effect=Exception("API error"))
 
-        classifier = RegimeClassifier(fingpt_client=mock_fingpt)
+        classifier = RegimeClassifier(analyst=mock_analyst)
         result = await classifier.classify()
 
         # Fallback uses rule-based classification (default VIX=20 -> sideways)
@@ -69,17 +69,17 @@ class TestRegimeClassifier:
         assert result.trigger == "baseline"
 
     @pytest.mark.asyncio
-    async def test_classify_fingpt_invalid_response(self) -> None:
-        """Should use default when FinGPT returns invalid data."""
+    async def test_classify_claude_invalid_response(self) -> None:
+        """Should use parse defaults when Claude returns empty response."""
         from src.models import RegimeClassifier
 
-        mock_fingpt = AsyncMock()
-        mock_fingpt.classify_regime = AsyncMock(return_value={})  # Missing 'regime' key
+        mock_analyst = AsyncMock()
+        mock_analyst.analyze = AsyncMock(return_value={})  # Missing 'regime' key
 
-        classifier = RegimeClassifier(fingpt_client=mock_fingpt)
+        classifier = RegimeClassifier(analyst=mock_analyst)
         result = await classifier.classify()
 
-        # Should use default from response parsing
+        # _parse_regime_response defaults to sideways
         assert result.regime == "sideways"
 
     @pytest.mark.asyncio
@@ -87,83 +87,19 @@ class TestRegimeClassifier:
         """Should return ISO 8601 formatted timestamp."""
         from src.models import RegimeClassifier
 
-        mock_fingpt = AsyncMock()
-        mock_fingpt.classify_regime = AsyncMock(return_value={
+        mock_analyst = AsyncMock()
+        mock_analyst.analyze = AsyncMock(return_value={
             "regime": "bull",
             "confidence": 0.9,
             "reasoning": "baseline",
         })
 
-        classifier = RegimeClassifier(fingpt_client=mock_fingpt)
+        classifier = RegimeClassifier(analyst=mock_analyst)
         result = await classifier.classify()
 
         # Verify timestamp is valid ISO 8601
         assert "T" in result.timestamp
         assert result.timestamp.endswith("+00:00") or result.timestamp.endswith("Z")
-
-
-class TestFinGPTClient:
-    """Tests for FinGPTClient and MockFinGPTClient."""
-
-    def test_init_with_explicit_api_key(self) -> None:
-        """Should initialize wrapper with API key passed to shared client."""
-        from src.clients.fingpt_client import FinGPTClient
-
-        client = FinGPTClient(api_key="explicit-key")
-        # Wrapper stores reference to shared client
-        assert client._client is not None
-        assert client._client.api_key == "explicit-key"
-
-    def test_mock_client_init(self) -> None:
-        """Should initialize MockFinGPTClient without API key."""
-        from src.clients.fingpt_client import MockFinGPTClient
-
-        client = MockFinGPTClient()
-        # Mock wrapper uses shared mock client internally
-        assert client._client is not None
-
-    @pytest.mark.asyncio
-    async def test_mock_classify_regime_returns_data(self) -> None:
-        """Should return regime classification from mock client."""
-        from src.clients.fingpt_client import MockFinGPTClient
-
-        client = MockFinGPTClient()
-        result = await client.classify_regime(
-            market_data={"vix": 18.0},
-            macro_indicators={"yield_curve_10y_2y": 0.5},
-        )
-
-        assert "regime" in result
-        assert "confidence" in result
-        assert "reasoning" in result
-
-    @pytest.mark.asyncio
-    async def test_mock_health_check_returns_true(self) -> None:
-        """Should return True from mock health check."""
-        from src.clients.fingpt_client import MockFinGPTClient
-
-        client = MockFinGPTClient()
-        result = await client.health_check()
-        assert result is True
-
-    @pytest.mark.asyncio
-    async def test_health_check_without_api_key_raises(self) -> None:
-        """Should raise ValueError when API key is empty."""
-        from src.clients.fingpt_client import FinGPTClient
-
-        with pytest.raises(ValueError, match="Hugging Face API token required"):
-            FinGPTClient(api_key="")
-
-    @pytest.mark.asyncio
-    async def test_health_check_with_api_key(self) -> None:
-        """Should attempt health check when API key is set."""
-        from src.clients.fingpt_client import FinGPTClient
-
-        client = FinGPTClient(api_key="test-key")
-        # Health check will fail because no real API, but won't crash
-        result = await client.health_check()
-        # Can be True or False depending on network - just test it doesn't crash
-        assert isinstance(result, bool)
 
 
 class TestMarketRegimeServicer:

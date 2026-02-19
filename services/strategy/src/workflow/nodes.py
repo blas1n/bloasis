@@ -96,7 +96,7 @@ async def initialize_analysis(state: AnalysisState) -> dict:
 
 
 async def macro_analysis_node(state: AnalysisState) -> dict:
-    """Layer 1: Macro economic analysis using FinGPT.
+    """Layer 1: Macro economic analysis using Claude.
 
     Args:
         state: Current workflow state

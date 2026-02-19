@@ -1,7 +1,7 @@
 """
 Market Regime Service - Domain Models and Classifier.
 
-Contains the RegimeClassifier that analyzes market conditions using FinGPT,
+Contains the RegimeClassifier that analyzes market conditions using Claude AI,
 and SQLAlchemy ORM models for database persistence.
 """
 
@@ -15,8 +15,10 @@ from sqlalchemy import DateTime, Float, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
+from .prompts import format_classification_prompt, get_model_parameters, get_system_prompt
+
 if TYPE_CHECKING:
-    from .clients.fingpt_client import FinGPTClient
+    from shared.ai_clients import ClaudeClient
     from .macro_data import MacroDataFetcher
 
 logger = logging.getLogger(__name__)
@@ -79,7 +81,7 @@ class RegimeData:
 
 class RegimeClassifier:
     """
-    Market regime classifier using FinGPT for AI-powered analysis.
+    Market regime classifier using Claude AI for analysis.
 
     Analyzes market conditions and classifies into one of the following regimes:
     - crisis: High volatility, risk-off (VIX > 30, major drawdowns)
@@ -91,18 +93,21 @@ class RegimeClassifier:
 
     def __init__(
         self,
-        fingpt_client: Optional["FinGPTClient"] = None,
+        analyst: Optional["ClaudeClient"] = None,
         macro_fetcher: Optional["MacroDataFetcher"] = None,
+        claude_model: str = "claude-haiku-4-5-20251001",
     ) -> None:
         """
         Initialize the RegimeClassifier.
 
         Args:
-            fingpt_client: FinGPT client for AI analysis.
+            analyst: Claude client for AI analysis. If None, uses rule-based fallback.
             macro_fetcher: Macro data fetcher for economic indicators.
+            claude_model: Claude model ID to use for analysis.
         """
-        self.fingpt = fingpt_client
+        self.analyst = analyst
         self.macro_fetcher = macro_fetcher
+        self.claude_model = claude_model
 
     async def classify(
         self,
@@ -112,7 +117,8 @@ class RegimeClassifier:
         """
         Classify the current market regime.
 
-        Uses FinGPT to analyze market conditions and determine the regime.
+        Uses Claude AI to analyze market conditions and determine the regime.
+        Falls back to rule-based classification if Claude is unavailable.
 
         Args:
             market_data: Optional pre-fetched market data.
@@ -135,12 +141,21 @@ class RegimeClassifier:
             macro_indicators = {"yield_curve_10y_2y": 0.5, "fed_funds_rate": 5.25}
 
         try:
-            if self.fingpt:
-                # Use FinGPT for classification
-                result = await self.fingpt.classify_regime(
-                    market_data=market_data,
-                    macro_indicators=macro_indicators,
+            if self.analyst:
+                # Use Claude for classification
+                prompt = format_classification_prompt(market_data, macro_indicators)
+                system_prompt = get_system_prompt()
+                params = get_model_parameters()
+
+                raw_result = await self.analyst.analyze(
+                    prompt=prompt,
+                    model=self.claude_model,
+                    system_prompt=system_prompt,
+                    response_format="json",
+                    max_tokens=params.get("max_new_tokens", 500),
                 )
+
+                result = self._parse_regime_response(raw_result)
 
                 timestamp = datetime.now(timezone.utc).isoformat()
 
@@ -169,10 +184,44 @@ class RegimeClassifier:
                 return regime_data
 
         except Exception as e:
-            logger.warning(f"FinGPT classification failed, using fallback: {e}")
+            logger.warning(f"Claude classification failed, using fallback: {e}")
 
         # Fallback: Simple rule-based classification
         return self._fallback_classify(market_data, macro_indicators)
+
+    def _parse_regime_response(self, data: dict) -> dict:
+        """
+        Validate and normalize Claude's regime classification response.
+
+        Args:
+            data: Parsed JSON from Claude API
+
+        Returns:
+            Validated regime response dict
+        """
+        try:
+            regime = data.get("regime", "sideways")
+            if regime not in ["crisis", "bear", "bull", "sideways", "recovery"]:
+                regime = "sideways"
+
+            confidence = float(data.get("confidence", 0.5))
+            confidence = max(0.0, min(1.0, confidence))
+
+            return {
+                "regime": regime,
+                "confidence": confidence,
+                "reasoning": data.get("reasoning", "Unable to determine"),
+                "indicators": data.get("key_indicators", []),
+            }
+
+        except (KeyError, TypeError, ValueError) as e:
+            logger.warning(f"Failed to parse Claude response: {e}")
+            return {
+                "regime": "sideways",
+                "confidence": 0.5,
+                "reasoning": "Parse error",
+                "indicators": [],
+            }
 
     def _calculate_risk_level(self, regime: str, vix: float) -> str:
         """Calculate risk level based on regime and VIX."""
@@ -188,7 +237,7 @@ class RegimeClassifier:
         market_data: dict,
         macro_indicators: dict,
     ) -> RegimeData:
-        """Fallback rule-based classification when FinGPT is unavailable."""
+        """Fallback rule-based classification when Claude is unavailable."""
         vix = market_data.get("vix", 20.0)
         timestamp = datetime.now(timezone.utc).isoformat()
 

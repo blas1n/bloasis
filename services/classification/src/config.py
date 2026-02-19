@@ -32,11 +32,9 @@ class ServiceConfig(BaseSettings):
     market_regime_host: str = "market-regime"
     market_regime_port: int = 50051
 
-    # FinGPT configuration (via Hugging Face)
-    huggingface_token: str = ""  # Hugging Face API token
-    fingpt_model: str = "FinGPT/fingpt-sentiment_llama2-13b_lora"  # HF model ID
-    fingpt_timeout: float = 60.0
-    use_mock_fingpt: bool = True  # Use mock in development (set False for production)
+    # Claude AI configuration (for sector/theme analysis)
+    anthropic_api_key: str = ""  # Anthropic API key
+    claude_model: str = "claude-haiku-4-5-20251001"  # Model for classification
 
 
 # Global config instance - validated at import time

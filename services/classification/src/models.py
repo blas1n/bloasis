@@ -14,7 +14,7 @@ class SectorScore(BaseModel):
 
     sector: str = Field(description="GICS sector name")
     score: float = Field(ge=0, le=100, description="Sector score (0-100)")
-    rationale: str = Field(description="Rationale for score from FinGPT")
+    rationale: str = Field(description="Rationale for score from AI or rule-based analysis")
     selected: bool = Field(description="Whether sector is selected for Stage 2")
 
 
@@ -24,7 +24,7 @@ class ThemeScore(BaseModel):
     theme: str = Field(description="Investment theme name")
     sector: str = Field(description="Sector this theme belongs to")
     score: float = Field(ge=0, le=100, description="Theme score (0-100)")
-    rationale: str = Field(description="Rationale for score from FinGPT")
+    rationale: str = Field(description="Rationale for score from AI or rule-based analysis")
     representative_symbols: List[str] = Field(
         default_factory=list, description="Representative symbols for this theme"
     )

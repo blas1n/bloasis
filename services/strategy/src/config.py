@@ -44,13 +44,12 @@ class ServiceConfig(BaseSettings):
     # Redpanda (Event Publishing)
     redpanda_brokers: str = "localhost:9092"
 
-    # External AI APIs
-    fingpt_api_key: str = ""
-    fingpt_base_url: str = "https://api.fingpt.ai"
-    claude_api_key: str = ""
+    # Claude AI configuration (for macro/regime analysis)
+    anthropic_api_key: str = ""
+    claude_model: str = "claude-haiku-4-5-20251001"
 
     # Sentiment caching
-    sentiment_cache_ttl: int = 3600  # 1 hour TTL for FinGPT sentiment
+    sentiment_cache_ttl: int = 3600  # 1 hour TTL for sentiment cache
 
 
 # Global config instance - validated at import time

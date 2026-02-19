@@ -9,7 +9,6 @@ import grpc
 import pytest
 from shared.generated import classification_pb2
 
-from src.clients.fingpt_client import MockFinGPTClient
 from src.clients.market_regime_client import MarketRegimeClient
 from src.service import ClassificationService, ClassificationServicer
 from src.utils.cache import CacheManager
@@ -33,12 +32,9 @@ async def grpc_servicer():
     mock_response.timestamp = "2026-02-02T12:00:00Z"
     mock_regime_client.get_current_regime = AsyncMock(return_value=mock_response)
 
-    # Real mock FinGPT client
-    fingpt_client = MockFinGPTClient()
-
-    # Create service and servicer
+    # Create service and servicer (rule-based fallback, no Claude analyst)
     service = ClassificationService(
-        fingpt_client=fingpt_client,
+        analyst=None,
         regime_client=mock_regime_client,
         cache_manager=mock_cache,
     )
@@ -251,10 +247,8 @@ class TestErrorHandling:
             side_effect=ConnectionError("Service unavailable")
         )
 
-        fingpt_client = MockFinGPTClient()
-
         service = ClassificationService(
-            fingpt_client=fingpt_client,
+            analyst=None,
             regime_client=mock_regime_client,
             cache_manager=mock_cache,
         )
@@ -287,10 +281,8 @@ class TestErrorHandling:
             side_effect=TimeoutError("Request timed out")
         )
 
-        fingpt_client = MockFinGPTClient()
-
         service = ClassificationService(
-            fingpt_client=fingpt_client,
+            analyst=None,
             regime_client=mock_regime_client,
             cache_manager=mock_cache,
         )

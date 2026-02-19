@@ -1,7 +1,7 @@
 """Workflow state definitions for LangGraph AI Flow.
 
 This module defines the state management for the 5-Layer AI Flow:
-- Layer 1: Macro Strategist (FinGPT)
+- Layer 1: Macro Strategist (Claude)
 - Layer 2: Technical Analyst (Claude)
 - Layer 3: Risk Manager (Claude)
 - Layer 4: Signal Generator

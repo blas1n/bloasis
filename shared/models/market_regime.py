@@ -6,7 +6,7 @@ in the GetCurrentRegimeResponse message in market_regime.proto. It provides
 bidirectional conversion between market regimes and sector bias strategies.
 
 Market regimes are part of Tier 1 (shared across all users, cached for 6 hours)
-and are classified using FinGPT analysis based on market conditions like VIX levels,
+and are classified using Claude/AI analysis based on market conditions like VIX levels,
 price trends, and sentiment indicators.
 
 Reference: shared/proto/market_regime.proto GetCurrentRegimeResponse message
@@ -33,11 +33,11 @@ class MarketRegime(Enum):
 
     Tier 1 Classification:
         Market regime classification is shared across ALL users and cached for 6 hours
-        to optimize FinGPT API costs. This shared analysis forms the foundation for
+        to optimize AI API costs. This shared analysis forms the foundation for
         Tier 2 sector strategies and Tier 3 user personalization.
 
-    FinGPT Integration:
-        FinGPT analyzes multiple market indicators to classify the current regime:
+    Claude Integration:
+        Claude analyzes multiple market indicators to classify the current regime:
         - VIX levels and volatility patterns
         - Market breadth and momentum
         - Sentiment indicators

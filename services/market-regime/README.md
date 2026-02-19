@@ -1,6 +1,6 @@
 # Market Regime Service
 
-BLOASIS Tier 1 service for market regime classification using FinGPT AI analysis.
+BLOASIS Tier 1 service for market regime classification using Claude AI analysis.
 
 ## Overview
 
@@ -15,7 +15,7 @@ The Market Regime Service classifies current market conditions into one of five 
 This is a **Tier 1 shared service**, meaning:
 - Results are cached for 6 hours
 - Shared across all users (not personalized)
-- Reduces FinGPT API costs by 93%
+- Reduces Claude API costs by 93%
 
 ## Architecture
 
@@ -25,7 +25,7 @@ This is a **Tier 1 shared service**, meaning:
 ├─────────────────────────────────────────────────────────────────┤
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────┐  │
 │  │    gRPC      │  │   gRPC       │  │  RegimeClassifier    │  │
-│  │  :50051      │  │ Health Check │  │  (FinGPT wrapper)    │  │
+│  │  :50051      │  │ Health Check │  │  (Claude AI/rules)   │  │
 │  │              │  │ grpc.health  │  │                      │  │
 │  └──────────────┘  └──────────────┘  └──────────────────────┘  │
 │                           │                     │               │
@@ -140,9 +140,8 @@ GET /v1/market-regime/history?time_range.start_date=2025-01-25T00:00:00Z&time_ra
 | `REDIS_PORT` | 6379 | Redis server port |
 | `REDPANDA_BROKERS` | redpanda:9092 | Redpanda broker addresses |
 | `DATABASE_URL` | - | PostgreSQL connection URL |
-| `HUGGINGFACE_TOKEN` | - | Hugging Face API token (required for production) |
-| `FINGPT_MODEL` | FinGPT/fingpt-sentiment_llama2-13b_lora | Hugging Face model ID |
-| `USE_MOCK_FINGPT` | true | Use mock client (set false for production) |
+| `ANTHROPIC_API_KEY` | - | Anthropic API key. If unset, falls back to rule-based classification |
+| `CLAUDE_MODEL` | claude-haiku-4-5-20251001 | Claude model ID for regime classification |
 | `LOG_LEVEL` | INFO | Logging level |
 
 ## Running Locally

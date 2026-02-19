@@ -4,7 +4,6 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from src.clients.fingpt_client import MockFinGPTClient
 from src.clients.market_regime_client import MarketRegimeClient
 from src.service import ClassificationService
 from src.utils.cache import CacheManager
@@ -42,16 +41,10 @@ def mock_regime_client():
 
 
 @pytest.fixture
-def mock_fingpt_client():
-    """Use real MockFinGPTClient for testing."""
-    return MockFinGPTClient()
-
-
-@pytest.fixture
-def classification_service(mock_fingpt_client, mock_regime_client, mock_cache):
-    """Create Classification Service with mocked dependencies."""
+def classification_service(mock_regime_client, mock_cache):
+    """Create Classification Service with rule-based fallback (no Claude analyst)."""
     return ClassificationService(
-        fingpt_client=mock_fingpt_client,
+        analyst=None,  # Uses rule-based fallback
         regime_client=mock_regime_client,
         cache_manager=mock_cache,
     )

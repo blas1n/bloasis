@@ -1,5 +1,5 @@
 """
-Prompt management for FinGPT sector and theme analysis.
+Prompt management for sector and theme analysis.
 
 This module provides:
 - YAML-based prompt loading with caching (via shared.prompts)

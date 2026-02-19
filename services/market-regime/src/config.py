@@ -34,11 +34,9 @@ class ServiceConfig(BaseSettings):
     # Database configuration
     database_url: str = ""
 
-    # FinGPT configuration (via Hugging Face)
-    huggingface_token: str = ""  # Hugging Face API token
-    fingpt_model: str = "FinGPT/fingpt-sentiment_llama2-13b_lora"  # HF model ID
-    fingpt_timeout: float = 60.0
-    use_mock_fingpt: bool = True  # Use mock in development (set False for production)
+    # Claude configuration (via Anthropic API)
+    anthropic_api_key: str = ""  # Anthropic API key (leave empty to use rule-based fallback)
+    claude_model: str = "claude-haiku-4-5-20251001"  # Claude model for regime classification
 
     # FRED API (for macro data)
     fred_api_key: str = ""

@@ -6,15 +6,20 @@ Implements Stock Selection Pipeline Stage 1-2:
 """
 
 import logging
-from datetime import datetime
-from typing import List, Optional
+from datetime import datetime, timezone
+from typing import TYPE_CHECKING, List, Optional
 
 import grpc
 from shared.generated import classification_pb2, classification_pb2_grpc
 
-from .clients.fingpt_client import FinGPTClientBase
 from .clients.market_regime_client import MarketRegimeClient
 from .models import CandidateSymbol, SectorScore, ThemeScore
+from .prompts import (
+    format_sector_prompt,
+    format_theme_prompt,
+    get_sector_model_parameters,
+    get_theme_model_parameters,
+)
 from .utils.cache import (
     CacheManager,
     build_candidate_cache_key,
@@ -22,7 +27,127 @@ from .utils.cache import (
     build_theme_cache_key,
 )
 
+if TYPE_CHECKING:
+    from shared.ai_clients import ClaudeClient
+
 logger = logging.getLogger(__name__)
+
+# All 11 GICS sectors
+_ALL_SECTORS = [
+    "Technology",
+    "Healthcare",
+    "Financials",
+    "Consumer Discretionary",
+    "Industrials",
+    "Communication Services",
+    "Consumer Staples",
+    "Energy",
+    "Utilities",
+    "Real Estate",
+    "Materials",
+]
+
+# Rule-based sector strategies by regime (fallback when Claude is unavailable)
+_SECTOR_STRATEGIES = {
+    "bull": {
+        "selected": ["Technology", "Consumer Discretionary", "Communication Services"],
+        "scores": {
+            "Technology": 90, "Consumer Discretionary": 85, "Communication Services": 82,
+            "Healthcare": 70, "Financials": 68, "Industrials": 65,
+            "Materials": 62, "Consumer Staples": 55, "Energy": 50,
+            "Utilities": 45, "Real Estate": 48,
+        },
+    },
+    "bear": {
+        "selected": ["Consumer Staples", "Healthcare", "Utilities"],
+        "scores": {
+            "Consumer Staples": 88, "Healthcare": 85, "Utilities": 80,
+            "Real Estate": 60, "Energy": 55, "Technology": 45,
+            "Financials": 42, "Consumer Discretionary": 38,
+            "Communication Services": 40, "Industrials": 35, "Materials": 32,
+        },
+    },
+    "crisis": {
+        "selected": ["Utilities", "Consumer Staples", "Healthcare"],
+        "scores": {
+            "Utilities": 92, "Consumer Staples": 90, "Healthcare": 88,
+            "Real Estate": 50, "Technology": 35, "Energy": 30,
+            "Financials": 25, "Consumer Discretionary": 20,
+            "Communication Services": 30, "Industrials": 22, "Materials": 18,
+        },
+    },
+    "sideways": {
+        "selected": ["Healthcare", "Consumer Staples", "Technology", "Utilities"],
+        "scores": {
+            "Healthcare": 78, "Consumer Staples": 75, "Technology": 72,
+            "Utilities": 70, "Financials": 65, "Communication Services": 63,
+            "Real Estate": 60, "Energy": 58, "Industrials": 55,
+            "Consumer Discretionary": 52, "Materials": 50,
+        },
+    },
+    "recovery": {
+        "selected": ["Technology", "Financials", "Industrials", "Consumer Discretionary"],
+        "scores": {
+            "Technology": 88, "Financials": 85, "Industrials": 82,
+            "Consumer Discretionary": 80, "Materials": 75, "Energy": 72,
+            "Healthcare": 68, "Communication Services": 70,
+            "Consumer Staples": 60, "Real Estate": 65, "Utilities": 55,
+        },
+    },
+}
+
+# Rule-based theme database (fallback)
+_THEME_DATABASE: dict[str, list[tuple[str, list[str], int]]] = {
+    "Technology": [
+        ("AI Infrastructure", ["NVDA", "AMD", "TSM"], 92),
+        ("Cloud Computing", ["MSFT", "GOOGL", "AMZN"], 88),
+        ("Cybersecurity", ["CRWD", "PANW", "ZS"], 85),
+        ("Software SaaS", ["CRM", "NOW", "WDAY"], 82),
+    ],
+    "Healthcare": [
+        ("Biotech Innovation", ["MRNA", "REGN", "VRTX"], 90),
+        ("Medical Devices", ["ISRG", "EW", "SYK"], 85),
+        ("Pharmaceuticals", ["LLY", "NVO", "JNJ"], 80),
+    ],
+    "Financials": [
+        ("Digital Banking", ["JPM", "BAC", "V"], 88),
+        ("Payment Systems", ["MA", "V", "PYPL"], 85),
+        ("Fintech", ["SQ", "SOFI", "COIN"], 80),
+    ],
+    "Consumer Discretionary": [
+        ("E-Commerce", ["AMZN", "SHOP", "MELI"], 90),
+        ("Electric Vehicles", ["TSLA", "RIVN", "LCID"], 85),
+        ("Streaming Services", ["NFLX", "DIS", "SPOT"], 80),
+    ],
+    "Consumer Staples": [
+        ("Food & Beverage", ["KO", "PEP", "MDLZ"], 85),
+        ("Household Products", ["PG", "CL", "KMB"], 82),
+    ],
+    "Energy": [
+        ("Clean Energy", ["ENPH", "SEDG", "RUN"], 88),
+        ("Oil & Gas", ["XOM", "CVX", "COP"], 75),
+    ],
+    "Utilities": [
+        ("Renewable Utilities", ["NEE", "DUK", "SO"], 85),
+        ("Electric Utilities", ["AEP", "EXC", "D"], 80),
+    ],
+    "Industrials": [
+        ("Aerospace & Defense", ["BA", "LMT", "RTX"], 85),
+        ("Industrial Automation", ["ROK", "EMR", "ITW"], 82),
+    ],
+    "Materials": [
+        ("Rare Earth Minerals", ["MP", "ALB", "LAC"], 85),
+        ("Chemicals", ["LIN", "ECL", "SHW"], 78),
+    ],
+    "Communication Services": [
+        ("Social Media", ["META", "SNAP", "PINS"], 85),
+        ("Telecom 5G", ["TMUS", "VZ", "T"], 75),
+    ],
+    "Real Estate": [
+        ("Data Center REITs", ["EQIX", "DLR", "CCI"], 88),
+        ("Residential REITs", ["AVB", "EQR", "MAA"], 75),
+    ],
+}
 
 
 class ClassificationService:
@@ -30,18 +155,21 @@ class ClassificationService:
 
     def __init__(
         self,
-        fingpt_client: FinGPTClientBase,
         regime_client: MarketRegimeClient,
         cache_manager: CacheManager,
+        analyst: Optional["ClaudeClient"] = None,
+        claude_model: str = "claude-haiku-4-5-20251001",
     ):
         """Initialize Classification Service.
 
         Args:
-            fingpt_client: FinGPT client for sector/theme analysis
             regime_client: Market Regime Service gRPC client
             cache_manager: Redis cache manager
+            analyst: Claude client for AI analysis. If None, uses rule-based fallback.
+            claude_model: Claude model ID to use for analysis.
         """
-        self.fingpt = fingpt_client
+        self.analyst = analyst
+        self.claude_model = claude_model
         self.regime_client = regime_client
         self.cache = cache_manager
 
@@ -73,15 +201,30 @@ class ClassificationService:
                     cached["cached_at"],
                 )
 
-        # Cache miss - analyze with FinGPT
         logger.info(f"Analyzing sectors for regime: {regime}")
-        sectors = await self.fingpt.analyze_sectors(regime)
+
+        try:
+            if self.analyst:
+                prompt = format_sector_prompt(regime=regime)
+                params = get_sector_model_parameters()
+                data = await self.analyst.analyze(
+                    prompt=prompt,
+                    model=self.claude_model,
+                    response_format="json",
+                    max_tokens=params.get("max_new_tokens", 1000),
+                )
+                sectors = self._parse_sector_response(data)
+            else:
+                sectors = self._fallback_sector_analysis(regime)
+        except Exception as e:
+            logger.warning(f"Claude sector analysis failed, using fallback: {e}")
+            sectors = self._fallback_sector_analysis(regime)
 
         # Sort by score descending
         sectors.sort(key=lambda s: s.score, reverse=True)
 
         # Cache result
-        cached_at = datetime.utcnow().isoformat() + "Z"
+        cached_at = datetime.now(timezone.utc).isoformat()
         await self.cache.set(
             cache_key,
             {
@@ -120,15 +263,28 @@ class ClassificationService:
                     cached["cached_at"],
                 )
 
-        # Cache miss - analyze with FinGPT
         logger.info(f"Analyzing themes for sectors: {sectors}")
-        themes = await self.fingpt.analyze_themes(sectors, regime)
 
-        # Already sorted by score in FinGPT client
+        try:
+            if self.analyst:
+                prompt = format_theme_prompt(sectors=sectors, regime=regime)
+                params = get_theme_model_parameters()
+                data = await self.analyst.analyze(
+                    prompt=prompt,
+                    model=self.claude_model,
+                    response_format="json",
+                    max_tokens=params.get("max_new_tokens", 1500),
+                )
+                themes = self._parse_theme_response(data)
+            else:
+                themes = self._fallback_theme_analysis(sectors, regime)
+        except Exception as e:
+            logger.warning(f"Claude theme analysis failed, using fallback: {e}")
+            themes = self._fallback_theme_analysis(sectors, regime)
+
         themes.sort(key=lambda t: t.score, reverse=True)
 
-        # Cache result
-        cached_at = datetime.utcnow().isoformat() + "Z"
+        cached_at = datetime.now(timezone.utc).isoformat()
         await self.cache.set(
             cache_key,
             {
@@ -143,18 +299,7 @@ class ClassificationService:
     async def get_candidate_symbols(
         self, regime: Optional[str] = None, max_candidates: int = 50, force_refresh: bool = False
     ) -> tuple[List[CandidateSymbol], List[str], List[str], str]:
-        """Stage 1+2 Combined: Get candidate symbols.
-
-        Combines sector filter and thematic analysis to produce candidate list.
-
-        Args:
-            regime: Market regime (fetched from Market Regime Service if None)
-            max_candidates: Maximum number of candidates to return
-            force_refresh: If True, bypass cache and force fresh analysis
-
-        Returns:
-            Tuple of (candidates, selected_sectors, top_themes, regime)
-        """
+        """Stage 1+2 Combined: Get candidate symbols."""
         # Fetch current regime if not provided
         if not regime:
             regime_response = await self.regime_client.get_current_regime()
@@ -198,7 +343,6 @@ class ClassificationService:
             for symbol in theme.representative_symbols:
                 if len(candidates) >= max_candidates:
                     break
-
                 candidates.append(
                     CandidateSymbol(
                         symbol=symbol,
@@ -207,7 +351,6 @@ class ClassificationService:
                         preliminary_score=theme.score,
                     )
                 )
-
             if len(candidates) >= max_candidates:
                 break
 
@@ -232,16 +375,70 @@ class ClassificationService:
         )
         return candidates, selected_sectors, top_themes, regime
 
+    def _parse_sector_response(self, data: dict) -> List[SectorScore]:
+        """Parse Claude's sector analysis response into SectorScore models."""
+        return [
+            SectorScore(
+                sector=s["sector"],
+                score=float(s["score"]),
+                rationale=s.get("rationale", "AI analysis"),
+                selected=s.get("selected", False),
+            )
+            for s in data.get("sectors", [])
+            if "sector" in s and "score" in s
+        ]
+
+    def _parse_theme_response(self, data: dict) -> List[ThemeScore]:
+        """Parse Claude's theme analysis response into ThemeScore models."""
+        return [
+            ThemeScore(
+                theme=t["theme"],
+                sector=t["sector"],
+                score=float(t["score"]),
+                rationale=t.get("rationale", "AI analysis"),
+                representative_symbols=t.get("representative_symbols", []),
+            )
+            for t in data.get("themes", [])
+            if "theme" in t and "sector" in t and "score" in t
+        ]
+
+    def _fallback_sector_analysis(self, regime: str) -> List[SectorScore]:
+        """Rule-based sector analysis when Claude is unavailable."""
+        strategy = _SECTOR_STRATEGIES.get(regime, _SECTOR_STRATEGIES["sideways"])
+        selected = set(strategy["selected"])
+        return [
+            SectorScore(
+                sector=sector,
+                score=float(strategy["scores"][sector]),
+                rationale=f"Rule-based analysis: {sector} in {regime} market",
+                selected=(sector in selected),
+            )
+            for sector in _ALL_SECTORS
+        ]
+
+    def _fallback_theme_analysis(self, sectors: List[str], regime: str) -> List[ThemeScore]:
+        """Rule-based theme analysis when Claude is unavailable."""
+        score_adjustment = {"bull": 5, "bear": -5, "crisis": -10, "recovery": 3}.get(regime, 0)
+        themes = []
+        for sector in sectors:
+            for theme_name, symbols, base_score in _THEME_DATABASE.get(sector, []):
+                adjusted_score = max(0.0, min(100.0, base_score + score_adjustment))
+                themes.append(
+                    ThemeScore(
+                        theme=theme_name,
+                        sector=sector,
+                        score=float(adjusted_score),
+                        rationale=f"Rule-based analysis: {theme_name} in {regime} market",
+                        representative_symbols=symbols,
+                    )
+                )
+        return themes
+
 
 class ClassificationServicer(classification_pb2_grpc.ClassificationServiceServicer):
     """gRPC servicer for Classification Service."""
 
     def __init__(self, service: ClassificationService):
-        """Initialize servicer.
-
-        Args:
-            service: Classification service instance
-        """
         self.service = service
         logger.info("Classification gRPC servicer initialized")
 
@@ -264,10 +461,8 @@ class ClassificationServicer(classification_pb2_grpc.ClassificationServiceServic
                 f"GetSectorAnalysis request: regime={regime}, force_refresh={force_refresh}"
             )
 
-            # Call business logic
             sectors, cached_at = await self.service.get_sector_analysis(regime, force_refresh)
 
-            # Convert to proto response
             sector_protos = [
                 classification_pb2.SectorScore(
                     sector=s.sector,
@@ -316,12 +511,10 @@ class ClassificationServicer(classification_pb2_grpc.ClassificationServiceServic
                 f"regime={regime}, force_refresh={force_refresh}"
             )
 
-            # Call business logic
             themes, cached_at = await self.service.get_thematic_analysis(
                 sectors, regime, force_refresh
             )
 
-            # Convert to proto response
             theme_protos = [
                 classification_pb2.ThemeScore(
                     theme=t.theme,
@@ -351,7 +544,7 @@ class ClassificationServicer(classification_pb2_grpc.ClassificationServiceServic
     ) -> classification_pb2.GetCandidateSymbolsResponse:
         """Get candidate symbols (Stage 1+2 combined)."""
         try:
-            regime = request.regime or None  # Empty string -> None
+            regime = request.regime or None
             max_candidates = request.max_candidates or 50
             force_refresh = request.force_refresh
 
@@ -360,7 +553,6 @@ class ClassificationServicer(classification_pb2_grpc.ClassificationServiceServic
                 f"max_candidates={max_candidates}, force_refresh={force_refresh}"
             )
 
-            # Call business logic
             (
                 candidates,
                 selected_sectors,
@@ -368,7 +560,6 @@ class ClassificationServicer(classification_pb2_grpc.ClassificationServiceServic
                 used_regime,
             ) = await self.service.get_candidate_symbols(regime, max_candidates, force_refresh)
 
-            # Convert to proto response
             candidate_protos = [
                 classification_pb2.CandidateSymbol(
                     symbol=c.symbol,
@@ -386,14 +577,14 @@ class ClassificationServicer(classification_pb2_grpc.ClassificationServiceServic
                 regime=used_regime,
             )
 
-        except ConnectionError as e:
-            logger.error(f"Market Regime Service unavailable: {e}")
+        except ConnectionError:
+            logger.error("Market Regime Service unavailable")
             context.set_code(grpc.StatusCode.UNAVAILABLE)
             context.set_details("Market Regime Service unavailable")
             return classification_pb2.GetCandidateSymbolsResponse()
 
-        except TimeoutError as e:
-            logger.error(f"Market Regime Service timeout: {e}")
+        except TimeoutError:
+            logger.error("Market Regime Service timeout")
             context.set_code(grpc.StatusCode.DEADLINE_EXCEEDED)
             context.set_details("Market Regime Service request timed out")
             return classification_pb2.GetCandidateSymbolsResponse()

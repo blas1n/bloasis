@@ -6,72 +6,7 @@ import grpc
 import pytest
 from shared.generated import market_regime_pb2
 
-from src.clients.fingpt_client import FinGPTClient, MockFinGPTClient
 from src.clients.market_regime_client import MarketRegimeClient
-
-
-@pytest.mark.asyncio
-class TestFinGPTClient:
-    """Test real FinGPTClient wrapper."""
-
-    def test_init_with_api_key(self):
-        """Test initialization with API key."""
-        client = FinGPTClient(api_key="test_key", model="test_model")
-        # Verify the client was initialized (wrapper uses internal _client)
-        assert client._client is not None
-
-    def test_init_without_api_key(self):
-        """Test initialization without API key raises error."""
-        with pytest.raises(ValueError, match="Hugging Face API token required"):
-            FinGPTClient(api_key="", model="test_model")
-
-    async def test_close(self):
-        """Test closing HTTP client."""
-        client = FinGPTClient(api_key="test_key")
-        await client.close()  # Should not raise
-
-
-@pytest.mark.asyncio
-class TestMockFinGPTClient:
-    """Test MockFinGPTClient."""
-
-    async def test_analyze_sectors_bull(self):
-        """Test sector analysis for bull regime."""
-        client = MockFinGPTClient()
-        sectors = await client.analyze_sectors("bull")
-
-        assert len(sectors) == 11  # All GICS sectors
-        assert all(s.sector for s in sectors)
-        assert all(0 <= s.score <= 100 for s in sectors)
-
-        # Bull regime should select growth sectors
-        selected = [s.sector for s in sectors if s.selected]
-        assert "Technology" in selected
-
-    async def test_analyze_sectors_crisis(self):
-        """Test sector analysis for crisis regime."""
-        client = MockFinGPTClient()
-        sectors = await client.analyze_sectors("crisis")
-
-        # Crisis regime should select defensive sectors
-        selected = [s.sector for s in sectors if s.selected]
-        defensive = {"Utilities", "Consumer Staples", "Healthcare"}
-        assert any(s in defensive for s in selected)
-
-    async def test_analyze_themes(self):
-        """Test thematic analysis."""
-        client = MockFinGPTClient()
-        themes = await client.analyze_themes(["Technology", "Healthcare"], "bull")
-
-        assert len(themes) > 0
-        assert all(t.theme for t in themes)
-        assert all(t.sector in ["Technology", "Healthcare"] for t in themes)
-        assert all(len(t.representative_symbols) > 0 for t in themes)
-
-    async def test_close(self):
-        """Test close is a no-op."""
-        client = MockFinGPTClient()
-        await client.close()  # Should not raise
 
 
 @pytest.mark.asyncio

@@ -16,8 +16,8 @@ class TestMacroStrategist:
     """Tests for Macro Strategist agent."""
 
     @pytest.fixture
-    def mock_fingpt_client(self):
-        """Create mock FinGPT client."""
+    def mock_analyst(self):
+        """Create mock Claude analyst."""
         client = AsyncMock()
         client.analyze = AsyncMock(
             return_value={
@@ -29,12 +29,12 @@ class TestMacroStrategist:
         return client
 
     @pytest.fixture
-    def strategist(self, mock_fingpt_client):
-        """Create Macro Strategist with mock client."""
-        return MacroStrategist(fingpt_client=mock_fingpt_client)
+    def strategist(self, mock_analyst):
+        """Create Macro Strategist with mock analyst."""
+        return MacroStrategist(analyst=mock_analyst)
 
     @pytest.mark.asyncio
-    async def test_analyze_success(self, strategist, mock_fingpt_client):
+    async def test_analyze_success(self, strategist, mock_analyst):
         """Test successful macro analysis."""
         stock_picks = [
             {"symbol": "AAPL", "sector": "Technology"},
@@ -51,12 +51,12 @@ class TestMacroStrategist:
         assert result.regime == "normal_bull"
         assert result.risk_level == "medium"
         assert "Technology" in result.sector_outlook
-        mock_fingpt_client.analyze.assert_called_once()
+        mock_analyst.analyze.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_analyze_fallback_on_error(self, strategist, mock_fingpt_client):
+    async def test_analyze_fallback_on_error(self, strategist, mock_analyst):
         """Test fallback to safe defaults on analysis error."""
-        mock_fingpt_client.analyze.side_effect = Exception("API error")
+        mock_analyst.analyze.side_effect = Exception("API error")
 
         stock_picks = [{"symbol": "AAPL", "sector": "Technology"}]
 
@@ -72,10 +72,9 @@ class TestMacroStrategist:
         assert result.risk_level == "medium"
 
     @pytest.mark.asyncio
-    async def test_assess_regime_risk(self, strategist, mock_fingpt_client):
+    async def test_assess_regime_risk(self, strategist, mock_analyst):
         """Test regime risk assessment."""
-        # Mock analyze method (shared FinGPT client uses analyze)
-        mock_fingpt_client.analyze = AsyncMock(
+        mock_analyst.analyze = AsyncMock(
             return_value={
                 "confidence": 0.9,
                 "risk_level": "high",

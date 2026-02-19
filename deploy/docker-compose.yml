@@ -204,9 +204,9 @@ services:
       CONSUL_PORT: "8500"
       CONSUL_ENABLED: "true"
       DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://postgres:postgres@postgres:5432/bloasis}
-      HUGGINGFACE_TOKEN: ${HUGGINGFACE_TOKEN:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      CLAUDE_MODEL: ${CLAUDE_MODEL:-claude-haiku-4-5-20251001}
       FRED_API_KEY: ${FRED_API_KEY:-}
-      USE_MOCK_FINGPT: ${USE_MOCK_FINGPT:-true}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     depends_on:
       redis:
@@ -354,8 +354,8 @@ services:
       MARKET_DATA_HOST: market-data
       MARKET_DATA_PORT: "50053"
       # AI APIs
-      FINGPT_API_KEY: ${FINGPT_API_KEY:-}
-      CLAUDE_API_KEY: ${CLAUDE_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      CLAUDE_MODEL: ${CLAUDE_MODEL:-claude-haiku-4-5-20251001}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     depends_on:
       market-regime:

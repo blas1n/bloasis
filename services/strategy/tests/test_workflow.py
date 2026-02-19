@@ -504,7 +504,7 @@ class TestWorkflowNodesErrorHandling:
 
         with patch("src.workflow.nodes.get_macro_strategist") as mock_get:
             mock_strategist = AsyncMock()
-            mock_strategist.analyze = AsyncMock(side_effect=Exception("FinGPT API error"))
+            mock_strategist.analyze = AsyncMock(side_effect=Exception("Claude API error"))
             mock_get.return_value = mock_strategist
 
             result = await macro_analysis_node(state)

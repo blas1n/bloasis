@@ -99,7 +99,7 @@ services:
       - REDIS_PORT=6379
       - REDPANDA_BROKERS=redpanda:9092
       - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/bloasis_test
-      - FINGPT_API_KEY=${FINGPT_API_KEY:-mock_key}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - PYTHONPATH=/workspace
     depends_on:
       postgres:

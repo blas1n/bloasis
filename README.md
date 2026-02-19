@@ -16,7 +16,7 @@ BLOASIS is an intelligent trading platform that combines Large Language Models (
 BLOASIS is built on a microservices architecture (MSA) with the following core services:
 
 - **Market Regime Service**: Event-based market condition classification
-- **AI Analysis Service**: Strategy generation using FinGPT + Claude
+- **AI Analysis Service**: Strategy generation using Claude
 - **Classification Service**: 3-Tier asset selection (Sector → Thematic → Factor)
 - **Backtesting Service**: Multi-strategy backtesting with VectorBT + FinRL
 - **Risk Management Service**: Risk assessment and position management
@@ -27,8 +27,7 @@ BLOASIS is built on a microservices architecture (MSA) with the following core s
 ### Backend
 - **Language**: Python 3.11+ (FastAPI)
 - **AI/ML**:
-  - FinGPT (financial domain specialization)
-  - Claude Sonnet 4 (complex reasoning)
+  - Claude (AI-powered analysis and reasoning)
   - LangGraph (multi-agent orchestration)
 - **Backtesting**: VectorBT (technical strategies), FinRL (reinforcement learning)
 - **API Gateway**: Envoy Gateway (gRPC-to-REST transcoding)

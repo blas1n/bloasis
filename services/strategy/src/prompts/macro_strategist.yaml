@@ -1,5 +1,5 @@
 # Macro Strategist Prompts (Layer 1)
-# FinGPT-based macro economic analysis
+# Claude-based macro economic analysis
 # Managed separately from code for easier maintenance
 
 system_prompt: |

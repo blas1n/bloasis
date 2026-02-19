@@ -44,7 +44,7 @@ class MarketRegimeServicer(market_regime_pb2_grpc.MarketRegimeServiceServicer):
     """
     gRPC servicer implementing the MarketRegimeService interface.
 
-    Provides market regime classification using FinGPT analysis.
+    Provides market regime classification using Claude analysis.
     Results are cached for 6 hours (Tier 1 shared across all users).
     """
 
@@ -65,7 +65,7 @@ class MarketRegimeServicer(market_regime_pb2_grpc.MarketRegimeServiceServicer):
             redpanda_client: Redpanda client for event publishing.
             postgres_client: PostgreSQL client for persistence.
             repository: Repository for database operations.
-            classifier: RegimeClassifier with FinGPT integration.
+            classifier: RegimeClassifier with Claude integration.
             event_publisher: EventPublisher for typed event publishing.
         """
         self.redis = redis_client
@@ -85,7 +85,7 @@ class MarketRegimeServicer(market_regime_pb2_grpc.MarketRegimeServiceServicer):
 
         Implements caching strategy:
         1. Check Redis cache (unless force_refresh is true)
-        2. If cache miss or force_refresh, classify using FinGPT
+        2. If cache miss or force_refresh, classify using Claude
         3. Cache the result for 6 hours
         4. Publish regime-change event to Redpanda
         5. Persist to database

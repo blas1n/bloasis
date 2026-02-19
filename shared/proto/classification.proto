@@ -16,7 +16,7 @@ import "google/api/annotations.proto";
 service ClassificationService {
   // GetSectorAnalysis returns sector analysis based on market regime
   // Stage 1: Filters 11 GICS sectors down to 3-7 sectors
-  // Uses FinGPT for analysis, cached for 6 hours
+  // Uses Claude for analysis, cached for 6 hours
   rpc GetSectorAnalysis(GetSectorAnalysisRequest) returns (GetSectorAnalysisResponse) {
     option (google.api.http) = {
       get: "/v1/classification/sectors"
@@ -25,7 +25,7 @@ service ClassificationService {
 
   // GetThematicAnalysis returns thematic ranking within selected sectors
   // Stage 2: Ranks investment themes within the filtered sectors
-  // Uses FinGPT for analysis, cached for 6 hours
+  // Uses Claude for analysis, cached for 6 hours
   rpc GetThematicAnalysis(GetThematicAnalysisRequest) returns (GetThematicAnalysisResponse) {
     option (google.api.http) = {
       post: "/v1/classification/thematic"
@@ -49,7 +49,7 @@ message GetSectorAnalysisRequest {
   // Values: "crisis", "bear", "bull", "sideways", "recovery"
   string regime = 1;
 
-  // If true, bypass cache and force fresh analysis from FinGPT
+  // If true, bypass cache and force fresh analysis from Claude
   // Use sparingly to avoid unnecessary API costs
   bool force_refresh = 2;
 }
@@ -79,7 +79,7 @@ message SectorScore {
   // Higher score = better fit for current market regime
   double score = 2;
 
-  // Rationale for score (from FinGPT analysis)
+  // Rationale for score (from AI or rule-based analysis)
   string rationale = 3;
 
   // Whether this sector is selected for Stage 2 (top 3-7 sectors)
@@ -122,7 +122,7 @@ message ThemeScore {
   // Higher score = stronger current relevance
   double score = 3;
 
-  // Rationale for score (from FinGPT analysis)
+  // Rationale for score (from AI or rule-based analysis)
   string rationale = 4;
 
   // Representative symbols for this theme (3-5 symbols)

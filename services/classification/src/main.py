@@ -10,10 +10,10 @@ from typing import Optional
 
 import grpc
 from grpc_health.v1 import health, health_pb2, health_pb2_grpc
+from shared.ai_clients import ClaudeClient
 from shared.generated import classification_pb2_grpc
 from shared.utils import setup_logger
 
-from .clients.fingpt_client import FinGPTClient, MockFinGPTClient
 from .clients.market_regime_client import MarketRegimeClient
 from .config import config
 from .service import ClassificationService, ClassificationServicer
@@ -24,12 +24,12 @@ logger = setup_logger(__name__)
 # Global clients for shutdown
 cache_manager: Optional[CacheManager] = None
 regime_client: Optional[MarketRegimeClient] = None
-fingpt_client: Optional[FinGPTClient | MockFinGPTClient] = None
+analyst: Optional[ClaudeClient] = None
 
 
 async def serve() -> None:
     """Start and run the gRPC server."""
-    global cache_manager, regime_client, fingpt_client
+    global cache_manager, regime_client, analyst
 
     logger.info(f"Starting {config.service_name} service...")
 
@@ -43,23 +43,19 @@ async def serve() -> None:
     await regime_client.connect()
     logger.info("Market Regime client connected")
 
-    # Initialize FinGPT client (mock or real based on config)
-    if config.use_mock_fingpt or not config.huggingface_token:
-        fingpt_client = MockFinGPTClient()
-        logger.warning(
-            "Using mock FinGPT client (set USE_MOCK_FINGPT=false and HUGGINGFACE_TOKEN to use real API)"
-        )
+    # Initialize Claude analyst (optional — falls back to rule-based if not set)
+    if config.anthropic_api_key:
+        analyst = ClaudeClient(api_key=config.anthropic_api_key)
+        logger.info(f"Claude analyst initialized (model: {config.claude_model})")
     else:
-        fingpt_client = FinGPTClient(
-            api_key=config.huggingface_token,
-            model=config.fingpt_model,
-            timeout=config.fingpt_timeout,
+        logger.warning(
+            "No ANTHROPIC_API_KEY set — sector/theme analysis uses rule-based fallback"
         )
-        logger.info(f"FinGPT client initialized (model: {config.fingpt_model})")
 
     # Initialize classification service
     classification_service = ClassificationService(
-        fingpt_client=fingpt_client,
+        analyst=analyst,
+        claude_model=config.claude_model,
         regime_client=regime_client,
         cache_manager=cache_manager,
     )
@@ -90,10 +86,6 @@ async def serve() -> None:
     async def shutdown() -> None:
         logger.info("Shutting down...")
         await server.stop(grace=5)
-
-        if fingpt_client:
-            await fingpt_client.close()
-            logger.info("FinGPT client closed")
 
         if regime_client:
             await regime_client.close()

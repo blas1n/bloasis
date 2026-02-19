@@ -251,27 +251,27 @@ class TestCandidateSymbols:
         assert regime == "bull"
 
     async def test_candidate_symbols_no_selected_sectors_fallback(
-        self, classification_service, mock_cache, mock_fingpt_client
+        self, classification_service, mock_cache
     ):
         """Test fallback when no sectors are selected."""
+        from unittest.mock import patch
+
         mock_cache.get.return_value = None
 
-        # Mock FinGPT to return no selected sectors
-        original_analyze = mock_fingpt_client.analyze_sectors
+        # Patch _fallback_sector_analysis to return all sectors as not selected
+        original_fallback = classification_service._fallback_sector_analysis
 
-        async def mock_analyze_no_selection(regime):
-            sectors = await original_analyze(regime)
-            # Mark all as not selected
+        def mock_no_selection(regime):
+            sectors = original_fallback(regime)
             for s in sectors:
                 s.selected = False
             return sectors
 
-        mock_fingpt_client.analyze_sectors = mock_analyze_no_selection
-
-        # Execute
-        candidates, selected_sectors, _, _ = await classification_service.get_candidate_symbols(
-            regime="bull"
-        )
+        with patch.object(classification_service, "_fallback_sector_analysis", mock_no_selection):
+            # Execute
+            candidates, selected_sectors, _, _ = (
+                await classification_service.get_candidate_symbols(regime="bull")
+            )
 
         # Verify: should fallback to top 3 sectors
         assert len(selected_sectors) == 3

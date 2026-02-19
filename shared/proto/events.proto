@@ -26,7 +26,7 @@ message RegimeChangeEvent {
   string previous_regime = 3;    // Previous regime: crisis, bear, bull, sideways, recovery
   string new_regime = 4;         // New regime
   double confidence = 5;         // Classification confidence (0.0-1.0)
-  string reasoning = 6;          // FinGPT reasoning for the change
+  string reasoning = 6;          // AI reasoning for the change
   EventPriority priority = 7;    // Event priority for routing
   map<string, string> metadata = 8;  // Additional context
 }
