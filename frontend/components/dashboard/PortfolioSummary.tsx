@@ -8,21 +8,19 @@ import { formatCurrency, formatPercent } from "@/lib/formatters";
 
 interface PortfolioSummaryProps {
   userId: string;
+  variant?: "dashboard" | "portfolio";
 }
 
-export function PortfolioSummary({ userId }: PortfolioSummaryProps) {
+export function PortfolioSummary({ userId, variant = "portfolio" }: PortfolioSummaryProps) {
   const { summary, isLoading, error, refetch } = usePortfolio(userId);
 
   if (isLoading) {
     return (
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {[...Array(4)].map((_, i) => (
-          <Card key={i} className="animate-pulse">
-            <div className="h-4 bg-bg-surface rounded w-24 mb-2" />
-            <div className="h-8 bg-bg-surface rounded w-32" />
-          </Card>
-        ))}
-      </div>
+      <Card className="animate-pulse">
+        <div className="h-4 bg-bg-surface rounded w-36 mb-4" />
+        <div className="h-8 bg-bg-surface rounded w-48 mb-3" />
+        <div className="h-5 bg-bg-surface rounded w-32" />
+      </Card>
     );
   }
 
@@ -34,46 +32,56 @@ export function PortfolioSummary({ userId }: PortfolioSummaryProps) {
     return null;
   }
 
-  return (
-    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+  // Dashboard variant: PORTFOLIO SUMMARY — Total Value + Daily P&L (간결)
+  if (variant === "dashboard") {
+    return (
       <Card>
-        <h3 className="text-sm text-text-secondary">Total Equity</h3>
-        <p className="text-2xl font-bold text-text-primary">
+        <p className="text-sm font-semibold text-text-primary mb-4 tracking-wider">
+          PORTFOLIO SUMMARY
+        </p>
+        <p className="text-3xl font-bold font-mono text-text-primary mb-2">
           {formatCurrency(summary.totalEquity)}
         </p>
+        <div>
+          <p className="text-xs text-text-muted mb-1">Daily P&amp;L</p>
+          <p className={`text-lg font-bold font-mono ${summary.dailyPnl >= 0 ? "text-theme-success" : "text-theme-danger"}`}>
+            {formatCurrency(summary.dailyPnl)}
+            <span className="text-sm font-normal ml-2">
+              ({formatPercent(summary.dailyPnlPct)})
+            </span>
+          </p>
+        </div>
       </Card>
+    );
+  }
 
-      <Card>
-        <h3 className="text-sm text-text-secondary">Today&apos;s P&amp;L</h3>
-        <p
-          className={`text-2xl font-bold ${
-            summary.dailyPnl >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"
-          }`}
-        >
-          {formatCurrency(summary.dailyPnl)}
-          <span className="text-sm ml-1">
-            ({formatPercent(summary.dailyPnlPct)})
-          </span>
-        </p>
-      </Card>
-
-      <Card>
-        <h3 className="text-sm text-text-secondary">Unrealized P&amp;L</h3>
-        <p
-          className={`text-2xl font-bold ${
-            summary.unrealizedPnl >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"
-          }`}
-        >
-          {formatCurrency(summary.unrealizedPnl)}
-        </p>
-      </Card>
-
-      <Card>
-        <h3 className="text-sm text-text-secondary">Buying Power</h3>
-        <p className="text-2xl font-bold text-text-primary">
-          {formatCurrency(summary.buyingPower)}
-        </p>
-      </Card>
-    </div>
+  // Portfolio variant: Portfolio Overview — Total Value, Total P&L, Cash (가로 배치)
+  return (
+    <Card>
+      <h3 className="text-lg font-semibold text-text-primary mb-5">Portfolio Overview</h3>
+      <div className="flex flex-wrap gap-8">
+        <div>
+          <p className="text-xs text-text-muted mb-1">Total Value</p>
+          <p className="text-2xl font-bold font-mono text-text-primary">
+            {formatCurrency(summary.totalEquity)}
+          </p>
+        </div>
+        <div>
+          <p className="text-xs text-text-muted mb-1">Total P&amp;L</p>
+          <p className={`text-2xl font-bold font-mono ${summary.unrealizedPnl >= 0 ? "text-theme-success" : "text-theme-danger"}`}>
+            {formatCurrency(summary.unrealizedPnl)}
+            <span className="text-sm font-normal ml-2">
+              ({formatPercent(summary.unrealizedPnl / summary.totalEquity * 100)})
+            </span>
+          </p>
+        </div>
+        <div>
+          <p className="text-xs text-text-muted mb-1">Cash</p>
+          <p className="text-2xl font-bold font-mono text-text-secondary">
+            {formatCurrency(summary.buyingPower)}
+          </p>
+        </div>
+      </div>
+    </Card>
   );
 }

@@ -32,6 +32,10 @@ const config: Config = {
         "theme-primary": "var(--theme-primary)",
         "theme-success": "var(--theme-success)",
         "theme-danger": "var(--theme-danger)",
+        "text-muted": "var(--text-muted)",
+      },
+      fontFamily: {
+        mono: ["var(--font-mono)", "monospace"],
       },
     },
   },

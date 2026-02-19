@@ -10,16 +10,16 @@ interface SignalsListProps {
 }
 
 const actionColors = {
-  buy: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400",
-  sell: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400",
-  hold: "bg-gray-100 text-gray-800 dark:bg-bg-elevated dark:text-text-secondary",
+  buy: "bg-theme-success/10 text-theme-success",
+  sell: "bg-theme-danger/10 text-theme-danger",
+  hold: "bg-bg-elevated text-text-secondary",
 };
 
 export function SignalsList({ signals, isLoading }: SignalsListProps) {
   if (isLoading) {
     return (
       <Card>
-        <h3 className="text-lg font-semibold mb-4">Trading Signals</h3>
+        <h3 className="text-lg font-semibold text-text-primary mb-4">Trading Signals</h3>
         <div className="space-y-3">
           {[...Array(3)].map((_, i) => (
             <div
@@ -41,7 +41,7 @@ export function SignalsList({ signals, isLoading }: SignalsListProps) {
   if (signals.length === 0) {
     return (
       <Card>
-        <h3 className="text-lg font-semibold mb-4">Trading Signals</h3>
+        <h3 className="text-lg font-semibold text-text-primary mb-4">Trading Signals</h3>
         <p className="text-text-secondary text-center py-8">
           No trading signals available
         </p>

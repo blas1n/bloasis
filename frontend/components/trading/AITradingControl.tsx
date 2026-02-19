@@ -38,11 +38,12 @@ export function AITradingControl({ userId }: { userId: string }) {
         <button
           onClick={handleToggle}
           disabled={isLoading}
-          className={`px-8 py-3 rounded-lg font-bold text-lg transition-colors ${
+          className={`px-8 py-3 rounded-full font-bold text-lg transition-colors disabled:opacity-50 ${
             isActive
-              ? "bg-green-500 text-slate-900 hover:bg-green-400"
+              ? "hover:opacity-90"
               : "bg-slate-600 text-slate-200 hover:bg-slate-500"
-          } disabled:opacity-50`}
+          }`}
+          style={isActive ? { backgroundColor: "#00E676", color: "#ffffff" } : undefined}
         >
           {isLoading ? "..." : isActive ? "ON" : "OFF"}
         </button>

@@ -43,7 +43,7 @@ export function TradingLog({ userId }: { userId: string }) {
           {trades.map((trade) => (
             <div
               key={trade.orderId}
-              className="p-4 bg-slate-700 rounded border border-slate-600 hover:border-blue-500 transition-colors"
+              className="p-4 bg-slate-700 rounded border border-slate-600 hover:border-[#00D9FF] transition-colors"
             >
               <div className="flex justify-between items-start">
                 <div>
@@ -65,10 +65,13 @@ export function TradingLog({ userId }: { userId: string }) {
                 </div>
 
                 <div className="text-right">
-                  <p className="text-white font-mono">
+                  <p className="text-white font-mono font-semibold">
                     {formatCurrency(trade.price)}
                   </p>
-                  <span className="px-2 py-1 bg-green-500 text-slate-900 text-xs rounded font-semibold">
+                  <span
+                    className="px-2 py-1 text-xs rounded font-semibold"
+                    style={{ backgroundColor: "rgba(0,230,118,0.1)", color: "#00E676" }}
+                  >
                     EXECUTED
                   </span>
                 </div>
@@ -76,8 +79,8 @@ export function TradingLog({ userId }: { userId: string }) {
 
               {/* AI Reason */}
               {trade.aiReason && (
-                <div className="mt-3 p-3 bg-slate-800 rounded border border-blue-500">
-                  <p className="text-xs text-blue-400 font-semibold mb-1">
+                <div className="mt-3 p-3 bg-slate-800 rounded border border-[#00D9FF]">
+                  <p className="text-xs font-semibold mb-1" style={{ color: "#00D9FF" }}>
                     🤖 AI Reasoning:
                   </p>
                   <p className="text-sm text-slate-300">{trade.aiReason}</p>

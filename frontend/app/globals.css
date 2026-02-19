@@ -11,22 +11,24 @@
     --border: #E5E7EB;
     --text-primary: #111827;
     --text-secondary: #6B7280;
+    --text-muted: #9CA3AF;
     --theme-primary: #2563EB;
     --theme-success: #059669;
     --theme-danger: #DC2626;
   }
 
   .dark {
-    /* Dark theme overrides */
-    --bg-base: #0A0E14;
-    --bg-elevated: #1A1F2E;
-    --bg-surface: #0F1419;
-    --border: #242B3D;
-    --text-primary: #F9FAFB;
-    --text-secondary: #9CA3AF;
-    --theme-primary: #3B82F6;
-    --theme-success: #10B981;
-    --theme-danger: #EF4444;
+    /* Dark theme overrides — BLOASIS brand colors */
+    --bg-base: #0A1628;
+    --bg-elevated: #1A2332;
+    --bg-surface: #0F1A2A;
+    --border: #2D3748;
+    --text-primary: #FFFFFF;
+    --text-secondary: #B8C5D0;
+    --text-muted: #6B7789;
+    --theme-primary: #00D9FF;
+    --theme-success: #00E676;
+    --theme-danger: #FF3D71;
   }
 
   /* Smooth theme transitions */

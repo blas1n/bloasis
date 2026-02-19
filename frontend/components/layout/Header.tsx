@@ -11,7 +11,12 @@ export function Header({ title = "Dashboard" }: HeaderProps) {
   return (
     <header className="bg-bg-elevated border-b border-border-custom">
       <div className="flex items-center justify-between h-16 px-6">
-        <h1 className="text-xl font-semibold text-text-primary">{title}</h1>
+        <div className="flex items-center gap-4">
+          <div className="w-8 h-8 rounded-md bg-theme-primary flex items-center justify-center flex-shrink-0">
+            <span className="text-lg font-bold" style={{ color: "#0A1628" }}>B</span>
+          </div>
+          <h1 className="text-xl font-bold text-text-primary">{title}</h1>
+        </div>
 
         <div className="flex items-center space-x-4">
           {/* Market Status */}

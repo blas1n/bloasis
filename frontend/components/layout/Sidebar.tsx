@@ -43,24 +43,24 @@ export function Sidebar() {
   const pathname = usePathname();
 
   return (
-    <div className="flex flex-col w-64 bg-bg-base min-h-screen">
+    <div className="flex flex-col w-[180px] bg-bg-base min-h-screen">
       {/* Logo */}
-      <div className="flex items-center h-16 px-4 bg-bg-base">
+      <div className="flex items-center h-16 px-6 bg-bg-base">
         <span className="text-xl font-bold text-text-primary">BLOASIS</span>
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 px-2 py-4 space-y-1">
+      <nav className="flex-1 px-3 py-6 space-y-3">
         {navigation.map((item) => {
           const isActive = pathname === item.href;
           return (
             <Link
               key={item.name}
               href={item.href}
-              className={`flex items-center px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+              className={`flex items-center px-4 py-3 text-sm rounded-lg transition-colors ${
                 isActive
-                  ? "bg-bg-elevated text-text-primary"
-                  : "text-text-secondary hover:bg-bg-elevated hover:text-text-primary"
+                  ? "bg-[rgba(0,217,255,0.1)] text-theme-primary font-semibold"
+                  : "text-text-secondary font-medium hover:bg-[rgba(0,217,255,0.05)] hover:text-text-primary"
               }`}
             >
               <span className="mr-3">{item.icon}</span>

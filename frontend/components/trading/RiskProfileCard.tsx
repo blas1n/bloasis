@@ -1,6 +1,7 @@
 "use client";
 
 import { useRiskProfile } from "@/hooks/useRiskProfile";
+import { Card } from "@/components/ui/Card";
 import type { RiskProfile } from "@/lib/types";
 
 export function RiskProfileCard({ userId }: { userId: string }) {
@@ -10,33 +11,28 @@ export function RiskProfileCard({ userId }: { userId: string }) {
     id: RiskProfile;
     icon: string;
     label: string;
-    description: string;
   }> = [
     {
       id: "conservative",
       icon: "🛡️",
-      label: "Conservative",
-      description: "Lower risk, steady returns",
+      label: "Conservative - Low Risk",
     },
     {
       id: "moderate",
       icon: "⚖️",
-      label: "Moderate",
-      description: "Balanced risk and reward",
+      label: "Moderate - Balanced",
     },
     {
       id: "aggressive",
       icon: "🚀",
-      label: "Aggressive",
-      description: "Higher risk, higher potential",
+      label: "Aggressive - High Risk",
     },
   ];
 
   return (
-    <div className="bg-slate-800 p-6 rounded-lg border border-slate-700">
-      <h3 className="text-lg font-semibold text-white mb-4">
-        💼 Investment Profile
-      </h3>
+    <Card>
+      <h3 className="text-lg font-bold text-text-primary mb-1">Risk Profile</h3>
+      <p className="text-sm text-text-muted mb-5">Select your investment risk tolerance</p>
 
       <div className="space-y-3">
         {profiles.map((profile) => {
@@ -47,28 +43,33 @@ export function RiskProfileCard({ userId }: { userId: string }) {
               key={profile.id}
               onClick={() => updateRiskProfile(profile.id)}
               disabled={isLoading}
-              className={`w-full p-4 rounded-lg border text-left transition-all ${
+              className={`w-full p-4 rounded-lg border text-left transition-all disabled:opacity-50 ${
                 isSelected
-                  ? "bg-blue-900 bg-opacity-30 border-blue-500"
-                  : "bg-slate-700 border-slate-600 hover:border-slate-500"
-              } disabled:opacity-50`}
+                  ? "border-2"
+                  : "bg-bg-surface border-border-custom hover:border-[#00D9FF]"
+              }`}
+              style={
+                isSelected
+                  ? {
+                      backgroundColor: "rgba(0,217,255,0.1)",
+                      borderColor: "#00D9FF",
+                    }
+                  : undefined
+              }
             >
               <div className="flex items-center gap-3">
                 <span className="text-2xl">{profile.icon}</span>
-                <div>
-                  <div className="font-semibold text-white">{profile.label}</div>
-                  <div className="text-sm text-slate-400">
-                    {profile.description}
-                  </div>
+                <div
+                  className={`font-semibold ${isSelected ? "" : "text-text-primary"}`}
+                  style={isSelected ? { color: "#00D9FF" } : undefined}
+                >
+                  {profile.label}
                 </div>
-                {isSelected && (
-                  <span className="ml-auto text-blue-400">✓</span>
-                )}
               </div>
             </button>
           );
         })}
       </div>
-    </div>
+    </Card>
   );
 }
