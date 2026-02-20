@@ -90,7 +90,7 @@ class ClassificationService:
             prompt=prompt,
             model=self.claude_model,
             response_format="json",
-            max_tokens=params.get("max_new_tokens", 1000),
+            max_tokens=params.get("max_tokens", 1000),
         )
         sectors = self._parse_sector_response(data)
 
@@ -147,7 +147,7 @@ class ClassificationService:
             prompt=prompt,
             model=self.claude_model,
             response_format="json",
-            max_tokens=params.get("max_new_tokens", 1500),
+            max_tokens=params.get("max_tokens", 1500),
         )
         themes = self._parse_theme_response(data)
 

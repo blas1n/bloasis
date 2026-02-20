@@ -70,7 +70,7 @@ response_schema:
 
 model_parameters:
   model: claude-haiku-4-5-20251001
-  max_new_tokens: 4096
+  max_tokens: 4096
   temperature: 0.7
 
 default_values:
