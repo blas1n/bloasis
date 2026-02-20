@@ -54,22 +54,18 @@ class TestMacroStrategist:
         mock_analyst.analyze.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_analyze_fallback_on_error(self, strategist, mock_analyst):
-        """Test fallback to safe defaults on analysis error."""
+    async def test_analyze_propagates_error(self, strategist, mock_analyst):
+        """Test that Claude API errors propagate (no fallback)."""
         mock_analyst.analyze.side_effect = Exception("API error")
 
         stock_picks = [{"symbol": "AAPL", "sector": "Technology"}]
 
-        result = await strategist.analyze(
-            stock_picks=stock_picks,
-            regime="normal_bull",
-            user_preferences={},
-        )
-
-        # Should return fallback context
-        assert isinstance(result, MarketContext)
-        assert result.confidence == 0.5
-        assert result.risk_level == "medium"
+        with pytest.raises(Exception, match="API error"):
+            await strategist.analyze(
+                stock_picks=stock_picks,
+                regime="normal_bull",
+                user_preferences={},
+            )
 
     @pytest.mark.asyncio
     async def test_assess_regime_risk(self, strategist, mock_analyst):
