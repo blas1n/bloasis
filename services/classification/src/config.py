@@ -4,7 +4,12 @@ This module provides centralized configuration management for the Classification
 All environment variables are validated at startup.
 """
 
+from pathlib import Path
+
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_WORKSPACE_ENV = Path(__file__).resolve().parent.parent.parent.parent / ".env"
 
 
 class ServiceConfig(BaseSettings):
@@ -14,9 +19,9 @@ class ServiceConfig(BaseSettings):
     """
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=str(_WORKSPACE_ENV),
         env_file_encoding="utf-8",
-        extra="ignore",  # Allow extra env vars from root .env
+        extra="ignore",
     )
 
     # Service identity
@@ -32,11 +37,9 @@ class ServiceConfig(BaseSettings):
     market_regime_host: str = "market-regime"
     market_regime_port: int = 50051
 
-    # FinGPT configuration (via Hugging Face)
-    huggingface_token: str = ""  # Hugging Face API token
-    fingpt_model: str = "FinGPT/fingpt-sentiment_llama2-13b_lora"  # HF model ID
-    fingpt_timeout: float = 60.0
-    use_mock_fingpt: bool = True  # Use mock in development (set False for production)
+    # Claude API key and model (required — server will not start without this)
+    anthropic_api_key: str = Field(default="", min_length=1)
+    claude_model: str = "claude-haiku-4-5-20251001"
 
 
 # Global config instance - validated at import time

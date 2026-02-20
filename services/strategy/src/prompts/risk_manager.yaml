@@ -75,9 +75,9 @@ response_schema:
   required: [approved, risk_score, position_adjustments, concentration_risk, warnings]
 
 model_parameters:
+  model: claude-haiku-4-5-20251001
   max_tokens: 4000
   temperature: 0.1
-  response_format: json
 
 default_values:
   risk_profile: "MODERATE"

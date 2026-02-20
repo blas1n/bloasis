@@ -6,15 +6,21 @@ Implements Stock Selection Pipeline Stage 1-2:
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional
 
 import grpc
+from shared.ai_clients import ClaudeClient
 from shared.generated import classification_pb2, classification_pb2_grpc
 
-from .clients.fingpt_client import FinGPTClientBase
 from .clients.market_regime_client import MarketRegimeClient
 from .models import CandidateSymbol, SectorScore, ThemeScore
+from .prompts import (
+    format_sector_prompt,
+    format_theme_prompt,
+    get_sector_model_parameters,
+    get_theme_model_parameters,
+)
 from .utils.cache import (
     CacheManager,
     build_candidate_cache_key,
@@ -30,18 +36,21 @@ class ClassificationService:
 
     def __init__(
         self,
-        fingpt_client: FinGPTClientBase,
+        analyst: ClaudeClient,
         regime_client: MarketRegimeClient,
         cache_manager: CacheManager,
+        claude_model: str = "claude-haiku-4-5-20251001",
     ):
         """Initialize Classification Service.
 
         Args:
-            fingpt_client: FinGPT client for sector/theme analysis
+            analyst: Claude client for AI analysis
             regime_client: Market Regime Service gRPC client
             cache_manager: Redis cache manager
+            claude_model: Claude model ID to use for analysis.
         """
-        self.fingpt = fingpt_client
+        self.analyst = analyst
+        self.claude_model = claude_model
         self.regime_client = regime_client
         self.cache = cache_manager
 
@@ -73,15 +82,23 @@ class ClassificationService:
                     cached["cached_at"],
                 )
 
-        # Cache miss - analyze with FinGPT
         logger.info(f"Analyzing sectors for regime: {regime}")
-        sectors = await self.fingpt.analyze_sectors(regime)
+
+        prompt = format_sector_prompt(regime=regime)
+        params = get_sector_model_parameters()
+        data = await self.analyst.analyze(
+            prompt=prompt,
+            model=self.claude_model,
+            response_format="json",
+            max_tokens=params.get("max_tokens", 1000),
+        )
+        sectors = self._parse_sector_response(data)
 
         # Sort by score descending
         sectors.sort(key=lambda s: s.score, reverse=True)
 
         # Cache result
-        cached_at = datetime.utcnow().isoformat() + "Z"
+        cached_at = datetime.now(timezone.utc).isoformat()
         await self.cache.set(
             cache_key,
             {
@@ -90,7 +107,9 @@ class ClassificationService:
             },
         )
 
-        logger.info(f"Sector analysis completed: {sum(1 for s in sectors if s.selected)} selected")
+        logger.info(
+            f"Sector analysis completed: {sum(1 for s in sectors if s.selected)} selected"
+        )
         return sectors, cached_at
 
     async def get_thematic_analysis(
@@ -120,15 +139,21 @@ class ClassificationService:
                     cached["cached_at"],
                 )
 
-        # Cache miss - analyze with FinGPT
         logger.info(f"Analyzing themes for sectors: {sectors}")
-        themes = await self.fingpt.analyze_themes(sectors, regime)
 
-        # Already sorted by score in FinGPT client
+        prompt = format_theme_prompt(sectors=sectors, regime=regime)
+        params = get_theme_model_parameters()
+        data = await self.analyst.analyze(
+            prompt=prompt,
+            model=self.claude_model,
+            response_format="json",
+            max_tokens=params.get("max_tokens", 1500),
+        )
+        themes = self._parse_theme_response(data)
+
         themes.sort(key=lambda t: t.score, reverse=True)
 
-        # Cache result
-        cached_at = datetime.utcnow().isoformat() + "Z"
+        cached_at = datetime.now(timezone.utc).isoformat()
         await self.cache.set(
             cache_key,
             {
@@ -141,20 +166,12 @@ class ClassificationService:
         return themes, cached_at
 
     async def get_candidate_symbols(
-        self, regime: Optional[str] = None, max_candidates: int = 50, force_refresh: bool = False
+        self,
+        regime: Optional[str] = None,
+        max_candidates: int = 50,
+        force_refresh: bool = False,
     ) -> tuple[List[CandidateSymbol], List[str], List[str], str]:
-        """Stage 1+2 Combined: Get candidate symbols.
-
-        Combines sector filter and thematic analysis to produce candidate list.
-
-        Args:
-            regime: Market regime (fetched from Market Regime Service if None)
-            max_candidates: Maximum number of candidates to return
-            force_refresh: If True, bypass cache and force fresh analysis
-
-        Returns:
-            Tuple of (candidates, selected_sectors, top_themes, regime)
-        """
+        """Stage 1+2 Combined: Get candidate symbols."""
         # Fetch current regime if not provided
         if not regime:
             regime_response = await self.regime_client.get_current_regime()
@@ -187,7 +204,9 @@ class ClassificationService:
             selected_sectors = [s.sector for s in sectors[:3]]
 
         # Stage 2: Thematic Filter
-        themes, _ = await self.get_thematic_analysis(selected_sectors, regime, force_refresh)
+        themes, _ = await self.get_thematic_analysis(
+            selected_sectors, regime, force_refresh
+        )
 
         # Extract candidates from top themes
         candidates = []
@@ -198,7 +217,6 @@ class ClassificationService:
             for symbol in theme.representative_symbols:
                 if len(candidates) >= max_candidates:
                     break
-
                 candidates.append(
                     CandidateSymbol(
                         symbol=symbol,
@@ -207,7 +225,6 @@ class ClassificationService:
                         preliminary_score=theme.score,
                     )
                 )
-
             if len(candidates) >= max_candidates:
                 break
 
@@ -232,16 +249,38 @@ class ClassificationService:
         )
         return candidates, selected_sectors, top_themes, regime
 
+    def _parse_sector_response(self, data: dict) -> List[SectorScore]:
+        """Parse Claude's sector analysis response into SectorScore models."""
+        return [
+            SectorScore(
+                sector=s["sector"],
+                score=float(s["score"]),
+                rationale=s.get("rationale", "AI analysis"),
+                selected=s.get("selected", False),
+            )
+            for s in data.get("sectors", [])
+            if "sector" in s and "score" in s
+        ]
+
+    def _parse_theme_response(self, data: dict) -> List[ThemeScore]:
+        """Parse Claude's theme analysis response into ThemeScore models."""
+        return [
+            ThemeScore(
+                theme=t["theme"],
+                sector=t["sector"],
+                score=float(t["score"]),
+                rationale=t.get("rationale", "AI analysis"),
+                representative_symbols=t.get("representative_symbols", []),
+            )
+            for t in data.get("themes", [])
+            if "theme" in t and "sector" in t and "score" in t
+        ]
+
 
 class ClassificationServicer(classification_pb2_grpc.ClassificationServiceServicer):
     """gRPC servicer for Classification Service."""
 
     def __init__(self, service: ClassificationService):
-        """Initialize servicer.
-
-        Args:
-            service: Classification service instance
-        """
         self.service = service
         logger.info("Classification gRPC servicer initialized")
 
@@ -264,10 +303,10 @@ class ClassificationServicer(classification_pb2_grpc.ClassificationServiceServic
                 f"GetSectorAnalysis request: regime={regime}, force_refresh={force_refresh}"
             )
 
-            # Call business logic
-            sectors, cached_at = await self.service.get_sector_analysis(regime, force_refresh)
+            sectors, cached_at = await self.service.get_sector_analysis(
+                regime, force_refresh
+            )
 
-            # Convert to proto response
             sector_protos = [
                 classification_pb2.SectorScore(
                     sector=s.sector,
@@ -316,12 +355,10 @@ class ClassificationServicer(classification_pb2_grpc.ClassificationServiceServic
                 f"regime={regime}, force_refresh={force_refresh}"
             )
 
-            # Call business logic
             themes, cached_at = await self.service.get_thematic_analysis(
                 sectors, regime, force_refresh
             )
 
-            # Convert to proto response
             theme_protos = [
                 classification_pb2.ThemeScore(
                     theme=t.theme,
@@ -351,7 +388,7 @@ class ClassificationServicer(classification_pb2_grpc.ClassificationServiceServic
     ) -> classification_pb2.GetCandidateSymbolsResponse:
         """Get candidate symbols (Stage 1+2 combined)."""
         try:
-            regime = request.regime or None  # Empty string -> None
+            regime = request.regime or None
             max_candidates = request.max_candidates or 50
             force_refresh = request.force_refresh
 
@@ -360,15 +397,15 @@ class ClassificationServicer(classification_pb2_grpc.ClassificationServiceServic
                 f"max_candidates={max_candidates}, force_refresh={force_refresh}"
             )
 
-            # Call business logic
             (
                 candidates,
                 selected_sectors,
                 top_themes,
                 used_regime,
-            ) = await self.service.get_candidate_symbols(regime, max_candidates, force_refresh)
+            ) = await self.service.get_candidate_symbols(
+                regime, max_candidates, force_refresh
+            )
 
-            # Convert to proto response
             candidate_protos = [
                 classification_pb2.CandidateSymbol(
                     symbol=c.symbol,
@@ -386,14 +423,14 @@ class ClassificationServicer(classification_pb2_grpc.ClassificationServiceServic
                 regime=used_regime,
             )
 
-        except ConnectionError as e:
-            logger.error(f"Market Regime Service unavailable: {e}")
+        except ConnectionError:
+            logger.error("Market Regime Service unavailable")
             context.set_code(grpc.StatusCode.UNAVAILABLE)
             context.set_details("Market Regime Service unavailable")
             return classification_pb2.GetCandidateSymbolsResponse()
 
-        except TimeoutError as e:
-            logger.error(f"Market Regime Service timeout: {e}")
+        except TimeoutError:
+            logger.error("Market Regime Service timeout")
             context.set_code(grpc.StatusCode.DEADLINE_EXCEEDED)
             context.set_details("Market Regime Service request timed out")
             return classification_pb2.GetCandidateSymbolsResponse()

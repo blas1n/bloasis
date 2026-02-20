@@ -1,5 +1,5 @@
 """
-Prompt management for FinGPT classification.
+Prompt management for market regime classification.
 
 This module provides:
 - YAML-based prompt loading with caching (via shared.prompts)
@@ -21,6 +21,7 @@ from .formatter import (
     get_classification_prompt,
     get_model_parameters,
     get_response_schema,
+    get_system_prompt,
 )
 
 # Default prompts directory for this service
@@ -61,4 +62,5 @@ __all__ = [
     "format_classification_prompt",
     "get_response_schema",
     "get_model_parameters",
+    "get_system_prompt",
 ]

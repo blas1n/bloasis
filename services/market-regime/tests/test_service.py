@@ -1,7 +1,7 @@
 """
 Unit tests for Market Regime Service.
 
-All external dependencies (Redis, Redpanda, PostgreSQL, FinGPT) are mocked.
+All external dependencies (Redis, Redpanda, PostgreSQL, Claude) are mocked.
 Target: 80%+ code coverage.
 """
 
@@ -34,52 +34,49 @@ class TestRegimeClassifier:
     """Tests for RegimeClassifier."""
 
     @pytest.mark.asyncio
-    async def test_classify_with_fingpt_success(self) -> None:
-        """Should use FinGPT result when available."""
+    async def test_classify_with_claude_success(self) -> None:
+        """Should use Claude result when analyst returns valid response."""
         from src.models import RegimeClassifier
 
-        mock_fingpt = AsyncMock()
-        mock_fingpt.classify_regime = AsyncMock(return_value={
+        mock_analyst = AsyncMock()
+        mock_analyst.analyze = AsyncMock(return_value={
             "regime": "crisis",
             "confidence": 0.95,
             "reasoning": "circuit_breaker",
         })
 
-        classifier = RegimeClassifier(fingpt_client=mock_fingpt)
+        classifier = RegimeClassifier(analyst=mock_analyst)
         result = await classifier.classify()
 
         assert result.regime == "crisis"
         assert result.confidence == 0.95
-        mock_fingpt.classify_regime.assert_called_once()
+        mock_analyst.analyze.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_classify_fingpt_failure_fallback(self) -> None:
-        """Should fall back to rule-based when FinGPT fails."""
+    async def test_classify_claude_failure_raises_exception(self) -> None:
+        """Should raise exception when Claude fails (no fallback)."""
         from src.models import RegimeClassifier
 
-        mock_fingpt = AsyncMock()
-        mock_fingpt.classify_regime = AsyncMock(side_effect=Exception("API error"))
+        mock_analyst = AsyncMock()
+        mock_analyst.analyze = AsyncMock(side_effect=Exception("API error"))
 
-        classifier = RegimeClassifier(fingpt_client=mock_fingpt)
-        result = await classifier.classify()
+        classifier = RegimeClassifier(analyst=mock_analyst)
 
-        # Fallback uses rule-based classification (default VIX=20 -> sideways)
-        assert result.regime == "sideways"
-        assert result.confidence == 0.65
-        assert result.trigger == "baseline"
+        with pytest.raises(Exception, match="API error"):
+            await classifier.classify()
 
     @pytest.mark.asyncio
-    async def test_classify_fingpt_invalid_response(self) -> None:
-        """Should use default when FinGPT returns invalid data."""
+    async def test_classify_claude_invalid_response(self) -> None:
+        """Should use parse defaults when Claude returns empty response."""
         from src.models import RegimeClassifier
 
-        mock_fingpt = AsyncMock()
-        mock_fingpt.classify_regime = AsyncMock(return_value={})  # Missing 'regime' key
+        mock_analyst = AsyncMock()
+        mock_analyst.analyze = AsyncMock(return_value={})  # Missing 'regime' key
 
-        classifier = RegimeClassifier(fingpt_client=mock_fingpt)
+        classifier = RegimeClassifier(analyst=mock_analyst)
         result = await classifier.classify()
 
-        # Should use default from response parsing
+        # _parse_regime_response defaults to sideways
         assert result.regime == "sideways"
 
     @pytest.mark.asyncio
@@ -87,83 +84,19 @@ class TestRegimeClassifier:
         """Should return ISO 8601 formatted timestamp."""
         from src.models import RegimeClassifier
 
-        mock_fingpt = AsyncMock()
-        mock_fingpt.classify_regime = AsyncMock(return_value={
+        mock_analyst = AsyncMock()
+        mock_analyst.analyze = AsyncMock(return_value={
             "regime": "bull",
             "confidence": 0.9,
             "reasoning": "baseline",
         })
 
-        classifier = RegimeClassifier(fingpt_client=mock_fingpt)
+        classifier = RegimeClassifier(analyst=mock_analyst)
         result = await classifier.classify()
 
         # Verify timestamp is valid ISO 8601
         assert "T" in result.timestamp
         assert result.timestamp.endswith("+00:00") or result.timestamp.endswith("Z")
-
-
-class TestFinGPTClient:
-    """Tests for FinGPTClient and MockFinGPTClient."""
-
-    def test_init_with_explicit_api_key(self) -> None:
-        """Should initialize wrapper with API key passed to shared client."""
-        from src.clients.fingpt_client import FinGPTClient
-
-        client = FinGPTClient(api_key="explicit-key")
-        # Wrapper stores reference to shared client
-        assert client._client is not None
-        assert client._client.api_key == "explicit-key"
-
-    def test_mock_client_init(self) -> None:
-        """Should initialize MockFinGPTClient without API key."""
-        from src.clients.fingpt_client import MockFinGPTClient
-
-        client = MockFinGPTClient()
-        # Mock wrapper uses shared mock client internally
-        assert client._client is not None
-
-    @pytest.mark.asyncio
-    async def test_mock_classify_regime_returns_data(self) -> None:
-        """Should return regime classification from mock client."""
-        from src.clients.fingpt_client import MockFinGPTClient
-
-        client = MockFinGPTClient()
-        result = await client.classify_regime(
-            market_data={"vix": 18.0},
-            macro_indicators={"yield_curve_10y_2y": 0.5},
-        )
-
-        assert "regime" in result
-        assert "confidence" in result
-        assert "reasoning" in result
-
-    @pytest.mark.asyncio
-    async def test_mock_health_check_returns_true(self) -> None:
-        """Should return True from mock health check."""
-        from src.clients.fingpt_client import MockFinGPTClient
-
-        client = MockFinGPTClient()
-        result = await client.health_check()
-        assert result is True
-
-    @pytest.mark.asyncio
-    async def test_health_check_without_api_key_raises(self) -> None:
-        """Should raise ValueError when API key is empty."""
-        from src.clients.fingpt_client import FinGPTClient
-
-        with pytest.raises(ValueError, match="Hugging Face API token required"):
-            FinGPTClient(api_key="")
-
-    @pytest.mark.asyncio
-    async def test_health_check_with_api_key(self) -> None:
-        """Should attempt health check when API key is set."""
-        from src.clients.fingpt_client import FinGPTClient
-
-        client = FinGPTClient(api_key="test-key")
-        # Health check will fail because no real API, but won't crash
-        result = await client.health_check()
-        # Can be True or False depending on network - just test it doesn't crash
-        assert isinstance(result, bool)
 
 
 class TestMarketRegimeServicer:
@@ -209,6 +142,23 @@ class TestMarketRegimeServicer:
         context.set_details = MagicMock()
         return context
 
+    @pytest.fixture
+    def mock_classifier(self) -> AsyncMock:
+        """Create mock RegimeClassifier that returns a sideways regime."""
+        from src.models import RegimeData
+
+        mock = AsyncMock()
+        mock.classify = AsyncMock(return_value=RegimeData(
+            regime="sideways",
+            confidence=0.65,
+            timestamp="2025-01-26T14:30:00+00:00",
+            trigger="baseline",
+            reasoning="Moderate volatility, range-bound market",
+            risk_level="medium",
+            indicators={"vix": 20.0, "sp500_trend": "neutral", "yield_curve": "0.5", "credit_spreads": "normal"},
+        ))
+        return mock
+
     @pytest.mark.asyncio
     async def test_get_current_regime_cache_hit(
         self, mock_redis: AsyncMock, mock_redpanda: AsyncMock,
@@ -246,7 +196,8 @@ class TestMarketRegimeServicer:
     @pytest.mark.asyncio
     async def test_get_current_regime_cache_miss(
         self, mock_redis: AsyncMock, mock_redpanda: AsyncMock,
-        mock_postgres: MagicMock, mock_repository: AsyncMock, mock_context: MagicMock
+        mock_postgres: MagicMock, mock_repository: AsyncMock, mock_context: MagicMock,
+        mock_classifier: AsyncMock,
     ) -> None:
         """Should classify and cache on cache miss."""
         from shared.generated import market_regime_pb2
@@ -261,12 +212,13 @@ class TestMarketRegimeServicer:
             redpanda_client=mock_redpanda,
             postgres_client=mock_postgres,
             repository=mock_repository,
+            classifier=mock_classifier,
         )
 
         request = market_regime_pb2.GetCurrentRegimeRequest(force_refresh=False)
         response = await servicer.GetCurrentRegime(request, mock_context)
 
-        # Should return classified data (rule-based fallback with default VIX=20)
+        # Should return classified data from Claude
         assert response.regime == "sideways"
         assert response.confidence == 0.65
 
@@ -285,7 +237,8 @@ class TestMarketRegimeServicer:
     @pytest.mark.asyncio
     async def test_get_current_regime_force_refresh(
         self, mock_redis: AsyncMock, mock_redpanda: AsyncMock,
-        mock_postgres: MagicMock, mock_repository: AsyncMock, mock_context: MagicMock
+        mock_postgres: MagicMock, mock_repository: AsyncMock, mock_context: MagicMock,
+        mock_classifier: AsyncMock,
     ) -> None:
         """Should bypass cache when force_refresh is true."""
         from shared.generated import market_regime_pb2
@@ -305,15 +258,15 @@ class TestMarketRegimeServicer:
             redpanda_client=mock_redpanda,
             postgres_client=mock_postgres,
             repository=mock_repository,
+            classifier=mock_classifier,
         )
 
         request = market_regime_pb2.GetCurrentRegimeRequest(force_refresh=True)
         response = await servicer.GetCurrentRegime(request, mock_context)
 
-        # Should return fresh classification (rule-based fallback)
+        # Should return fresh classification from Claude
         assert response.regime == "sideways"
         # Redis.get is called to get previous regime for change detection
-        # (even with force_refresh, we need previous value for event publishing)
         mock_redis.get.assert_called()
         # Should update cache
         mock_redis.setex.assert_called_once()
@@ -321,7 +274,7 @@ class TestMarketRegimeServicer:
     @pytest.mark.asyncio
     async def test_get_current_regime_no_redis(
         self, mock_redpanda: AsyncMock, mock_postgres: MagicMock,
-        mock_repository: AsyncMock, mock_context: MagicMock
+        mock_repository: AsyncMock, mock_context: MagicMock, mock_classifier: AsyncMock,
     ) -> None:
         """Should work without Redis client."""
         from shared.generated import market_regime_pb2
@@ -333,6 +286,7 @@ class TestMarketRegimeServicer:
             redpanda_client=mock_redpanda,
             postgres_client=mock_postgres,
             repository=mock_repository,
+            classifier=mock_classifier,
         )
 
         request = market_regime_pb2.GetCurrentRegimeRequest(force_refresh=False)
@@ -358,12 +312,14 @@ class TestMarketRegimeServicer:
         mock_record1.confidence = 0.9
         mock_record1.timestamp = datetime(2025, 1, 25, 10, 0, 0, tzinfo=timezone.utc)
         mock_record1.trigger = "baseline"
+        mock_record1.analysis = None
 
         mock_record2 = MagicMock(spec=MarketRegimeRecord)
         mock_record2.regime = "crisis"
         mock_record2.confidence = 0.95
         mock_record2.timestamp = datetime(2025, 1, 26, 10, 0, 0, tzinfo=timezone.utc)
         mock_record2.trigger = "circuit_breaker"
+        mock_record2.analysis = None
 
         # Setup mock repository to return ORM records
         mock_repository.get_history.return_value = [mock_record1, mock_record2]

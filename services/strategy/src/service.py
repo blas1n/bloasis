@@ -282,7 +282,7 @@ class StrategyServicer(strategy_pb2_grpc.StrategyServiceServicer):
         """Run AI Flow (5-Layer LangGraph workflow).
 
         This executes the complete AI analysis pipeline:
-        - Layer 1: Macro Analysis (FinGPT)
+        - Layer 1: Macro Analysis (Claude)
         - Layer 2: Technical Analysis (Claude)
         - Layer 3: Risk Assessment (Claude)
         - Layer 4: Signal Generation

@@ -244,7 +244,7 @@ class MacroDataFetcher:
 
     async def get_full_market_data(self) -> dict[str, Any]:
         """
-        Get comprehensive market data for FinGPT analysis.
+        Get comprehensive market data for AI analysis.
 
         Returns:
             Dictionary with all market indicators needed for classification.

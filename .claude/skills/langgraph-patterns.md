@@ -26,11 +26,11 @@ class AnalysisState(TypedDict):
 ### Agent Definitions
 
 ```python
-# Agent 1: Macro Strategist (FinGPT)
+# Agent 1: Macro Strategist (Claude)
 async def macro_strategist(state: AnalysisState) -> AnalysisState:
     """Analyze market regime and generate macro strategy."""
     prompt = f"Analyze {state['regime']} for symbols {state['symbols']}"
-    response = await fingpt_client.analyze(prompt)
+    response = await claude_client.analyze(prompt, response_format="json")
 
     return {
         **state,
@@ -253,7 +253,7 @@ class FullAnalysisState(TypedDict):
     iteration: int
 
 async def macro_strategist(state):
-    # FinGPT macro analysis
+    # Claude macro analysis
     pass
 
 async def technical_analyst(state):
@@ -341,12 +341,12 @@ from tenacity import retry, stop_after_attempt, wait_exponential
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=2, max=10)
 )
-async def fingpt_with_retry(prompt: str):
-    return await fingpt_client.analyze(prompt)
+async def claude_with_retry(prompt: str):
+    return await claude_client.analyze(prompt, response_format="json")
 
 async def macro_strategist(state: AnalysisState) -> AnalysisState:
     try:
-        response = await fingpt_with_retry(prompt)
+        response = await claude_with_retry(prompt)
         return {**state, "macro_strategy": response}
     except Exception as e:
         # Fallback to rule-based
@@ -388,7 +388,7 @@ async def macro_strategist(state: AnalysisState) -> AnalysisState:
         "symbols": state['symbols']
     })
 
-    response = await fingpt_client.analyze(prompt)
+    response = await claude_client.analyze(prompt, response_format="json")
 
     logger.info("Macro strategist completed", extra={
         "confidence": response.get('confidence'),

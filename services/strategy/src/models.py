@@ -4,12 +4,12 @@ These models are service-specific and used for internal business logic.
 Inter-service communication uses Proto messages only (gRPC).
 """
 
-from enum import Enum
+from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
 
-class RiskProfile(str, Enum):
+class RiskProfile(StrEnum):
     """Risk profile enumeration."""
 
     CONSERVATIVE = "CONSERVATIVE"

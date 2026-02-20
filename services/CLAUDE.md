@@ -76,7 +76,7 @@ class ServiceConfig(BaseSettings):
     database_url: str = ""
 
     # Optional API keys
-    fingpt_api_key: str = ""
+    anthropic_api_key: str = ""
 ```
 
 **Note**: Services expose only gRPC. Envoy Gateway handles HTTP-to-gRPC transcoding.
@@ -303,7 +303,7 @@ class RegimeClassifier:
 
     async def classify(self) -> Dict[str, any]:
         """Classify current market regime."""
-        # FinGPT integration
+        # Claude/AI integration
         # Market data analysis
         # Return regime classification
         pass
@@ -328,7 +328,7 @@ REDPANDA_BROKERS=redpanda:9092
 DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/bloasis
 
 # External APIs
-FINGPT_API_KEY=your_api_key_here
+ANTHROPIC_API_KEY=your_api_key_here
 
 # Logging
 LOG_LEVEL=INFO
@@ -341,7 +341,7 @@ from .config import config
 # Access configuration - validated at import time
 grpc_port = config.grpc_port
 redis_host = config.redis_host
-fingpt_api_key = config.fingpt_api_key
+anthropic_api_key = config.anthropic_api_key
 ```
 
 ---

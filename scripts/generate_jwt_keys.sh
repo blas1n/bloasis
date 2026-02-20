@@ -3,7 +3,7 @@
 #
 # This script generates:
 # - Private key for signing tokens (Auth Service only)
-# - Public key for verifying tokens (Kong Gateway and other services)
+# - Public key for verifying tokens (Envoy Gateway and other services)
 #
 # Usage:
 #   ./scripts/generate_jwt_keys.sh

@@ -1,5 +1,5 @@
 ---
-always: true
+description: Security rules for the BLOASIS trading platform
 ---
 
 # Security Rules
@@ -20,25 +20,23 @@ import os
 from dotenv import load_dotenv
 
 load_dotenv()
-FINGPT_API_KEY = os.getenv('FINGPT_API_KEY')
+ANTHROPIC_API_KEY = os.getenv('ANTHROPIC_API_KEY')
 
-if not FINGPT_API_KEY:
-    raise ValueError("FINGPT_API_KEY not set")
+if not ANTHROPIC_API_KEY:
+    raise ValueError("ANTHROPIC_API_KEY not set")
 
 # Wrong
-FINGPT_API_KEY = "sk-1234567890"  # NEVER hardcode!
+ANTHROPIC_API_KEY = "sk-1234567890"  # NEVER hardcode!
 ```
 
 **Provide .env.example:**
 
 ```bash
 # .env.example (committed)
-FINGPT_API_KEY=your_api_key_here
-CLAUDE_API_KEY=your_api_key_here
+ANTHROPIC_API_KEY=your_api_key_here
 
 # .env (gitignored, actual secrets)
-FINGPT_API_KEY=sk-real-key-here
-CLAUDE_API_KEY=sk-real-key-here
+ANTHROPIC_API_KEY=sk-real-key-here
 ```
 
 ### 2. API Keys in Logs
@@ -47,7 +45,7 @@ CLAUDE_API_KEY=sk-real-key-here
 
 ```python
 # Correct
-logger.info("Calling FinGPT API", extra={"key_length": len(api_key)})
+logger.info("Calling Claude API", extra={"key_length": len(api_key)})
 
 # Wrong
 logger.info(f"Using API key: {api_key}")  # NO!

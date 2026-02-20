@@ -1,4 +1,4 @@
-// Market Regime Service - Classifies current market conditions using FinGPT
+// Market Regime Service - Classifies current market conditions using Claude
 // Part of BLOASIS Tier 1 (shared across all users, cached for 6 hours)
 
 syntax = "proto3";
@@ -12,7 +12,7 @@ import "common.proto";
 // Regime classification is shared across ALL users (Tier 1) and cached for cost optimization
 service MarketRegimeService {
   // GetCurrentRegime returns the current market regime classification
-  // Uses FinGPT for analysis, cached for 6 hours unless force_refresh is true
+  // Uses Claude for analysis, cached for 6 hours unless force_refresh is true
   rpc GetCurrentRegime(GetCurrentRegimeRequest) returns (GetCurrentRegimeResponse) {
     option (google.api.http) = {
       get: "/v1/market-regime/current"
@@ -35,7 +35,7 @@ service MarketRegimeService {
 
 // GetCurrentRegimeRequest - Request for current market regime
 message GetCurrentRegimeRequest {
-  // If true, bypass cache and force fresh analysis from FinGPT
+  // If true, bypass cache and force fresh analysis from Claude
   // Use sparingly to avoid unnecessary API costs
   bool force_refresh = 1;
 }
@@ -65,7 +65,7 @@ message GetCurrentRegimeResponse {
   // - "recovery": Transition from crisis/bear to bull
   string regime = 1;
 
-  // Confidence score from FinGPT classification (0.0 to 1.0)
+  // Confidence score from AI classification (0.0 to 1.0)
   // Higher values indicate stronger signal clarity
   double confidence = 2;
 

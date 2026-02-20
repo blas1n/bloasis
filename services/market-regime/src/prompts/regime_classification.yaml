@@ -67,8 +67,7 @@ classification:
     credit_spread: "N/A"
 
 # Model parameters
-parameters:
-  max_new_tokens: 500
+model_parameters:
+  model: claude-haiku-4-5-20251001
+  max_tokens: 500
   temperature: 0.1
-  top_p: 0.9
-  do_sample: false  # Deterministic output for consistency

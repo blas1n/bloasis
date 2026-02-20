@@ -33,7 +33,15 @@ user_prompt_template: |
   - Sector correlations and diversification benefits
   - Risk-adjusted return potential
 
-  Output your analysis in the specified JSON format with all 11 sectors.
+  Respond with ONLY a JSON object in exactly this format (no other text):
+  {{
+    "sectors": [
+      {{"sector": "Technology", "score": 75, "rationale": "...", "selected": true}},
+      {{"sector": "Healthcare", "score": 70, "rationale": "...", "selected": true}},
+      {{"sector": "Financials", "score": 60, "rationale": "...", "selected": false}},
+      ... (all 11 sectors)
+    ]
+  }}
 
 response_schema:
   type: object
@@ -61,10 +69,9 @@ response_schema:
   required: [sectors]
 
 model_parameters:
-  max_new_tokens: 1000
+  model: claude-haiku-4-5-20251001
+  max_tokens: 4096
   temperature: 0.7
-  top_p: 0.9
-  return_full_text: false
 
 default_values:
   regime: "unknown"

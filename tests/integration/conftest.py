@@ -894,31 +894,6 @@ def mock_alpaca_client() -> Generator[MagicMock, None, None]:
 
 
 @pytest.fixture
-def mock_fingpt_client() -> Generator[MagicMock, None, None]:
-    """Mock FinGPT client for AI analysis.
-
-    Yields:
-        Mock FinGPT client.
-    """
-    with patch("src.utils.fingpt.FinGPT") as mock_fingpt:
-        mock_instance = MagicMock()
-        mock_instance.classify = AsyncMock(
-            return_value={
-                "regime": "bull",
-                "confidence": 0.85,
-            }
-        )
-        mock_instance.analyze_sentiment = AsyncMock(
-            return_value={
-                "sentiment": "positive",
-                "score": 0.75,
-            }
-        )
-        mock_fingpt.return_value = mock_instance
-        yield mock_fingpt
-
-
-@pytest.fixture
 def mock_claude_client() -> Generator[MagicMock, None, None]:
     """Mock Claude client for complex reasoning.
 

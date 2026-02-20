@@ -1,7 +1,7 @@
 """LangGraph workflow definition for 5-Layer AI Flow.
 
 This module defines the complete workflow graph with conditional branching:
-- Layer 1: Macro Analysis (FinGPT)
+- Layer 1: Macro Analysis (Claude)
 - Layer 2: Technical Analysis (Claude)
 - Layer 3: Risk Assessment (Claude)
 - Layer 4: Signal Generation

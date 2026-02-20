@@ -21,7 +21,7 @@ class TestLoadPrompt:
         config = load_prompt("regime_classification")
         assert "system" in config
         assert "classification" in config
-        assert "parameters" in config
+        assert "model_parameters" in config
 
     def test_load_nonexistent_raises(self) -> None:
         """Test loading nonexistent prompt raises FileNotFoundError."""
@@ -158,11 +158,11 @@ class TestGetModelParameters:
         params = get_model_parameters()
         assert isinstance(params, dict)
 
-    def test_has_max_new_tokens(self) -> None:
-        """Test has max_new_tokens parameter."""
+    def test_has_max_tokens(self) -> None:
+        """Test has max_tokens parameter (Claude API)."""
         params = get_model_parameters()
-        assert "max_new_tokens" in params
-        assert isinstance(params["max_new_tokens"], int)
+        assert "max_tokens" in params
+        assert isinstance(params["max_tokens"], int)
 
     def test_has_temperature(self) -> None:
         """Test has temperature parameter."""

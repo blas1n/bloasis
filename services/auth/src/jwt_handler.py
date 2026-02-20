@@ -1,14 +1,9 @@
 """JWT token handling for authentication.
 
 Handles JWT token creation, validation, and claim extraction.
-Supports both HS256 (symmetric) and RS256 (asymmetric) algorithms.
-
-RS256 (recommended for microservices):
-- Private key stays in Auth Service (signing)
-- Public key distributed to Kong and other services (verification)
-
-HS256 (legacy support):
-- Shared secret key for both signing and verification
+Uses RS256 (asymmetric) algorithm exclusively:
+- Private key stays in Auth Service (signing only)
+- Public key distributed to Envoy Gateway and other services (verification)
 """
 
 import logging
@@ -22,82 +17,48 @@ logger = logging.getLogger(__name__)
 
 
 class JWTHandler:
-    """Handles JWT token creation and validation.
+    """Handles JWT token creation and validation using RS256.
 
-    Supports both RS256 (asymmetric) and HS256 (symmetric) algorithms.
+    RS256 uses asymmetric RSA keys:
+    - Private key for signing (required for token creation)
+    - Public key for verification (required for token validation)
 
-    RS256 mode:
-        - Requires private_key_path for signing
-        - Requires public_key_path for verification
-        - Recommended for microservices architecture
-
-    HS256 mode:
-        - Requires secret_key for both signing and verification
-        - Legacy support for backward compatibility
+    Either key can be omitted if the corresponding operation is not needed.
     """
 
     def __init__(
         self,
-        algorithm: str = "RS256",
         private_key_path: str | None = None,
         public_key_path: str | None = None,
-        secret_key: str | None = None,
         access_token_expire_minutes: int = 15,
         refresh_token_expire_days: int = 7,
     ) -> None:
         """Initialize JWT handler.
 
         Args:
-            algorithm: JWT signing algorithm ("RS256" or "HS256").
-            private_key_path: Path to RSA private key file (RS256 only).
-            public_key_path: Path to RSA public key file (RS256 only).
-            secret_key: Secret key for signing tokens (HS256 only).
+            private_key_path: Path to RSA private key file (for signing).
+            public_key_path: Path to RSA public key file (for verification).
             access_token_expire_minutes: Access token expiry in minutes.
             refresh_token_expire_days: Refresh token expiry in days.
 
         Raises:
-            ValueError: If required keys are not provided for the algorithm.
+            ValueError: If neither key path is provided, or if key files are invalid.
             FileNotFoundError: If key files do not exist.
         """
-        self.algorithm = algorithm
+        if not private_key_path and not public_key_path:
+            raise ValueError(
+                "RS256 algorithm requires private_key_path and/or public_key_path"
+            )
+
+        self.algorithm = "RS256"
         self.access_expire = timedelta(minutes=access_token_expire_minutes)
         self.refresh_expire = timedelta(days=refresh_token_expire_days)
 
-        if algorithm == "RS256":
-            if not private_key_path and not public_key_path:
-                raise ValueError(
-                    "RS256 algorithm requires private_key_path and/or public_key_path"
-                )
+        self._private_key = self._load_key(private_key_path) if private_key_path else None
+        self._public_key = self._load_key(public_key_path) if public_key_path else None
 
-            # Load private key for signing (optional, needed for token creation)
-            if private_key_path:
-                self._private_key = self._load_key(private_key_path)
-            else:
-                self._private_key = None
-
-            # Load public key for verification (optional, needed for token validation)
-            if public_key_path:
-                self._public_key = self._load_key(public_key_path)
-            else:
-                self._public_key = None
-
-            self._signing_key = self._private_key
-            self._verify_key = self._public_key
-
-        elif algorithm == "HS256":
-            if not secret_key:
-                raise ValueError("JWT secret key is required for HS256 algorithm")
-
-            self._signing_key = secret_key
-            self._verify_key = secret_key
-            self._private_key = None
-            self._public_key = None
-
-        else:
-            raise ValueError(f"Unsupported algorithm: {algorithm}. Use RS256 or HS256.")
-
-        # Legacy attribute for backward compatibility
-        self.secret_key = secret_key if algorithm == "HS256" else None
+        self._signing_key = self._private_key
+        self._verify_key = self._public_key
 
     def _load_key(self, key_path: str) -> str:
         """Load a key from file.
@@ -249,11 +210,11 @@ class JWTHandler:
     def get_public_key(self) -> str | None:
         """Get the public key for RS256 algorithm.
 
-        This can be used to share the public key with Envoy Gateway
+        Can be used to share the public key with Envoy Gateway
         and other services for token verification.
 
         Returns:
-            Public key content if RS256, None if HS256.
+            Public key content, or None if not loaded.
         """
         return self._public_key
 
@@ -261,7 +222,7 @@ class JWTHandler:
         """Check if this handler can sign tokens.
 
         Returns:
-            True if signing key is available, False otherwise.
+            True if private key is available, False otherwise.
         """
         return self._signing_key is not None
 
@@ -269,6 +230,6 @@ class JWTHandler:
         """Check if this handler can verify tokens.
 
         Returns:
-            True if verification key is available, False otherwise.
+            True if public key is available, False otherwise.
         """
         return self._verify_key is not None

@@ -99,7 +99,7 @@ services:
       - REDIS_PORT=6379
       - REDPANDA_BROKERS=redpanda:9092
       - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/bloasis_test
-      - FINGPT_API_KEY=${FINGPT_API_KEY:-mock_key}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - PYTHONPATH=/workspace
     depends_on:
       postgres:
@@ -324,8 +324,8 @@ services:
       - GRPC_PORT=50062
       - REDIS_HOST=redis
       - REDIS_PORT=6379
-      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-test_jwt_secret_key_for_e2e_testing}
-      - JWT_ALGORITHM=HS256
+      - JWT_PRIVATE_KEY_PATH=infra/keys/jwt-private.pem
+      - JWT_PUBLIC_KEY_PATH=infra/keys/jwt-public.pem
       - ACCESS_TOKEN_EXPIRE_MINUTES=30
       - REFRESH_TOKEN_EXPIRE_DAYS=7
       - USER_SERVICE_HOST=user

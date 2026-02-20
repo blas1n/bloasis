@@ -1,5 +1,5 @@
 ---
-always: true
+description: Architecture rules and critical design decisions for BLOASIS
 ---
 
 # Architecture Rules

@@ -66,12 +66,23 @@ def get_response_schema() -> dict[str, Any]:
     return config["classification"]["response_schema"]
 
 
+def get_system_prompt() -> str:
+    """
+    Get the system prompt for the AI analyst.
+
+    Returns:
+        System prompt string from the YAML configuration.
+    """
+    config = get_classification_prompt()
+    return config.get("system", "You are a financial market analyst.")
+
+
 def get_model_parameters() -> dict[str, Any]:
     """
     Get model generation parameters.
 
     Returns:
-        Dictionary of model parameters (max_new_tokens, temperature, etc.).
+        Dictionary of model parameters (model, max_tokens, temperature, etc.).
     """
     config = get_classification_prompt()
-    return config.get("parameters", {})
+    return config.get("model_parameters", {})

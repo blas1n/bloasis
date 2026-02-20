@@ -1,5 +1,5 @@
 ---
-always: true
+description: Testing rules and coverage requirements
 ---
 
 # Testing Rules
@@ -23,26 +23,26 @@ import pytest
 from unittest.mock import AsyncMock, patch
 
 @pytest.fixture
-def mock_fingpt():
-    with patch('src.utils.fingpt.FinGPT') as mock:
-        mock.return_value.classify = AsyncMock(return_value={
-            "regime": "crisis",
-            "confidence": 0.95
-        })
-        yield mock
+def mock_analyst():
+    from unittest.mock import AsyncMock
+    analyst = AsyncMock()
+    analyst.analyze = AsyncMock(return_value={
+        "regime": "crisis",
+        "confidence": 0.95
+    })
+    return analyst
 
 @pytest.mark.asyncio
-async def test_regime_classification(mock_fingpt):
-    service = MarketRegimeService()
-    result = await service.get_current_regime()
+async def test_regime_classification(mock_analyst):
+    classifier = RegimeClassifier(analyst=mock_analyst)
+    result = await classifier.classify(market_data={}, macro_indicators={})
     assert result.regime == "crisis"
 ```
 
 ### Mock External APIs
 
 **ALWAYS mock**:
-- FinGPT API
-- Claude API
+- Claude API (Anthropic)
 - Alpha Vantage API
 - Database connections (in unit tests)
 

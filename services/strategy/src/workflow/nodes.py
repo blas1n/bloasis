@@ -12,6 +12,7 @@ import logging
 from datetime import UTC, datetime
 from uuid import uuid4
 
+from shared.ai_clients import ClaudeClient
 from shared.utils.event_publisher import EventPriority, EventPublisher
 from shared.utils.redpanda_client import RedpandaClient
 
@@ -19,10 +20,14 @@ from ..agents.macro_strategist import MacroStrategist
 from ..agents.risk_manager import RiskManager
 from ..agents.signal_generator import SignalGenerator
 from ..agents.technical_analyst import TechnicalAnalyst
+from ..clients.market_data_client import MarketDataClient
 from ..config import config
 from .state import AnalysisState, WorkflowPhase
 
 logger = logging.getLogger(__name__)
+
+# Shared Claude client — one connection pool for the entire workflow
+_claude_client: ClaudeClient | None = None
 
 # Agent instances (singleton pattern for workflow)
 _macro_strategist: MacroStrategist | None = None
@@ -32,11 +37,19 @@ _signal_generator: SignalGenerator | None = None
 _event_publisher: EventPublisher | None = None
 
 
+def get_claude_client() -> ClaudeClient:
+    """Get or create the shared ClaudeClient instance."""
+    global _claude_client
+    if _claude_client is None:
+        _claude_client = ClaudeClient(api_key=config.anthropic_api_key)
+    return _claude_client
+
+
 def get_macro_strategist() -> MacroStrategist:
     """Get or create MacroStrategist instance."""
     global _macro_strategist
     if _macro_strategist is None:
-        _macro_strategist = MacroStrategist()
+        _macro_strategist = MacroStrategist(analyst=get_claude_client())
     return _macro_strategist
 
 
@@ -44,7 +57,10 @@ def get_technical_analyst() -> TechnicalAnalyst:
     """Get or create TechnicalAnalyst instance."""
     global _technical_analyst
     if _technical_analyst is None:
-        _technical_analyst = TechnicalAnalyst()
+        _technical_analyst = TechnicalAnalyst(
+            claude_client=get_claude_client(),
+            market_data_client=MarketDataClient(),
+        )
     return _technical_analyst
 
 
@@ -52,7 +68,7 @@ def get_risk_manager() -> RiskManager:
     """Get or create RiskManager instance."""
     global _risk_manager
     if _risk_manager is None:
-        _risk_manager = RiskManager()
+        _risk_manager = RiskManager(claude_client=get_claude_client())
     return _risk_manager
 
 
@@ -96,7 +112,7 @@ async def initialize_analysis(state: AnalysisState) -> dict:
 
 
 async def macro_analysis_node(state: AnalysisState) -> dict:
-    """Layer 1: Macro economic analysis using FinGPT.
+    """Layer 1: Macro economic analysis using Claude.
 
     Args:
         state: Current workflow state

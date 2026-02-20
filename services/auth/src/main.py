@@ -7,6 +7,7 @@ Manages JWT authentication, token validation, and refresh.
 
 import asyncio
 import socket
+from pathlib import Path
 from typing import Optional
 
 import grpc
@@ -32,40 +33,35 @@ user_client: Optional[UserClient] = None
 consul_client: Optional[ConsulClient] = None
 
 
-def create_jwt_handler() -> JWTHandler:
-    """Create JWT handler based on configuration.
+def _resolve_key_path(path: str) -> str:
+    """Resolve a key path to absolute, anchored at workspace root if relative."""
+    if not path:
+        return path
+    p = Path(path)
+    if p.is_absolute():
+        return path
+    # Relative path: resolve against workspace root (4 levels up from this file)
+    workspace_root = Path(__file__).resolve().parent.parent.parent.parent
+    return str(workspace_root / path)
 
-    Supports both RS256 (asymmetric) and HS256 (symmetric) algorithms.
+
+def create_jwt_handler() -> JWTHandler:
+    """Create JWT handler using RS256 configuration.
 
     Returns:
         Configured JWTHandler instance.
 
     Raises:
-        ValueError: If configuration is invalid.
+        ValueError: If key paths are not configured.
+        FileNotFoundError: If key files do not exist.
     """
-    if config.jwt_algorithm == "RS256":
-        logger.info("Initializing JWT handler with RS256 algorithm")
-        return JWTHandler(
-            algorithm="RS256",
-            private_key_path=config.jwt_private_key_path,
-            public_key_path=config.jwt_public_key_path,
-            access_token_expire_minutes=config.access_token_expire_minutes,
-            refresh_token_expire_days=config.refresh_token_expire_days,
-        )
-    elif config.jwt_algorithm == "HS256":
-        if not config.jwt_secret_key:
-            raise ValueError("JWT_SECRET_KEY is required for HS256 algorithm")
-        logger.info("Initializing JWT handler with HS256 algorithm (legacy)")
-        return JWTHandler(
-            algorithm="HS256",
-            secret_key=config.jwt_secret_key,
-            access_token_expire_minutes=config.access_token_expire_minutes,
-            refresh_token_expire_days=config.refresh_token_expire_days,
-        )
-    else:
-        raise ValueError(
-            f"Unsupported JWT algorithm: {config.jwt_algorithm}. Use RS256 or HS256."
-        )
+    logger.info("Initializing JWT handler with RS256 algorithm")
+    return JWTHandler(
+        private_key_path=_resolve_key_path(config.jwt_private_key_path),
+        public_key_path=_resolve_key_path(config.jwt_public_key_path),
+        access_token_expire_minutes=config.access_token_expire_minutes,
+        refresh_token_expire_days=config.refresh_token_expire_days,
+    )
 
 
 async def serve() -> None:
@@ -107,10 +103,10 @@ async def serve() -> None:
 
     # Initialize JWT handler
     jwt_handler = create_jwt_handler()
-    logger.info(f"JWT handler initialized with algorithm: {config.jwt_algorithm}")
+    logger.info("JWT handler initialized with RS256 algorithm")
 
-    # Log public key availability for RS256
-    if config.jwt_algorithm == "RS256" and jwt_handler.get_public_key():
+    # Log public key availability for Envoy Gateway configuration
+    if jwt_handler.get_public_key():
         logger.info("RS256 public key available for Envoy Gateway configuration")
 
     # Create gRPC server

@@ -6,7 +6,7 @@ BLOASIS is an AI-powered multi-asset trading platform combining LLMs and Reinfor
 
 **Core Technologies**:
 - Backend: Python 3.11+ (FastAPI), gRPC internal communication
-- AI/ML: FinGPT (financial analysis), Claude Sonnet 4 (complex reasoning), LangGraph (multi-agent)
+- AI/ML: Claude (financial analysis and reasoning), LangGraph (multi-agent)
 - Backtesting: VectorBT, FinRL
 - Infrastructure: Envoy Gateway (gRPC-to-REST), Redpanda (messaging), PostgreSQL/TimescaleDB
 - Frontend: TypeScript (React/Next.js)
@@ -24,10 +24,9 @@ BLOASIS is an AI-powered multi-asset trading platform combining LLMs and Reinfor
 - Notification Service consumes and broadcasts via WebSocket
 
 ### 3. AI Architecture
-- **FinGPT**: Financial domain analysis (cheap, specialized)
-  - Market regime, sector analysis, sentiment
-- **Claude**: Complex reasoning (expensive, general)
-  - Technical synthesis, risk assessment, final decisions
+- **Claude**: All AI-powered analysis (market regime, sector analysis, technical synthesis, risk assessment)
+  - Uses claude-haiku-4-5-20251001 for cost-effective classification tasks
+  - Falls back to rule-based analysis when no API key is configured
 - **LangGraph**: Multi-agent orchestration with conditional branching
 
 ### 4. Cost Optimization
@@ -60,7 +59,7 @@ await producer.send('regime-change', event_data)
 from langgraph.graph import StateGraph
 
 workflow = StateGraph(AnalysisState)
-workflow.add_node("macro", macro_strategist)  # FinGPT
+workflow.add_node("macro", macro_strategist)  # Claude
 workflow.add_node("technical", technical_analyst)  # Claude
 workflow.add_conditional_edges("risk", should_adjust, {
     "approve": END,
@@ -73,7 +72,7 @@ workflow.add_conditional_edges("risk", should_adjust, {
 1. **gRPC Internal Communication**: 10x performance vs HTTP (10-50ms vs 100-500ms)
 2. **Redpanda from Phase 1**: Avoids migration cost, message durability
 3. **Notification Service Pattern**: Backend doesn't handle WebSocket, only publishes to Redpanda
-4. **FinGPT + Claude Division**: Cost optimization via role specialization
+4. **Claude with Rule-Based Fallback**: Cost optimization via Haiku + fallback when no API key
 
 ---
 

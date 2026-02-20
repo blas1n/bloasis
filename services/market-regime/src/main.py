@@ -2,7 +2,7 @@
 Market Regime Service - gRPC only.
 
 Envoy Gateway handles HTTP-to-gRPC transcoding.
-Integrates FinGPT for AI-powered market regime classification.
+Uses Claude AI for market regime classification (ANTHROPIC_API_KEY required).
 """
 
 import asyncio
@@ -11,6 +11,7 @@ from typing import Optional
 
 import grpc
 from grpc_health.v1 import health, health_pb2, health_pb2_grpc
+from shared.ai_clients import ClaudeClient
 from shared.generated import market_regime_pb2_grpc
 from shared.utils import (
     ConsulClient,
@@ -21,7 +22,6 @@ from shared.utils import (
     setup_logger,
 )
 
-from .clients.fingpt_client import FinGPTClient, MockFinGPTClient
 from .config import config
 from .macro_data import MacroDataFetcher
 from .models import RegimeClassifier
@@ -81,27 +81,19 @@ async def serve() -> None:
                 "Consul service registration failed - service will continue without Consul"
             )
 
-    # Initialize FinGPT client (via Hugging Face)
-    if config.use_mock_fingpt or not config.huggingface_token:
-        fingpt_client = MockFinGPTClient()
-        logger.warning("Using mock FinGPT client (set HUGGINGFACE_TOKEN to use real API)")
-    else:
-        fingpt_client = FinGPTClient(
-            api_key=config.huggingface_token,
-            model=config.fingpt_model,
-            timeout=config.fingpt_timeout,
-        )
-        await fingpt_client.connect()
-        logger.info(f"FinGPT client connected (model: {config.fingpt_model})")
+    # Initialize Claude analyst (required)
+    analyst = ClaudeClient(api_key=config.anthropic_api_key)
+    logger.info(f"Claude analyst initialized (model: {config.claude_model})")
 
     # Initialize macro data fetcher
     macro_fetcher = MacroDataFetcher(fred_api_key=config.fred_api_key or None)
     logger.info("Macro data fetcher initialized")
 
-    # Initialize regime classifier with FinGPT integration
+    # Initialize regime classifier with Claude integration
     classifier = RegimeClassifier(
-        fingpt_client=fingpt_client,
+        analyst=analyst,
         macro_fetcher=macro_fetcher,
+        claude_model=config.claude_model,
     )
 
     # Create gRPC server
@@ -140,10 +132,6 @@ async def serve() -> None:
             await consul_client.deregister_all()
             logger.info("Consul services deregistered")
         await server.stop(grace=5)
-        # Close FinGPT client
-        if fingpt_client:
-            await fingpt_client.close()
-            logger.info("FinGPT client disconnected")
         if postgres_client:
             await postgres_client.close()
             logger.info("PostgreSQL client disconnected")

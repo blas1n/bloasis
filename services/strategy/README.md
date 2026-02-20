@@ -176,7 +176,7 @@ ruff format src/ tests/
 
 - 🔄 Value factor: Integrate financial data API (Alpha Vantage, yfinance)
 - 🔄 Quality factor: Integrate financial data API
-- 🔄 Sentiment factor: Integrate FinGPT sentiment analysis
+- 🔄 Sentiment factor: Integrate news sentiment analysis (Claude or external API)
 - 🔄 LangGraph integration: Task 5 (5-Layer AI Flow)
 
 ## Proto Definition

@@ -11,7 +11,7 @@
 // - Classification Service (Tier 2): Provides sector strategies based on regime
 //
 // The workflow uses:
-// - FinGPT: For financial domain analysis (sector, sentiment)
+// - Claude: For financial domain analysis (sector, sentiment)
 // - Claude: For complex reasoning and final strategy synthesis
 
 syntax = "proto3";
@@ -25,7 +25,7 @@ import "common.proto";
 // Strategies are user-specific (Tier 3) and computed on-demand using LangGraph
 service AIAnalysisService {
   // GenerateStrategy creates a personalized trading strategy for a user
-  // Uses LangGraph multi-agent workflow to orchestrate FinGPT and Claude
+  // Uses LangGraph multi-agent workflow with Claude
   //
   // The workflow:
   // 1. Retrieves current market regime from Market Regime Service (Tier 1)
@@ -78,7 +78,7 @@ message GenerateStrategyResponse {
   repeated TradingSignal signals = 3;
 
   // AI-generated explanation of the strategy rationale
-  // Includes reasoning from both FinGPT (market analysis) and Claude (synthesis)
+  // Includes reasoning from Claude (market analysis and synthesis)
   // Provides transparency for user decision-making
   string rationale = 4;
 

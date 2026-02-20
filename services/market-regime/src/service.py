@@ -44,7 +44,7 @@ class MarketRegimeServicer(market_regime_pb2_grpc.MarketRegimeServiceServicer):
     """
     gRPC servicer implementing the MarketRegimeService interface.
 
-    Provides market regime classification using FinGPT analysis.
+    Provides market regime classification using Claude analysis.
     Results are cached for 6 hours (Tier 1 shared across all users).
     """
 
@@ -65,14 +65,14 @@ class MarketRegimeServicer(market_regime_pb2_grpc.MarketRegimeServiceServicer):
             redpanda_client: Redpanda client for event publishing.
             postgres_client: PostgreSQL client for persistence.
             repository: Repository for database operations.
-            classifier: RegimeClassifier with FinGPT integration.
+            classifier: RegimeClassifier with Claude integration.
             event_publisher: EventPublisher for typed event publishing.
         """
         self.redis = redis_client
         self.redpanda = redpanda_client
         self.postgres = postgres_client
         self.repository = repository or MarketRegimeRepository(postgres_client)
-        self.classifier = classifier or RegimeClassifier()
+        self.classifier = classifier
         self.event_publisher = event_publisher
 
     async def GetCurrentRegime(
@@ -85,7 +85,7 @@ class MarketRegimeServicer(market_regime_pb2_grpc.MarketRegimeServiceServicer):
 
         Implements caching strategy:
         1. Check Redis cache (unless force_refresh is true)
-        2. If cache miss or force_refresh, classify using FinGPT
+        2. If cache miss or force_refresh, classify using Claude
         3. Cache the result for 6 hours
         4. Publish regime-change event to Redpanda
         5. Persist to database
@@ -126,6 +126,8 @@ class MarketRegimeServicer(market_regime_pb2_grpc.MarketRegimeServiceServicer):
 
             # Cache miss or force_refresh - classify regime
             logger.info("Classifying market regime...")
+            if self.classifier is None:
+                raise RuntimeError("RegimeClassifier is not configured — ANTHROPIC_API_KEY required")
             regime_data: RegimeData = await self.classifier.classify()
 
             # Build indicators message
@@ -239,8 +241,6 @@ class MarketRegimeServicer(market_regime_pb2_grpc.MarketRegimeServiceServicer):
                     trigger=record.trigger,
                     reasoning=getattr(record, "analysis", "") or "",
                     risk_level=getattr(record, "risk_level", "medium"),
-                    # Indicators not stored in historical records yet
-                    indicators=None,
                 )
                 regimes.append(regime_response)
 
@@ -433,7 +433,7 @@ class MarketRegimeServicer(market_regime_pb2_grpc.MarketRegimeServiceServicer):
                     previous_regime=previous_regime or "unknown",
                     new_regime=regime_data.regime,
                     confidence=regime_data.confidence,
-                    reasoning=regime_data.trigger,
+                    reasoning=regime_data.reasoning,
                     priority=EventPriority.HIGH,
                     metadata={"event_type": event_type},
                 )

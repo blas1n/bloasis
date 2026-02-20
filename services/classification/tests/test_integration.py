@@ -9,10 +9,62 @@ import grpc
 import pytest
 from shared.generated import classification_pb2
 
-from src.clients.fingpt_client import MockFinGPTClient
 from src.clients.market_regime_client import MarketRegimeClient
 from src.service import ClassificationService, ClassificationServicer
 from src.utils.cache import CacheManager
+
+
+def _make_mock_analyst():
+    """Create a mock Claude analyst with realistic sector/theme responses."""
+    analyst = AsyncMock()
+    analyst.analyze = AsyncMock(side_effect=_analyst_side_effect)
+    return analyst
+
+
+def _analyst_side_effect(**kwargs) -> dict:
+    """Return appropriate mock data based on prompt content."""
+    prompt = kwargs.get("prompt", "")
+    if "theme" in prompt.lower():
+        return {
+            "themes": [
+                {
+                    "theme": "AI Infrastructure",
+                    "sector": "Technology",
+                    "score": 92.0,
+                    "rationale": "AI drives tech demand",
+                    "representative_symbols": ["NVDA", "AMD", "TSM"],
+                },
+                {
+                    "theme": "Cloud Computing",
+                    "sector": "Technology",
+                    "score": 88.0,
+                    "rationale": "Cloud adoption accelerating",
+                    "representative_symbols": ["MSFT", "GOOGL", "AMZN"],
+                },
+                {
+                    "theme": "Biotech Innovation",
+                    "sector": "Healthcare",
+                    "score": 85.0,
+                    "rationale": "Drug pipeline momentum",
+                    "representative_symbols": ["MRNA", "REGN", "VRTX"],
+                },
+            ]
+        }
+    return {
+        "sectors": [
+            {"sector": "Technology", "score": 90.0, "rationale": "Growth leader", "selected": True},
+            {"sector": "Healthcare", "score": 75.0, "rationale": "Defensive growth", "selected": True},
+            {"sector": "Financials", "score": 68.0, "rationale": "Rate sensitive", "selected": False},
+            {"sector": "Consumer Discretionary", "score": 65.0, "rationale": "Mixed signals", "selected": False},
+            {"sector": "Industrials", "score": 60.0, "rationale": "Neutral", "selected": False},
+            {"sector": "Communication Services", "score": 58.0, "rationale": "Neutral", "selected": False},
+            {"sector": "Consumer Staples", "score": 55.0, "rationale": "Defensive", "selected": False},
+            {"sector": "Energy", "score": 50.0, "rationale": "Volatile", "selected": False},
+            {"sector": "Utilities", "score": 45.0, "rationale": "Low growth", "selected": False},
+            {"sector": "Real Estate", "score": 42.0, "rationale": "Rate risk", "selected": False},
+            {"sector": "Materials", "score": 40.0, "rationale": "Cyclical", "selected": False},
+        ]
+    }
 
 
 @pytest.fixture
@@ -33,12 +85,9 @@ async def grpc_servicer():
     mock_response.timestamp = "2026-02-02T12:00:00Z"
     mock_regime_client.get_current_regime = AsyncMock(return_value=mock_response)
 
-    # Real mock FinGPT client
-    fingpt_client = MockFinGPTClient()
-
-    # Create service and servicer
+    # Create service and servicer with mock Claude analyst
     service = ClassificationService(
-        fingpt_client=fingpt_client,
+        analyst=_make_mock_analyst(),
         regime_client=mock_regime_client,
         cache_manager=mock_cache,
     )
@@ -67,10 +116,10 @@ class TestGetSectorAnalysisRPC:
 
         response = await grpc_servicer.GetSectorAnalysis(request, grpc_context)
 
-        # Verify response
+        # Verify response structure
         assert isinstance(response, classification_pb2.GetSectorAnalysisResponse)
         assert response.regime == "bull"
-        assert len(response.sectors) == 11  # All GICS sectors
+        assert len(response.sectors) == 11  # Mock returns all 11 GICS sectors
         assert any(s.selected for s in response.sectors)
         assert response.cached_at  # Timestamp present
 
@@ -100,14 +149,10 @@ class TestGetSectorAnalysisRPC:
 
         response = await grpc_servicer.GetSectorAnalysis(request, grpc_context)
 
-        # Verify response
+        # Verify response structure (sector selection logic is tested in unit tests)
         assert response.regime == "crisis"
         assert len(response.sectors) == 11
-
-        # Crisis regime should select defensive sectors
-        selected = [s.sector for s in response.sectors if s.selected]
-        defensive = {"Utilities", "Consumer Staples", "Healthcare"}
-        assert any(s in defensive for s in selected)
+        assert any(s.selected for s in response.sectors)
 
 
 @pytest.mark.asyncio
@@ -251,10 +296,8 @@ class TestErrorHandling:
             side_effect=ConnectionError("Service unavailable")
         )
 
-        fingpt_client = MockFinGPTClient()
-
         service = ClassificationService(
-            fingpt_client=fingpt_client,
+            analyst=_make_mock_analyst(),
             regime_client=mock_regime_client,
             cache_manager=mock_cache,
         )
@@ -287,10 +330,8 @@ class TestErrorHandling:
             side_effect=TimeoutError("Request timed out")
         )
 
-        fingpt_client = MockFinGPTClient()
-
         service = ClassificationService(
-            fingpt_client=fingpt_client,
+            analyst=_make_mock_analyst(),
             regime_client=mock_regime_client,
             cache_manager=mock_cache,
         )

@@ -6,7 +6,7 @@ Implements 6-factor scoring system with risk profile-based weighting:
 - Quality: ROE, debt ratios
 - Volatility: Price volatility (inverse scoring)
 - Liquidity: Trading volume
-- Sentiment: News/social sentiment (FinGPT with momentum fallback)
+- Sentiment: Price momentum proxy
 """
 
 import logging
@@ -20,7 +20,6 @@ from .models import FactorScores, RiskProfile
 if TYPE_CHECKING:
     from shared.utils.redis_client import RedisClient
 
-    from .clients.fingpt_client import FinGPTClient
     from .clients.market_data_client import MarketDataClient
 
 logger = logging.getLogger(__name__)
@@ -60,18 +59,15 @@ class FactorScoringEngine:
     def __init__(
         self,
         market_data_client: "MarketDataClient",
-        fingpt_client: "FinGPTClient | None" = None,
         redis_client: "RedisClient | None" = None,
     ) -> None:
         """Initialize factor scoring engine.
 
         Args:
             market_data_client: Market Data Service gRPC client.
-            fingpt_client: Optional FinGPT client for sentiment analysis.
             redis_client: Optional Redis client for caching sentiment results.
         """
         self.market_data = market_data_client
-        self.fingpt_client = fingpt_client
         self.redis_client = redis_client
 
     async def calculate_factor_scores(self, symbol: str, regime: str) -> FactorScores:
@@ -320,10 +316,9 @@ class FactorScoringEngine:
             return 50.0
 
     async def _calculate_sentiment(self, symbol: str) -> float:
-        """Calculate sentiment score (0-100) using FinGPT analysis.
+        """Calculate sentiment score (0-100) using momentum proxy.
 
-        Uses FinGPT for news sentiment analysis with Redis caching (1 hour TTL).
-        Falls back to momentum proxy if FinGPT is unavailable or low confidence.
+        Uses price momentum as a simplified sentiment proxy with Redis caching.
 
         Args:
             symbol: Stock ticker symbol.
@@ -337,35 +332,6 @@ class FactorScoringEngine:
             logger.debug(f"Using cached sentiment for {symbol}: {cached_score:.2f}")
             return cached_score
 
-        # Try FinGPT if available
-        if self.fingpt_client:
-            try:
-                result = await self.fingpt_client.analyze_sentiment(symbol)
-
-                if result["confidence"] > 0.5:  # Only use if confident
-                    # Convert -1.0 ~ 1.0 to 0-100 scale
-                    sentiment = result["sentiment"]
-                    score = (sentiment + 1.0) * 50.0
-                    score = max(0.0, min(100.0, score))
-
-                    logger.debug(
-                        f"FinGPT sentiment for {symbol}: {score:.2f} "
-                        f"(raw: {sentiment}, confidence: {result['confidence']})"
-                    )
-
-                    # Cache the result
-                    await self._cache_sentiment(symbol, score)
-                    return score
-
-                logger.debug(
-                    f"FinGPT low confidence for {symbol} "
-                    f"({result['confidence']:.2f}), using momentum proxy"
-                )
-
-            except Exception as e:
-                logger.warning(f"FinGPT failed for {symbol}: {e}, using momentum proxy")
-
-        # Fallback to momentum proxy
         return await self._calculate_sentiment_from_momentum(symbol)
 
     async def _calculate_sentiment_from_momentum(self, symbol: str) -> float:
