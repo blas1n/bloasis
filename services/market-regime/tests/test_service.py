@@ -53,20 +53,17 @@ class TestRegimeClassifier:
         mock_analyst.analyze.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_classify_claude_failure_fallback(self) -> None:
-        """Should fall back to rule-based when Claude raises an exception."""
+    async def test_classify_claude_failure_raises_exception(self) -> None:
+        """Should raise exception when Claude fails (no fallback)."""
         from src.models import RegimeClassifier
 
         mock_analyst = AsyncMock()
         mock_analyst.analyze = AsyncMock(side_effect=Exception("API error"))
 
         classifier = RegimeClassifier(analyst=mock_analyst)
-        result = await classifier.classify()
 
-        # Fallback uses rule-based classification (default VIX=20 -> sideways)
-        assert result.regime == "sideways"
-        assert result.confidence == 0.65
-        assert result.trigger == "baseline"
+        with pytest.raises(Exception, match="API error"):
+            await classifier.classify()
 
     @pytest.mark.asyncio
     async def test_classify_claude_invalid_response(self) -> None:
@@ -145,6 +142,23 @@ class TestMarketRegimeServicer:
         context.set_details = MagicMock()
         return context
 
+    @pytest.fixture
+    def mock_classifier(self) -> AsyncMock:
+        """Create mock RegimeClassifier that returns a sideways regime."""
+        from src.models import RegimeData
+
+        mock = AsyncMock()
+        mock.classify = AsyncMock(return_value=RegimeData(
+            regime="sideways",
+            confidence=0.65,
+            timestamp="2025-01-26T14:30:00+00:00",
+            trigger="baseline",
+            reasoning="Moderate volatility, range-bound market",
+            risk_level="medium",
+            indicators={"vix": 20.0, "sp500_trend": "neutral", "yield_curve": "0.5", "credit_spreads": "normal"},
+        ))
+        return mock
+
     @pytest.mark.asyncio
     async def test_get_current_regime_cache_hit(
         self, mock_redis: AsyncMock, mock_redpanda: AsyncMock,
@@ -182,7 +196,8 @@ class TestMarketRegimeServicer:
     @pytest.mark.asyncio
     async def test_get_current_regime_cache_miss(
         self, mock_redis: AsyncMock, mock_redpanda: AsyncMock,
-        mock_postgres: MagicMock, mock_repository: AsyncMock, mock_context: MagicMock
+        mock_postgres: MagicMock, mock_repository: AsyncMock, mock_context: MagicMock,
+        mock_classifier: AsyncMock,
     ) -> None:
         """Should classify and cache on cache miss."""
         from shared.generated import market_regime_pb2
@@ -197,12 +212,13 @@ class TestMarketRegimeServicer:
             redpanda_client=mock_redpanda,
             postgres_client=mock_postgres,
             repository=mock_repository,
+            classifier=mock_classifier,
         )
 
         request = market_regime_pb2.GetCurrentRegimeRequest(force_refresh=False)
         response = await servicer.GetCurrentRegime(request, mock_context)
 
-        # Should return classified data (rule-based fallback with default VIX=20)
+        # Should return classified data from Claude
         assert response.regime == "sideways"
         assert response.confidence == 0.65
 
@@ -221,7 +237,8 @@ class TestMarketRegimeServicer:
     @pytest.mark.asyncio
     async def test_get_current_regime_force_refresh(
         self, mock_redis: AsyncMock, mock_redpanda: AsyncMock,
-        mock_postgres: MagicMock, mock_repository: AsyncMock, mock_context: MagicMock
+        mock_postgres: MagicMock, mock_repository: AsyncMock, mock_context: MagicMock,
+        mock_classifier: AsyncMock,
     ) -> None:
         """Should bypass cache when force_refresh is true."""
         from shared.generated import market_regime_pb2
@@ -241,15 +258,15 @@ class TestMarketRegimeServicer:
             redpanda_client=mock_redpanda,
             postgres_client=mock_postgres,
             repository=mock_repository,
+            classifier=mock_classifier,
         )
 
         request = market_regime_pb2.GetCurrentRegimeRequest(force_refresh=True)
         response = await servicer.GetCurrentRegime(request, mock_context)
 
-        # Should return fresh classification (rule-based fallback)
+        # Should return fresh classification from Claude
         assert response.regime == "sideways"
         # Redis.get is called to get previous regime for change detection
-        # (even with force_refresh, we need previous value for event publishing)
         mock_redis.get.assert_called()
         # Should update cache
         mock_redis.setex.assert_called_once()
@@ -257,7 +274,7 @@ class TestMarketRegimeServicer:
     @pytest.mark.asyncio
     async def test_get_current_regime_no_redis(
         self, mock_redpanda: AsyncMock, mock_postgres: MagicMock,
-        mock_repository: AsyncMock, mock_context: MagicMock
+        mock_repository: AsyncMock, mock_context: MagicMock, mock_classifier: AsyncMock,
     ) -> None:
         """Should work without Redis client."""
         from shared.generated import market_regime_pb2
@@ -269,6 +286,7 @@ class TestMarketRegimeServicer:
             redpanda_client=mock_redpanda,
             postgres_client=mock_postgres,
             repository=mock_repository,
+            classifier=mock_classifier,
         )
 
         request = market_regime_pb2.GetCurrentRegimeRequest(force_refresh=False)

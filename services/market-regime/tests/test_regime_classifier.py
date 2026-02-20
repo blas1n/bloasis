@@ -1,5 +1,5 @@
 """
-Unit tests for RegimeClassifier (Claude AI + rule-based fallback).
+Unit tests for RegimeClassifier (Claude AI required).
 """
 
 from unittest.mock import AsyncMock
@@ -7,81 +7,6 @@ from unittest.mock import AsyncMock
 import pytest
 
 from src.models import RegimeClassifier, RegimeData
-
-
-class TestRegimeClassifierFallback:
-    """Tests for RegimeClassifier._fallback_classify() (no analyst)."""
-
-    @pytest.mark.asyncio
-    async def test_fallback_crisis_high_vix(self) -> None:
-        """VIX > 30 → crisis regime."""
-        classifier = RegimeClassifier()  # analyst=None
-        result = await classifier.classify(market_data={"vix": 35.0}, macro_indicators={})
-
-        assert result.regime == "crisis"
-        assert result.confidence == 0.85
-        assert result.risk_level == "high"
-
-    @pytest.mark.asyncio
-    async def test_fallback_bear_elevated_vix(self) -> None:
-        """25 < VIX <= 30 → bear regime."""
-        classifier = RegimeClassifier()
-        result = await classifier.classify(market_data={"vix": 28.0}, macro_indicators={})
-
-        assert result.regime == "bear"
-        assert result.confidence == 0.75
-        assert result.risk_level == "medium"
-
-    @pytest.mark.asyncio
-    async def test_fallback_bull_low_vix(self) -> None:
-        """VIX < 15 → bull regime."""
-        classifier = RegimeClassifier()
-        result = await classifier.classify(market_data={"vix": 12.0}, macro_indicators={})
-
-        assert result.regime == "bull"
-        assert result.confidence == 0.80
-        assert result.risk_level == "low"
-
-    @pytest.mark.asyncio
-    async def test_fallback_sideways_moderate_vix(self) -> None:
-        """15 <= VIX <= 25 → sideways regime."""
-        classifier = RegimeClassifier()
-        result = await classifier.classify(market_data={"vix": 20.0}, macro_indicators={})
-
-        assert result.regime == "sideways"
-        assert result.confidence == 0.65
-
-    @pytest.mark.asyncio
-    async def test_fallback_default_data(self) -> None:
-        """No market data → uses defaults (VIX=20 → sideways)."""
-        classifier = RegimeClassifier()
-        result = await classifier.classify()
-
-        assert result.regime == "sideways"
-        assert result.confidence == 0.65
-        assert isinstance(result, RegimeData)
-
-    @pytest.mark.asyncio
-    async def test_fallback_timestamp_format(self) -> None:
-        """Timestamp should be valid ISO 8601."""
-        classifier = RegimeClassifier()
-        result = await classifier.classify()
-
-        assert "T" in result.timestamp
-        assert result.timestamp.endswith("+00:00") or result.timestamp.endswith("Z")
-
-    @pytest.mark.asyncio
-    async def test_fallback_includes_indicators(self) -> None:
-        """Result should include indicator dict."""
-        classifier = RegimeClassifier()
-        result = await classifier.classify(
-            market_data={"vix": 20.0, "sp500_trend": "up"},
-            macro_indicators={"yield_curve_10y_2y": 0.5},
-        )
-
-        assert result.indicators is not None
-        assert "vix" in result.indicators
-        assert result.indicators["vix"] == 20.0
 
 
 class TestRegimeClassifierClaude:
@@ -107,17 +32,15 @@ class TestRegimeClassifierClaude:
         mock_analyst.analyze.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_classify_claude_failure_uses_fallback(self) -> None:
-        """Should fall back to rule-based when Claude raises an exception."""
+    async def test_classify_claude_failure_raises_exception(self) -> None:
+        """Should raise exception when Claude fails (no fallback)."""
         mock_analyst = AsyncMock()
         mock_analyst.analyze = AsyncMock(side_effect=Exception("API error"))
 
         classifier = RegimeClassifier(analyst=mock_analyst)
-        result = await classifier.classify(market_data={"vix": 20.0}, macro_indicators={})
 
-        # Default VIX=20 → sideways fallback
-        assert result.regime == "sideways"
-        assert result.confidence == 0.65
+        with pytest.raises(Exception, match="API error"):
+            await classifier.classify(market_data={"vix": 20.0}, macro_indicators={})
 
     @pytest.mark.asyncio
     async def test_classify_claude_empty_response_uses_parse_defaults(self) -> None:
@@ -177,7 +100,8 @@ class TestParseRegimeResponse:
     """Tests for RegimeClassifier._parse_regime_response()."""
 
     def setup_method(self) -> None:
-        self.classifier = RegimeClassifier()
+        mock_analyst = AsyncMock()
+        self.classifier = RegimeClassifier(analyst=mock_analyst)
 
     def test_valid_regime_passes_through(self) -> None:
         """Valid regime value should be returned unchanged."""
@@ -230,7 +154,8 @@ class TestCalculateRiskLevel:
     """Tests for RegimeClassifier._calculate_risk_level()."""
 
     def setup_method(self) -> None:
-        self.classifier = RegimeClassifier()
+        mock_analyst = AsyncMock()
+        self.classifier = RegimeClassifier(analyst=mock_analyst)
 
     def test_crisis_is_high_risk(self) -> None:
         assert self.classifier._calculate_risk_level("crisis", 25.0) == "high"

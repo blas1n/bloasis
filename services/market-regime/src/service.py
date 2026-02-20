@@ -72,7 +72,7 @@ class MarketRegimeServicer(market_regime_pb2_grpc.MarketRegimeServiceServicer):
         self.redpanda = redpanda_client
         self.postgres = postgres_client
         self.repository = repository or MarketRegimeRepository(postgres_client)
-        self.classifier = classifier or RegimeClassifier()
+        self.classifier = classifier
         self.event_publisher = event_publisher
 
     async def GetCurrentRegime(

@@ -19,3 +19,4 @@ def setup_test_env() -> None:
         "DATABASE_URL",
         "postgresql+asyncpg://postgres:postgres@localhost:5432/bloasis_test"
     )
+    os.environ.setdefault("ANTHROPIC_API_KEY", "test_anthropic_key_for_unit_tests")

@@ -94,7 +94,7 @@ class RegimeClassifier:
 
     def __init__(
         self,
-        analyst: Optional["ClaudeClient"] = None,
+        analyst: "ClaudeClient",
         macro_fetcher: Optional["MacroDataFetcher"] = None,
         claude_model: str = "claude-haiku-4-5-20251001",
     ) -> None:
@@ -102,7 +102,7 @@ class RegimeClassifier:
         Initialize the RegimeClassifier.
 
         Args:
-            analyst: Claude client for AI analysis. If None, uses rule-based fallback.
+            analyst: Claude client for AI analysis (required).
             macro_fetcher: Macro data fetcher for economic indicators.
             claude_model: Claude model ID to use for analysis.
         """
@@ -116,10 +116,7 @@ class RegimeClassifier:
         macro_indicators: Optional[dict] = None,
     ) -> RegimeData:
         """
-        Classify the current market regime.
-
-        Uses Claude AI to analyze market conditions and determine the regime.
-        Falls back to rule-based classification if Claude is unavailable.
+        Classify the current market regime using Claude AI.
 
         Args:
             market_data: Optional pre-fetched market data.
@@ -127,6 +124,9 @@ class RegimeClassifier:
 
         Returns:
             RegimeData containing the classification results.
+
+        Raises:
+            Exception: If Claude API call fails.
         """
         logger.info("Starting market regime classification")
 
@@ -141,54 +141,45 @@ class RegimeClassifier:
         elif macro_indicators is None:
             macro_indicators = {"yield_curve_10y_2y": 0.5, "fed_funds_rate": 5.25}
 
-        try:
-            if self.analyst:
-                # Use Claude for classification
-                prompt = format_classification_prompt(market_data, macro_indicators)
-                system_prompt = get_system_prompt()
-                params = get_model_parameters()
+        prompt = format_classification_prompt(market_data, macro_indicators)
+        system_prompt = get_system_prompt()
+        params = get_model_parameters()
 
-                raw_result = await self.analyst.analyze(
-                    prompt=prompt,
-                    model=self.claude_model,
-                    system_prompt=system_prompt,
-                    response_format="json",
-                    max_tokens=params.get("max_new_tokens", 500),
-                )
+        raw_result = await self.analyst.analyze(
+            prompt=prompt,
+            model=self.claude_model,
+            system_prompt=system_prompt,
+            response_format="json",
+            max_tokens=params.get("max_new_tokens", 500),
+        )
 
-                result = self._parse_regime_response(raw_result)
+        result = self._parse_regime_response(raw_result)
 
-                timestamp = datetime.now(timezone.utc).isoformat()
+        timestamp = datetime.now(timezone.utc).isoformat()
 
-                # Determine risk level based on regime and VIX
-                vix = market_data.get("vix", 20.0)
-                risk_level = self._calculate_risk_level(result.get("regime", "sideways"), vix)
+        # Determine risk level based on regime and VIX
+        vix = market_data.get("vix", 20.0)
+        risk_level = self._calculate_risk_level(result.get("regime", "sideways"), vix)
 
-                regime_data = RegimeData(
-                    regime=result.get("regime", "sideways"),
-                    confidence=float(result.get("confidence", 0.5)),
-                    timestamp=timestamp,
-                    trigger=result.get("reasoning", "baseline")[:50],
-                    reasoning=result.get("reasoning", "AI-generated market analysis"),
-                    risk_level=risk_level,
-                    indicators={
-                        "vix": vix,
-                        "sp500_trend": market_data.get("sp500_trend", "neutral"),
-                        "yield_curve": str(macro_indicators.get("yield_curve_10y_2y", 0.0)),
-                        "credit_spreads": market_data.get("credit_spreads", "normal"),
-                    },
-                )
-                logger.info(
-                    f"Classified regime: {regime_data.regime} "
-                    f"(confidence: {regime_data.confidence}, risk: {risk_level})"
-                )
-                return regime_data
-
-        except Exception as e:
-            logger.warning(f"Claude classification failed, using fallback: {e}")
-
-        # Fallback: Simple rule-based classification
-        return self._fallback_classify(market_data, macro_indicators)
+        regime_data = RegimeData(
+            regime=result.get("regime", "sideways"),
+            confidence=float(result.get("confidence", 0.5)),
+            timestamp=timestamp,
+            trigger=result.get("reasoning", "baseline")[:50],
+            reasoning=result.get("reasoning", "AI-generated market analysis"),
+            risk_level=risk_level,
+            indicators={
+                "vix": vix,
+                "sp500_trend": market_data.get("sp500_trend", "neutral"),
+                "yield_curve": str(macro_indicators.get("yield_curve_10y_2y", 0.0)),
+                "credit_spreads": market_data.get("credit_spreads", "normal"),
+            },
+        )
+        logger.info(
+            f"Classified regime: {regime_data.regime} "
+            f"(confidence: {regime_data.confidence}, risk: {risk_level})"
+        )
+        return regime_data
 
     def _parse_regime_response(self, data: dict) -> dict:
         """
@@ -232,48 +223,3 @@ class RegimeClassifier:
             return "medium"
         else:
             return "low"
-
-    def _fallback_classify(
-        self,
-        market_data: dict,
-        macro_indicators: dict,
-    ) -> RegimeData:
-        """Fallback rule-based classification when Claude is unavailable."""
-        vix = market_data.get("vix", 20.0)
-        timestamp = datetime.now(timezone.utc).isoformat()
-
-        if vix > 30:
-            regime = "crisis"
-            confidence = 0.85
-            trigger = "high_vix"
-            reasoning = f"High volatility detected (VIX: {vix:.1f}), indicating crisis conditions"
-        elif vix > 25:
-            regime = "bear"
-            confidence = 0.75
-            trigger = "elevated_vix"
-            reasoning = f"Elevated volatility (VIX: {vix:.1f}), bearish market conditions"
-        elif vix < 15:
-            regime = "bull"
-            confidence = 0.80
-            trigger = "low_vix"
-            reasoning = f"Low volatility (VIX: {vix:.1f}), bullish market conditions"
-        else:
-            regime = "sideways"
-            confidence = 0.65
-            trigger = "baseline"
-            reasoning = f"Moderate volatility (VIX: {vix:.1f}), range-bound market"
-
-        return RegimeData(
-            regime=regime,
-            confidence=confidence,
-            timestamp=timestamp,
-            trigger=trigger,
-            reasoning=reasoning,
-            risk_level=self._calculate_risk_level(regime, vix),
-            indicators={
-                "vix": vix,
-                "sp500_trend": market_data.get("sp500_trend", "neutral"),
-                "yield_curve": str(macro_indicators.get("yield_curve_10y_2y", 0.0)),
-                "credit_spreads": market_data.get("credit_spreads", "normal"),
-            },
-        )
