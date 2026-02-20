@@ -126,6 +126,8 @@ class MarketRegimeServicer(market_regime_pb2_grpc.MarketRegimeServiceServicer):
 
             # Cache miss or force_refresh - classify regime
             logger.info("Classifying market regime...")
+            if self.classifier is None:
+                raise RuntimeError("RegimeClassifier is not configured — ANTHROPIC_API_KEY required")
             regime_data: RegimeData = await self.classifier.classify()
 
             # Build indicators message
@@ -431,7 +433,7 @@ class MarketRegimeServicer(market_regime_pb2_grpc.MarketRegimeServiceServicer):
                     previous_regime=previous_regime or "unknown",
                     new_regime=regime_data.regime,
                     confidence=regime_data.confidence,
-                    reasoning=regime_data.trigger,
+                    reasoning=regime_data.reasoning,
                     priority=EventPriority.HIGH,
                     metadata={"event_type": event_type},
                 )

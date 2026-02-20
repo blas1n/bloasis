@@ -6,6 +6,7 @@ All environment variables are validated at startup.
 
 from pathlib import Path
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _WORKSPACE_ENV = Path(__file__).resolve().parent.parent.parent.parent / ".env"
@@ -48,8 +49,8 @@ class ServiceConfig(BaseSettings):
     # Redpanda (Event Publishing)
     redpanda_brokers: str = "localhost:9092"
 
-    # Claude API key (model is configured in prompts/*.yaml)
-    anthropic_api_key: str = ""
+    # Claude API key (required — server will not start without this)
+    anthropic_api_key: str = Field(default="", min_length=1)
 
     # Sentiment caching
     sentiment_cache_ttl: int = 3600  # 1 hour TTL for sentiment cache

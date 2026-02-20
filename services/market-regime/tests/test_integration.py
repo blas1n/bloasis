@@ -11,9 +11,33 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from src.models import RegimeData
+
+
+def _make_mock_classifier(regime: str = "sideways", confidence: float = 0.65) -> AsyncMock:
+    """Create a mock RegimeClassifier whose classify() returns a fixed RegimeData."""
+    from datetime import timezone as tz
+
+    regime_data = RegimeData(
+        regime=regime,
+        confidence=confidence,
+        timestamp=datetime.now(tz.utc).isoformat(),
+        trigger="baseline",
+        reasoning="Mock analysis for testing",
+        risk_level="medium",
+    )
+    classifier = AsyncMock()
+    classifier.classify = AsyncMock(return_value=regime_data)
+    return classifier
+
 
 class TestServiceIntegration:
     """Integration tests for MarketRegimeServicer with all components."""
+
+    @pytest.fixture
+    def mock_classifier(self) -> AsyncMock:
+        """Create a mock RegimeClassifier."""
+        return _make_mock_classifier()
 
     @pytest.fixture
     def mock_clients(self) -> tuple[AsyncMock, AsyncMock, MagicMock]:
@@ -65,6 +89,7 @@ class TestServiceIntegration:
         self,
         mock_clients: tuple[AsyncMock, AsyncMock, MagicMock],
         mock_context: MagicMock,
+        mock_classifier: AsyncMock,
     ) -> None:
         """Test complete flow: classify -> cache -> publish -> persist."""
         from shared.generated import market_regime_pb2
@@ -77,13 +102,14 @@ class TestServiceIntegration:
             redis_client=redis,
             redpanda_client=redpanda,
             postgres_client=postgres,
+            classifier=mock_classifier,
         )
 
         # Make request
         request = market_regime_pb2.GetCurrentRegimeRequest(force_refresh=False)
         response = await servicer.GetCurrentRegime(request, mock_context)
 
-        # Verify classification (rule-based fallback with default VIX=20)
+        # Verify classification via mock classifier
         assert response.regime == "sideways"
         assert response.confidence == 0.65
 
@@ -106,6 +132,7 @@ class TestServiceIntegration:
         self,
         mock_clients: tuple[AsyncMock, AsyncMock, MagicMock],
         mock_context: MagicMock,
+        mock_classifier: AsyncMock,
     ) -> None:
         """Test cache hit followed by force refresh."""
         from shared.generated import market_regime_pb2
@@ -118,6 +145,7 @@ class TestServiceIntegration:
             redis_client=redis,
             redpanda_client=redpanda,
             postgres_client=postgres,
+            classifier=mock_classifier,
         )
 
         # First request - cache miss
@@ -221,6 +249,7 @@ class TestServiceIntegration:
         self,
         mock_clients: tuple[AsyncMock, AsyncMock, MagicMock],
         mock_context: MagicMock,
+        mock_classifier: AsyncMock,
     ) -> None:
         """Test service works without Redis (no caching)."""
         from shared.generated import market_regime_pb2
@@ -233,12 +262,13 @@ class TestServiceIntegration:
             redis_client=None,  # No Redis
             redpanda_client=redpanda,
             postgres_client=postgres,
+            classifier=mock_classifier,
         )
 
         request = market_regime_pb2.GetCurrentRegimeRequest(force_refresh=False)
         response = await servicer.GetCurrentRegime(request, mock_context)
 
-        # Should still work (rule-based fallback)
+        # Should still work via Claude classifier
         assert response.regime == "sideways"
         # Event should still be published
         redpanda.publish.assert_called_once()
@@ -248,6 +278,7 @@ class TestServiceIntegration:
         self,
         mock_clients: tuple[AsyncMock, AsyncMock, MagicMock],
         mock_context: MagicMock,
+        mock_classifier: AsyncMock,
     ) -> None:
         """Test service works without Redpanda (no events)."""
         from shared.generated import market_regime_pb2
@@ -260,12 +291,13 @@ class TestServiceIntegration:
             redis_client=redis,
             redpanda_client=None,  # No Redpanda
             postgres_client=postgres,
+            classifier=mock_classifier,
         )
 
         request = market_regime_pb2.GetCurrentRegimeRequest(force_refresh=False)
         response = await servicer.GetCurrentRegime(request, mock_context)
 
-        # Should still work (rule-based fallback)
+        # Should still work via Claude classifier
         assert response.regime == "sideways"
         # Cache should still be set
         redis.setex.assert_called_once()

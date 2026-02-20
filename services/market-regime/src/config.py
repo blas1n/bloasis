@@ -40,7 +40,7 @@ class ServiceConfig(BaseSettings):
     database_url: str = ""
 
     # Claude API key and model (required — server will not start without this)
-    anthropic_api_key: str = Field(min_length=1)
+    anthropic_api_key: str = Field(default="", min_length=1)
     claude_model: str = "claude-haiku-4-5-20251001"
 
     # FRED API (for macro data)

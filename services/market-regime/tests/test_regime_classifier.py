@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from src.models import RegimeClassifier, RegimeData
+from src.models import RegimeClassifier
 
 
 class TestRegimeClassifierClaude:
@@ -94,6 +94,32 @@ class TestRegimeClassifierClaude:
 
         assert "T" in result.timestamp
         assert result.timestamp.endswith("+00:00") or result.timestamp.endswith("Z")
+
+    @pytest.mark.asyncio
+    async def test_classify_default_trigger_is_baseline(self) -> None:
+        """Omitting trigger should produce 'baseline' in RegimeData."""
+        mock_analyst = AsyncMock()
+        mock_analyst.analyze = AsyncMock(return_value={
+            "regime": "bull", "confidence": 0.8, "reasoning": "Low VIX",
+        })
+
+        classifier = RegimeClassifier(analyst=mock_analyst)
+        result = await classifier.classify()
+
+        assert result.trigger == "baseline"
+
+    @pytest.mark.asyncio
+    async def test_classify_custom_trigger_is_propagated(self) -> None:
+        """Caller-supplied trigger should be stored in RegimeData."""
+        mock_analyst = AsyncMock()
+        mock_analyst.analyze = AsyncMock(return_value={
+            "regime": "crisis", "confidence": 0.95, "reasoning": "Market halt",
+        })
+
+        classifier = RegimeClassifier(analyst=mock_analyst)
+        result = await classifier.classify(trigger="circuit_breaker")
+
+        assert result.trigger == "circuit_breaker"
 
 
 class TestParseRegimeResponse:

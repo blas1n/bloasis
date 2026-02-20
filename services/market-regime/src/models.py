@@ -114,6 +114,7 @@ class RegimeClassifier:
         self,
         market_data: Optional[dict] = None,
         macro_indicators: Optional[dict] = None,
+        trigger: str = "baseline",
     ) -> RegimeData:
         """
         Classify the current market regime using Claude AI.
@@ -121,6 +122,9 @@ class RegimeClassifier:
         Args:
             market_data: Optional pre-fetched market data.
             macro_indicators: Optional pre-fetched macro indicators.
+            trigger: What caused this classification to run.
+                Allowed values: "baseline" (scheduled), "fomc",
+                "circuit_breaker", "earnings_season", "geopolitical".
 
         Returns:
             RegimeData containing the classification results.
@@ -128,7 +132,7 @@ class RegimeClassifier:
         Raises:
             Exception: If Claude API call fails.
         """
-        logger.info("Starting market regime classification")
+        logger.info(f"Starting market regime classification (trigger={trigger})")
 
         # Fetch data if not provided
         if market_data is None and self.macro_fetcher:
@@ -165,7 +169,7 @@ class RegimeClassifier:
             regime=result.get("regime", "sideways"),
             confidence=float(result.get("confidence", 0.5)),
             timestamp=timestamp,
-            trigger=result.get("reasoning", "baseline")[:50],
+            trigger=trigger,
             reasoning=result.get("reasoning", "AI-generated market analysis"),
             risk_level=risk_level,
             indicators={

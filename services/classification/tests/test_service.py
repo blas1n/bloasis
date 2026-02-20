@@ -1,6 +1,7 @@
 """Unit tests for Classification Service business logic.
 
 Tests Stage 1 (Sector Filter), Stage 2 (Thematic Filter), and combined pipeline.
+All external dependencies (Redis, Market Regime Service, Claude) are mocked.
 """
 
 import pytest
@@ -12,27 +13,19 @@ from src.models import SectorScore, ThemeScore
 class TestSectorAnalysis:
     """Test Stage 1: Sector Filter."""
 
-    async def test_sector_analysis_cache_miss(self, classification_service, mock_cache):
-        """Test sector analysis with cache miss."""
-        # Setup: cache miss
+    async def test_sector_analysis_calls_claude(self, classification_service, mock_cache, mock_analyst):
+        """Should call Claude analyst and parse response."""
         mock_cache.get.return_value = None
 
-        # Execute
         sectors, cached_at = await classification_service.get_sector_analysis("bull")
 
-        # Verify
-        assert len(sectors) == 11  # All 11 GICS sectors
+        mock_analyst.analyze.assert_called_once()
+        assert len(sectors) > 0
         assert all(isinstance(s, SectorScore) for s in sectors)
-        assert any(s.selected for s in sectors)  # At least some sectors selected
-        assert sectors[0].score >= sectors[-1].score  # Sorted by score descending
+        assert sectors[0].score >= sectors[-1].score  # Sorted descending
 
-        # Verify cache was called
-        mock_cache.get.assert_called_once()
-        mock_cache.set.assert_called_once()
-
-    async def test_sector_analysis_cache_hit(self, classification_service, mock_cache):
-        """Test sector analysis with cache hit."""
-        # Setup: cache hit
+    async def test_sector_analysis_cache_hit(self, classification_service, mock_cache, mock_analyst):
+        """Cache hit should skip Claude and return cached data."""
         cached_data = {
             "sectors": [
                 {
@@ -46,78 +39,68 @@ class TestSectorAnalysis:
         }
         mock_cache.get.return_value = cached_data
 
-        # Execute
         sectors, cached_at = await classification_service.get_sector_analysis("bull")
 
-        # Verify
+        mock_analyst.analyze.assert_not_called()
         assert len(sectors) == 1
         assert sectors[0].sector == "Technology"
         assert cached_at == "2026-02-02T12:00:00Z"
 
-        # Cache should be read but not written
-        mock_cache.get.assert_called_once()
-        mock_cache.set.assert_not_called()
-
-    async def test_sector_analysis_force_refresh(self, classification_service, mock_cache):
-        """Test sector analysis with force_refresh bypasses cache."""
-        # Setup: cache would hit, but force_refresh=True
+    async def test_sector_analysis_force_refresh_bypasses_cache(
+        self, classification_service, mock_cache, mock_analyst
+    ):
+        """force_refresh=True should skip cache read and call Claude."""
         mock_cache.get.return_value = {"sectors": [], "cached_at": "old"}
 
-        # Execute
-        sectors, cached_at = await classification_service.get_sector_analysis(
-            "bull", force_refresh=True
-        )
+        await classification_service.get_sector_analysis("bull", force_refresh=True)
 
-        # Verify: should skip cache read
         mock_cache.get.assert_not_called()
-        mock_cache.set.assert_called_once()  # But still writes to cache
+        mock_analyst.analyze.assert_called_once()
+        mock_cache.set.assert_called_once()
 
-    async def test_sector_analysis_different_regimes(self, classification_service, mock_cache):
-        """Test that different regimes produce different results."""
+    async def test_sector_analysis_result_written_to_cache(
+        self, classification_service, mock_cache
+    ):
+        """Cache miss should write result back to cache."""
         mock_cache.get.return_value = None
 
-        # Bull regime
-        sectors_bull, _ = await classification_service.get_sector_analysis("bull")
-        selected_bull = [s.sector for s in sectors_bull if s.selected]
+        await classification_service.get_sector_analysis("bull")
 
-        # Crisis regime
-        sectors_crisis, _ = await classification_service.get_sector_analysis("crisis")
-        selected_crisis = [s.sector for s in sectors_crisis if s.selected]
+        mock_cache.set.assert_called_once()
 
-        # Verify different selections
-        assert set(selected_bull) != set(selected_crisis)
-        # Bull should favor growth sectors
-        assert "Technology" in selected_bull
-        # Crisis should favor defensive sectors
-        assert "Utilities" in selected_crisis or "Consumer Staples" in selected_crisis
+    async def test_sector_analysis_claude_failure_propagates(
+        self, classification_service, mock_cache, mock_analyst
+    ):
+        """Claude failure should propagate (no silent fallback)."""
+        mock_cache.get.return_value = None
+        mock_analyst.analyze.side_effect = Exception("API error")
+
+        with pytest.raises(Exception, match="API error"):
+            await classification_service.get_sector_analysis("bull")
 
 
 @pytest.mark.asyncio
 class TestThematicAnalysis:
     """Test Stage 2: Thematic Filter."""
 
-    async def test_thematic_analysis_cache_miss(self, classification_service, mock_cache):
-        """Test thematic analysis with cache miss."""
-        # Setup
+    async def test_thematic_analysis_calls_claude(
+        self, classification_service, mock_cache, mock_analyst
+    ):
+        """Should call Claude analyst and return parsed themes."""
         mock_cache.get.return_value = None
         sectors = ["Technology", "Healthcare"]
 
-        # Execute
         themes, cached_at = await classification_service.get_thematic_analysis(sectors, "bull")
 
-        # Verify
+        mock_analyst.analyze.assert_called_once()
         assert len(themes) > 0
         assert all(isinstance(t, ThemeScore) for t in themes)
-        assert all(t.sector in sectors for t in themes)
-        assert themes[0].score >= themes[-1].score  # Sorted by score
+        assert themes[0].score >= themes[-1].score  # Sorted descending
 
-        # Verify cache
-        mock_cache.get.assert_called_once()
-        mock_cache.set.assert_called_once()
-
-    async def test_thematic_analysis_cache_hit(self, classification_service, mock_cache):
-        """Test thematic analysis with cache hit."""
-        # Setup: cache hit
+    async def test_thematic_analysis_cache_hit(
+        self, classification_service, mock_cache, mock_analyst
+    ):
+        """Cache hit should skip Claude."""
         cached_data = {
             "themes": [
                 {
@@ -132,12 +115,11 @@ class TestThematicAnalysis:
         }
         mock_cache.get.return_value = cached_data
 
-        # Execute
         themes, cached_at = await classification_service.get_thematic_analysis(
             ["Technology"], "bull"
         )
 
-        # Verify
+        mock_analyst.analyze.assert_not_called()
         assert len(themes) == 1
         assert themes[0].theme == "AI Infrastructure"
         assert "NVDA" in themes[0].representative_symbols
@@ -145,13 +127,22 @@ class TestThematicAnalysis:
     async def test_thematic_analysis_representative_symbols(
         self, classification_service, mock_cache
     ):
-        """Test that themes include representative symbols."""
+        """Parsed themes should include representative symbols."""
         mock_cache.get.return_value = None
 
         themes, _ = await classification_service.get_thematic_analysis(["Technology"], "bull")
 
-        # Verify all themes have representative symbols
         assert all(len(t.representative_symbols) > 0 for t in themes)
+
+    async def test_thematic_analysis_claude_failure_propagates(
+        self, classification_service, mock_cache, mock_analyst
+    ):
+        """Claude failure should propagate (no silent fallback)."""
+        mock_cache.get.return_value = None
+        mock_analyst.analyze.side_effect = Exception("API error")
+
+        with pytest.raises(Exception, match="API error"):
+            await classification_service.get_thematic_analysis(["Technology"], "bull")
 
 
 @pytest.mark.asyncio
@@ -161,67 +152,50 @@ class TestCandidateSymbols:
     async def test_candidate_symbols_full_pipeline(
         self, classification_service, mock_cache, mock_regime_client
     ):
-        """Test full pipeline from regime to candidates."""
-        # Setup: no cache
+        """Full pipeline should return candidates with required fields."""
         mock_cache.get.return_value = None
 
-        # Execute (no regime provided - should fetch from service)
-        (
-            candidates,
-            selected_sectors,
-            top_themes,
-            regime,
-        ) = await classification_service.get_candidate_symbols()
+        candidates, selected_sectors, top_themes, regime = (
+            await classification_service.get_candidate_symbols()
+        )
 
-        # Verify
         assert regime == "bull"  # From mock regime client
         assert len(selected_sectors) > 0
         assert len(top_themes) > 0
         assert len(candidates) > 0
-        assert len(candidates) <= 50  # Default max
+        assert len(candidates) <= 50
 
-        # Verify candidates have all required fields
         for candidate in candidates:
             assert candidate.symbol
             assert candidate.sector in selected_sectors
             assert candidate.theme
             assert 0 <= candidate.preliminary_score <= 100
 
-    async def test_candidate_symbols_with_regime(self, classification_service, mock_cache):
-        """Test candidate symbols with explicit regime."""
+    async def test_candidate_symbols_with_explicit_regime(
+        self, classification_service, mock_cache
+    ):
+        """Explicit regime should skip regime service call."""
         mock_cache.get.return_value = None
 
-        # Execute with explicit regime
-        (
-            candidates,
-            selected_sectors,
-            top_themes,
-            regime,
-        ) = await classification_service.get_candidate_symbols(regime="crisis")
-
-        # Verify
-        assert regime == "crisis"
-        assert len(candidates) > 0
-
-        # Crisis regime should select defensive sectors
-        defensive_sectors = {"Utilities", "Consumer Staples", "Healthcare"}
-        assert any(s in defensive_sectors for s in selected_sectors)
-
-    async def test_candidate_symbols_max_candidates(self, classification_service, mock_cache):
-        """Test that max_candidates limit is respected."""
-        mock_cache.get.return_value = None
-
-        # Request only 10 candidates
-        candidates, _, _, _ = await classification_service.get_candidate_symbols(
-            regime="bull", max_candidates=10
+        candidates, selected_sectors, top_themes, regime = (
+            await classification_service.get_candidate_symbols(regime="bull")
         )
 
-        # Verify
-        assert len(candidates) <= 10
+        assert regime == "bull"
+        assert len(candidates) > 0
 
-    async def test_candidate_symbols_cache_hit(self, classification_service, mock_cache):
-        """Test candidate symbols with cache hit."""
-        # Setup: cache hit
+    async def test_candidate_symbols_max_candidates(self, classification_service, mock_cache):
+        """max_candidates limit should be respected."""
+        mock_cache.get.return_value = None
+
+        candidates, _, _, _ = await classification_service.get_candidate_symbols(
+            regime="bull", max_candidates=2
+        )
+
+        assert len(candidates) <= 2
+
+    async def test_candidate_symbols_cache_hit(self, classification_service, mock_cache, mock_analyst):
+        """Cache hit should skip full pipeline."""
         cached_data = {
             "candidates": [
                 {
@@ -237,45 +211,14 @@ class TestCandidateSymbols:
         }
         mock_cache.get.return_value = cached_data
 
-        # Execute
-        (
-            candidates,
-            selected_sectors,
-            top_themes,
-            regime,
-        ) = await classification_service.get_candidate_symbols(regime="bull")
+        candidates, selected_sectors, top_themes, regime = (
+            await classification_service.get_candidate_symbols(regime="bull")
+        )
 
-        # Verify
+        mock_analyst.analyze.assert_not_called()
         assert len(candidates) == 1
         assert candidates[0].symbol == "AAPL"
         assert regime == "bull"
-
-    async def test_candidate_symbols_no_selected_sectors_fallback(
-        self, classification_service, mock_cache
-    ):
-        """Test fallback when no sectors are selected."""
-        from unittest.mock import patch
-
-        mock_cache.get.return_value = None
-
-        # Patch _fallback_sector_analysis to return all sectors as not selected
-        original_fallback = classification_service._fallback_sector_analysis
-
-        def mock_no_selection(regime):
-            sectors = original_fallback(regime)
-            for s in sectors:
-                s.selected = False
-            return sectors
-
-        with patch.object(classification_service, "_fallback_sector_analysis", mock_no_selection):
-            # Execute
-            candidates, selected_sectors, _, _ = (
-                await classification_service.get_candidate_symbols(regime="bull")
-            )
-
-        # Verify: should fallback to top 3 sectors
-        assert len(selected_sectors) == 3
-        assert len(candidates) > 0
 
 
 @pytest.mark.asyncio
@@ -283,29 +226,27 @@ class TestCaching:
     """Test caching behavior."""
 
     async def test_cache_key_consistency(self, classification_service, mock_cache):
-        """Test that same inputs produce same cache keys."""
+        """Same inputs should produce same cache key."""
         mock_cache.get.return_value = None
 
-        # Call twice with same parameters
         await classification_service.get_sector_analysis("bull")
         await classification_service.get_sector_analysis("bull")
 
-        # Verify cache was checked with same key both times
         assert mock_cache.get.call_count == 2
-        call_args_1 = mock_cache.get.call_args_list[0][0][0]
-        call_args_2 = mock_cache.get.call_args_list[1][0][0]
-        assert call_args_1 == call_args_2
+        assert (
+            mock_cache.get.call_args_list[0][0][0]
+            == mock_cache.get.call_args_list[1][0][0]
+        )
 
     async def test_cache_key_different_for_different_regimes(
         self, classification_service, mock_cache
     ):
-        """Test that different regimes use different cache keys."""
+        """Different regimes should use different cache keys."""
         mock_cache.get.return_value = None
 
         await classification_service.get_sector_analysis("bull")
         await classification_service.get_sector_analysis("bear")
 
-        # Verify different cache keys
-        call_args_1 = mock_cache.get.call_args_list[0][0][0]
-        call_args_2 = mock_cache.get.call_args_list[1][0][0]
-        assert call_args_1 != call_args_2
+        key1 = mock_cache.get.call_args_list[0][0][0]
+        key2 = mock_cache.get.call_args_list[1][0][0]
+        assert key1 != key2

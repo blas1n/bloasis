@@ -43,14 +43,9 @@ async def serve() -> None:
     await regime_client.connect()
     logger.info("Market Regime client connected")
 
-    # Initialize Claude analyst (optional — falls back to rule-based if not set)
-    if config.anthropic_api_key:
-        analyst = ClaudeClient(api_key=config.anthropic_api_key)
-        logger.info(f"Claude analyst initialized (model: {config.claude_model})")
-    else:
-        logger.warning(
-            "No ANTHROPIC_API_KEY set — sector/theme analysis uses rule-based fallback"
-        )
+    # Initialize Claude analyst
+    analyst = ClaudeClient(api_key=config.anthropic_api_key)
+    logger.info(f"Claude analyst initialized (model: {config.claude_model})")
 
     # Initialize classification service
     classification_service = ClassificationService(
@@ -65,7 +60,9 @@ async def serve() -> None:
 
     # Add Classification service
     servicer = ClassificationServicer(classification_service)
-    classification_pb2_grpc.add_ClassificationServiceServicer_to_server(servicer, server)
+    classification_pb2_grpc.add_ClassificationServiceServicer_to_server(
+        servicer, server
+    )
 
     # Add gRPC health check service
     health_servicer = health.HealthServicer()
