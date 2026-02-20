@@ -33,7 +33,7 @@ export interface PositionsResponse {
 }
 
 // Market Regime Types
-export type RegimeType = "risk_on" | "risk_off" | "crisis" | "recovery";
+export type RegimeType = "bull" | "bear" | "sideways" | "crisis" | "recovery";
 export type RiskLevel = "low" | "medium" | "high";
 
 export interface MarketRegimeIndicators {
