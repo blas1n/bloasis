@@ -7,6 +7,7 @@ Manages JWT authentication, token validation, and refresh.
 
 import asyncio
 import socket
+from pathlib import Path
 from typing import Optional
 
 import grpc
@@ -32,6 +33,18 @@ user_client: Optional[UserClient] = None
 consul_client: Optional[ConsulClient] = None
 
 
+def _resolve_key_path(path: str) -> str:
+    """Resolve a key path to absolute, anchored at workspace root if relative."""
+    if not path:
+        return path
+    p = Path(path)
+    if p.is_absolute():
+        return path
+    # Relative path: resolve against workspace root (4 levels up from this file)
+    workspace_root = Path(__file__).resolve().parent.parent.parent.parent
+    return str(workspace_root / path)
+
+
 def create_jwt_handler() -> JWTHandler:
     """Create JWT handler using RS256 configuration.
 
@@ -44,8 +57,8 @@ def create_jwt_handler() -> JWTHandler:
     """
     logger.info("Initializing JWT handler with RS256 algorithm")
     return JWTHandler(
-        private_key_path=config.jwt_private_key_path,
-        public_key_path=config.jwt_public_key_path,
+        private_key_path=_resolve_key_path(config.jwt_private_key_path),
+        public_key_path=_resolve_key_path(config.jwt_public_key_path),
         access_token_expire_minutes=config.access_token_expire_minutes,
         refresh_token_expire_days=config.refresh_token_expire_days,
     )
