@@ -294,12 +294,14 @@ class TestMarketRegimeServicer:
         mock_record1.confidence = 0.9
         mock_record1.timestamp = datetime(2025, 1, 25, 10, 0, 0, tzinfo=timezone.utc)
         mock_record1.trigger = "baseline"
+        mock_record1.analysis = None
 
         mock_record2 = MagicMock(spec=MarketRegimeRecord)
         mock_record2.regime = "crisis"
         mock_record2.confidence = 0.95
         mock_record2.timestamp = datetime(2025, 1, 26, 10, 0, 0, tzinfo=timezone.utc)
         mock_record2.trigger = "circuit_breaker"
+        mock_record2.analysis = None
 
         # Setup mock repository to return ORM records
         mock_repository.get_history.return_value = [mock_record1, mock_record2]

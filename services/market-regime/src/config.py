@@ -38,8 +38,9 @@ class ServiceConfig(BaseSettings):
     # Database configuration
     database_url: str = ""
 
-    # Claude API key (model is configured in prompts/regime_classification.yaml)
+    # Claude API key and model
     anthropic_api_key: str = ""
+    claude_model: str = "claude-haiku-4-5-20251001"
 
     # FRED API (for macro data)
     fred_api_key: str = ""

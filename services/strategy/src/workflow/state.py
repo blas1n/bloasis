@@ -10,11 +10,11 @@ This module defines the state management for the 5-Layer AI Flow:
 
 from dataclasses import dataclass
 from decimal import Decimal
-from enum import Enum
+from enum import StrEnum
 from typing import TypedDict
 
 
-class WorkflowPhase(str, Enum):
+class WorkflowPhase(StrEnum):
     """Workflow progress phase tracking."""
 
     INIT = "init"

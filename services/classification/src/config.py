@@ -36,8 +36,9 @@ class ServiceConfig(BaseSettings):
     market_regime_host: str = "market-regime"
     market_regime_port: int = 50051
 
-    # Claude API key (model is configured in prompts/*.yaml)
+    # Claude API key and model
     anthropic_api_key: str = ""
+    claude_model: str = "claude-haiku-4-5-20251001"
 
 
 # Global config instance - validated at import time

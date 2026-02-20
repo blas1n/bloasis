@@ -41,7 +41,7 @@ class MacroStrategist:
         elif config.anthropic_api_key:
             from shared.ai_clients import ClaudeClient
 
-            self.analyst: Optional["ClaudeClient"] = ClaudeClient(
+            self.analyst: ClaudeClient | None = ClaudeClient(
                 api_key=config.anthropic_api_key
             )
         else:
@@ -85,9 +85,11 @@ class MacroStrategist:
             try:
                 response = await self.analyst.analyze(
                     prompt=prompt,
-                    model=config.claude_model,
+                    model=model_params.get("model", "claude-haiku-4-5-20251001"),
                     response_format="json",
-                    max_tokens=model_params.get("max_new_tokens", 500),
+                    max_tokens=model_params.get(
+                        "max_tokens", model_params.get("max_new_tokens", 500)
+                    ),
                 )
 
                 # Validate response type
@@ -147,9 +149,11 @@ class MacroStrategist:
             try:
                 return await self.analyst.analyze(
                     prompt=prompt,
-                    model=config.claude_model,
+                    model=model_params.get("model", "claude-haiku-4-5-20251001"),
                     response_format="json",
-                    max_tokens=model_params.get("max_new_tokens", 500),
+                    max_tokens=model_params.get(
+                        "max_tokens", model_params.get("max_new_tokens", 500)
+                    ),
                 )
             except Exception as e:
                 logger.error(f"Regime risk assessment failed: {e}")

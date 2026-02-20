@@ -172,18 +172,21 @@ class TestServiceIntegration:
         mock_record1.confidence = 0.85
         mock_record1.timestamp = datetime(2025, 1, 24, 10, 0, 0, tzinfo=timezone.utc)
         mock_record1.trigger = "baseline"
+        mock_record1.analysis = None
 
         mock_record2 = MagicMock(spec=MarketRegimeRecord)
         mock_record2.regime = "crisis"
         mock_record2.confidence = 0.78
         mock_record2.timestamp = datetime(2025, 1, 25, 10, 0, 0, tzinfo=timezone.utc)
         mock_record2.trigger = "fomc"
+        mock_record2.analysis = None
 
         mock_record3 = MagicMock(spec=MarketRegimeRecord)
         mock_record3.regime = "crisis"
         mock_record3.confidence = 0.95
         mock_record3.timestamp = datetime(2025, 1, 26, 10, 0, 0, tzinfo=timezone.utc)
         mock_record3.trigger = "circuit_breaker"
+        mock_record3.analysis = None
 
         # Setup mock session to return ORM records
         mock_result = MagicMock()

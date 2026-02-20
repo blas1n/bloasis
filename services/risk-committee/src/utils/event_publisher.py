@@ -24,7 +24,7 @@ class EventPublisher:
             producer: Optional pre-configured producer (for testing)
         """
         self._producer = producer
-        self._bootstrap_servers = config.redpanda_bootstrap_servers
+        self._bootstrap_servers = config.redpanda_brokers
 
     async def connect(self) -> None:
         """Connect to Redpanda."""

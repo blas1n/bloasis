@@ -19,6 +19,7 @@ from .prompts import format_classification_prompt, get_model_parameters, get_sys
 
 if TYPE_CHECKING:
     from shared.ai_clients import ClaudeClient
+
     from .macro_data import MacroDataFetcher
 
 logger = logging.getLogger(__name__)

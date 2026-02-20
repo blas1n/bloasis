@@ -84,7 +84,7 @@ async def serve() -> None:
 
     # Start trading control event consumer
     try:
-        await servicer.start_trading_control_consumer(config.redpanda_bootstrap_servers)
+        await servicer.start_trading_control_consumer(config.redpanda_brokers)
         logger.info("Trading control consumer started")
     except Exception as e:
         logger.error(f"Failed to start trading control consumer: {e}")

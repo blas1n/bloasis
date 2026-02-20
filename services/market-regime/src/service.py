@@ -239,8 +239,6 @@ class MarketRegimeServicer(market_regime_pb2_grpc.MarketRegimeServiceServicer):
                     trigger=record.trigger,
                     reasoning=getattr(record, "analysis", "") or "",
                     risk_level=getattr(record, "risk_level", "medium"),
-                    # Indicators not stored in historical records yet
-                    indicators=None,
                 )
                 regimes.append(regime_response)
 
