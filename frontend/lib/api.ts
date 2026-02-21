@@ -143,14 +143,20 @@ class ApiClient {
   // ========================================================================
 
   async getUserPreferences(userId: string): Promise<ApiResponse<UserPreferences>> {
-    return this.request<UserPreferences>(`/v1/users/${userId}/preferences`);
+    const result = await this.request<{ preferences: UserPreferences }>(
+      `/v1/users/${userId}/preferences`
+    );
+    if (result.data?.preferences) {
+      return { data: result.data.preferences };
+    }
+    return { data: null as unknown as UserPreferences, error: result.error };
   }
 
   async updateRiskProfile(
     userId: string,
     riskProfile: RiskProfile
   ): Promise<ApiResponse<UserPreferences>> {
-    return this.request<UserPreferences>(
+    const result = await this.request<{ preferences: UserPreferences }>(
       `/v1/users/${userId}/preferences`,
       {
         method: "PATCH",
@@ -159,6 +165,10 @@ class ApiClient {
         }),
       }
     );
+    if (result.data?.preferences) {
+      return { data: result.data.preferences };
+    }
+    return { data: null as unknown as UserPreferences, error: result.error };
   }
 }
 

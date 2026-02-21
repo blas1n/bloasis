@@ -5,7 +5,7 @@ import { RiskProfileCard } from "@/components/trading/RiskProfileCard";
 import { TradingLog } from "@/components/trading/TradingLog";
 
 export default function TradingPage() {
-  const userId = "demo-user";
+  const userId = "00000000-0000-0000-0000-000000000001";
 
   return (
     <div className="p-8 space-y-8">

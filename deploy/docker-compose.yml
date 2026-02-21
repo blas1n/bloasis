@@ -207,6 +207,7 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       FRED_API_KEY: ${FRED_API_KEY:-}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FILE: /logs/market-regime.log
     depends_on:
       redis:
         condition: service_healthy
@@ -228,6 +229,8 @@ services:
           memory: 512M
         reservations:
           memory: 256M
+    volumes:
+      - ../logs:/logs
     networks:
       - bloasis-network
 
@@ -254,6 +257,7 @@ services:
       DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://postgres:postgres@postgres:5432/bloasis}
       ALPHA_VANTAGE_KEY: ${ALPHA_VANTAGE_KEY:-}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FILE: /logs/market-data.log
     depends_on:
       redis:
         condition: service_healthy
@@ -273,6 +277,8 @@ services:
           memory: 512M
         reservations:
           memory: 256M
+    volumes:
+      - ../logs:/logs
     networks:
       - bloasis-network
 
@@ -302,6 +308,7 @@ services:
       CONSUL_PORT: "8500"
       DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://postgres:postgres@postgres:5432/bloasis}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FILE: /logs/classification.log
     depends_on:
       redis:
         condition: service_healthy
@@ -321,6 +328,8 @@ services:
           memory: 512M
         reservations:
           memory: 256M
+    volumes:
+      - ../logs:/logs
     networks:
       - bloasis-network
 
@@ -355,6 +364,7 @@ services:
       # AI APIs
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FILE: /logs/strategy.log
     depends_on:
       market-regime:
         condition: service_healthy
@@ -378,6 +388,8 @@ services:
           memory: 768M
         reservations:
           memory: 384M
+    volumes:
+      - ../logs:/logs
     networks:
       - bloasis-network
 
@@ -410,6 +422,7 @@ services:
       MAX_DRAWDOWN_THRESHOLD: ${MAX_DRAWDOWN_THRESHOLD:-0.30}
       MIN_WIN_RATE: ${MIN_WIN_RATE:-0.40}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FILE: /logs/backtesting.log
     depends_on:
       redis:
         condition: service_healthy
@@ -429,6 +442,8 @@ services:
           memory: 1G
         reservations:
           memory: 512M
+    volumes:
+      - ../logs:/logs
     networks:
       - bloasis-network
 
@@ -458,6 +473,7 @@ services:
       CONSUL_PORT: "8500"
       DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://postgres:postgres@postgres:5432/bloasis}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FILE: /logs/user.log
     depends_on:
       redis:
         condition: service_healthy
@@ -479,6 +495,8 @@ services:
           memory: 512M
         reservations:
           memory: 256M
+    volumes:
+      - ../logs:/logs
     networks:
       - bloasis-network
 
@@ -511,8 +529,10 @@ services:
       USER_SERVICE_HOST: user
       USER_SERVICE_PORT: "50052"
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FILE: /logs/auth.log
     volumes:
       - ../infra/keys:/app/keys:ro
+      - ../logs:/logs
     depends_on:
       redis:
         condition: service_healthy
@@ -557,6 +577,7 @@ services:
       CONSUL_PORT: "8500"
       DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://postgres:postgres@postgres:5432/bloasis}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FILE: /logs/portfolio.log
     depends_on:
       redis:
         condition: service_healthy
@@ -578,6 +599,8 @@ services:
           memory: 512M
         reservations:
           memory: 256M
+    volumes:
+      - ../logs:/logs
     networks:
       - bloasis-network
 
@@ -604,6 +627,7 @@ services:
       DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://postgres:postgres@postgres:5432/bloasis}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FILE: /logs/risk-committee.log
     depends_on:
       redis:
         condition: service_healthy
@@ -623,6 +647,8 @@ services:
           memory: 512M
         reservations:
           memory: 256M
+    volumes:
+      - ../logs:/logs
     networks:
       - bloasis-network
 
@@ -652,6 +678,7 @@ services:
       ALPACA_SECRET_KEY: ${ALPACA_SECRET_KEY:?ALPACA_SECRET_KEY is required}
       ALPACA_PAPER: ${ALPACA_PAPER:-true}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FILE: /logs/executor.log
     depends_on:
       redis:
         condition: service_healthy
@@ -671,6 +698,8 @@ services:
           memory: 512M
         reservations:
           memory: 256M
+    volumes:
+      - ../logs:/logs
     networks:
       - bloasis-network
 
@@ -696,6 +725,7 @@ services:
       CONSUL_HOST: consul
       CONSUL_PORT: "8500"
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FILE: /logs/notification.log
     depends_on:
       redpanda:
         condition: service_healthy
@@ -713,6 +743,8 @@ services:
           memory: 256M
         reservations:
           memory: 128M
+    volumes:
+      - ../logs:/logs
     networks:
       - bloasis-network
 

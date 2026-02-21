@@ -9,6 +9,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
+from typing import Optional
 
 from sqlalchemy import Boolean, DateTime, Numeric, String
 from sqlalchemy.dialects.postgresql import ARRAY, UUID
@@ -140,6 +141,7 @@ class UserPreferences:
     preferred_sectors: list[str] = field(default_factory=list)
     enable_notifications: bool = True
     trading_enabled: bool = False
+    updated_at: Optional[datetime] = None
 
     @classmethod
     def from_record(cls, record: UserPreferencesRecord) -> "UserPreferences":
@@ -160,6 +162,7 @@ class UserPreferences:
             preferred_sectors=list(record.preferred_sectors) if record.preferred_sectors else [],
             enable_notifications=record.enable_notifications,
             trading_enabled=record.trading_enabled,
+            updated_at=record.updated_at,
         )
 
     @classmethod
@@ -201,6 +204,7 @@ def preferences_to_cache_dict(preferences: UserPreferences) -> dict:
         "preferred_sectors": preferences.preferred_sectors,
         "enable_notifications": preferences.enable_notifications,
         "trading_enabled": preferences.trading_enabled,
+        "updated_at": preferences.updated_at.isoformat() if preferences.updated_at else None,
     }
 
 
@@ -214,6 +218,8 @@ def cache_dict_to_preferences(data: dict) -> UserPreferences:
     Returns:
         UserPreferences domain object.
     """
+    updated_at_str = data.get("updated_at")
+    updated_at = datetime.fromisoformat(updated_at_str) if updated_at_str else None
     return UserPreferences(
         user_id=data["user_id"],
         risk_profile=data["risk_profile"],
@@ -222,4 +228,5 @@ def cache_dict_to_preferences(data: dict) -> UserPreferences:
         preferred_sectors=data.get("preferred_sectors", []),
         enable_notifications=data.get("enable_notifications", True),
         trading_enabled=data.get("trading_enabled", False),
+        updated_at=updated_at,
     )

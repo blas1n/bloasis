@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useTradingControl } from "@/hooks/useTradingControl";
 
 export function AITradingControl({ userId }: { userId: string }) {
-  const { status, isLoading, startTrading, stopTrading } =
+  const { status, isLoading, error, startTrading, stopTrading } =
     useTradingControl(userId);
   const [showStopDialog, setShowStopDialog] = useState(false);
 
@@ -58,6 +58,10 @@ export function AITradingControl({ userId }: { userId: string }) {
           System is currently {isActive ? "ACTIVE" : "INACTIVE"}
         </span>
       </div>
+
+      {error && (
+        <p className="mt-2 text-xs text-red-400">{error}</p>
+      )}
 
       {/* Stop Mode Dialog */}
       {showStopDialog && (

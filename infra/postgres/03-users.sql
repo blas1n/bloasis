@@ -64,3 +64,16 @@ CREATE TRIGGER update_user_preferences_updated_at
     BEFORE UPDATE ON user_data.user_preferences
     FOR EACH ROW
     EXECUTE FUNCTION user_data.update_updated_at_column();
+
+-- Seed demo user with fixed UUID (idempotent)
+INSERT INTO user_data.users (user_id, email, password_hash, name)
+VALUES (
+    '00000000-0000-0000-0000-000000000001',
+    'demo@bloasis.ai',
+    '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQyCgK8a0nRvO.JnJG0RsTI3S',
+    'Demo User'
+) ON CONFLICT (user_id) DO NOTHING;
+
+INSERT INTO user_data.user_preferences (user_id)
+VALUES ('00000000-0000-0000-0000-000000000001')
+ON CONFLICT (user_id) DO NOTHING;

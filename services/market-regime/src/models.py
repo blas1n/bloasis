@@ -154,7 +154,7 @@ class RegimeClassifier:
             model=self.claude_model,
             system_prompt=system_prompt,
             response_format="json",
-            max_tokens=params.get("max_new_tokens", 500),
+            max_tokens=params.get("max_tokens", 1024),
         )
 
         result = self._parse_regime_response(raw_result)

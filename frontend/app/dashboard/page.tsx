@@ -8,7 +8,7 @@ import { usePortfolio } from "@/hooks/usePortfolio";
 import { formatCurrency, formatPercent } from "@/lib/formatters";
 
 export default function DashboardPage() {
-  const userId = "demo-user";
+  const userId = "00000000-0000-0000-0000-000000000001";
   const { summary } = usePortfolio(userId);
 
   return (
