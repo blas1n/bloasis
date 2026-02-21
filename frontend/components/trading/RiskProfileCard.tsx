@@ -5,7 +5,7 @@ import { Card } from "@/components/ui/Card";
 import type { RiskProfile } from "@/lib/types";
 
 export function RiskProfileCard({ userId }: { userId: string }) {
-  const { riskProfile, isLoading, updateRiskProfile } = useRiskProfile(userId);
+  const { riskProfile, isLoading, error, updateRiskProfile } = useRiskProfile(userId);
 
   const profiles: Array<{
     id: RiskProfile;
@@ -33,6 +33,10 @@ export function RiskProfileCard({ userId }: { userId: string }) {
     <Card>
       <h3 className="text-lg font-bold text-text-primary mb-1">Risk Profile</h3>
       <p className="text-sm text-text-muted mb-5">Select your investment risk tolerance</p>
+
+      {error && (
+        <p className="mb-3 text-xs text-red-400">{error}</p>
+      )}
 
       <div className="space-y-3">
         {profiles.map((profile) => {

@@ -476,6 +476,7 @@ class UserServicer(user_pb2_grpc.UserServiceServicer):
         except Exception as e:
             logger.error(f"Failed to start trading: {e}")
             context.set_code(grpc.StatusCode.INTERNAL)
+            context.set_details(f"Failed to start trading: {str(e)}")
             return user_pb2.StartTradingResponse(
                 success=False,
                 message="Internal error occurred",
@@ -574,6 +575,7 @@ class UserServicer(user_pb2_grpc.UserServiceServicer):
         except Exception as e:
             logger.error(f"Failed to stop trading: {e}")
             context.set_code(grpc.StatusCode.INTERNAL)
+            context.set_details(f"Failed to stop trading: {str(e)}")
             return user_pb2.StopTradingResponse(
                 success=False,
                 message="Internal error occurred",

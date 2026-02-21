@@ -9,6 +9,7 @@ import json
 import logging
 import os
 from datetime import datetime, timezone
+from logging.handlers import RotatingFileHandler
 from typing import Any, Dict, Optional
 
 
@@ -186,25 +187,33 @@ def setup_logger(
     # Convert level string to logging constant
     numeric_level = getattr(logging, level.upper(), logging.INFO)
 
-    # Create logger with service name
-    logger = logging.getLogger(service_name)
-    logger.setLevel(numeric_level)
-
-    # Remove existing handlers to avoid duplicates
-    logger.handlers.clear()
+    # Apply JSON formatter
+    formatter = JSONFormatter(service_name=service_name)
 
     # Create stream handler for stdout
     handler = logging.StreamHandler()
     handler.setLevel(numeric_level)
-
-    # Apply JSON formatter
-    formatter = JSONFormatter(service_name=service_name)
     handler.setFormatter(formatter)
 
-    # Add handler to logger
-    logger.addHandler(handler)
+    # Configure root logger so all module loggers (via __name__) inherit handlers
+    root_logger = logging.getLogger()
+    root_logger.setLevel(numeric_level)
+    root_logger.handlers.clear()
+    root_logger.addHandler(handler)
 
-    # Prevent propagation to root logger to avoid duplicate logs
-    logger.propagate = False
+    # Optionally write to file when LOG_FILE env var is set
+    log_file = os.getenv("LOG_FILE")
+    if log_file:
+        os.makedirs(os.path.dirname(log_file), exist_ok=True)
+        file_handler = RotatingFileHandler(
+            log_file,
+            maxBytes=10 * 1024 * 1024,  # 10MB per file
+            backupCount=3,
+            encoding="utf-8",
+        )
+        file_handler.setLevel(numeric_level)
+        file_handler.setFormatter(formatter)
+        root_logger.addHandler(file_handler)
 
-    return logger
+    # Return named logger for convenience
+    return logging.getLogger(service_name)

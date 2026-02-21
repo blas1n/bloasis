@@ -18,7 +18,7 @@ export async function GET(
       headers: {
         "Content-Type": "application/json",
       },
-      signal: AbortSignal.timeout(3000), // 3s timeout
+      signal: AbortSignal.timeout(30000), // 3s timeout
     });
 
     if (!response.ok) {
@@ -63,7 +63,14 @@ export async function POST(
 ) {
   const path = params.path.join("/");
   const url = `${API_BASE_URL}/${path}`;
-  const body = await request.json();
+
+  let body: unknown = {};
+  try {
+    const text = await request.text();
+    if (text.trim()) body = JSON.parse(text);
+  } catch {
+    // no body or invalid JSON — proceed with empty object
+  }
 
   try {
     const response = await fetch(url, {
@@ -72,7 +79,7 @@ export async function POST(
         "Content-Type": "application/json",
       },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(3000),
+      signal: AbortSignal.timeout(30000),
     });
 
     if (!response.ok) {
@@ -103,7 +110,14 @@ export async function PATCH(
 ) {
   const path = params.path.join("/");
   const url = `${API_BASE_URL}/${path}`;
-  const body = await request.json();
+
+  let body: unknown = {};
+  try {
+    const text = await request.text();
+    if (text.trim()) body = JSON.parse(text);
+  } catch {
+    // no body or invalid JSON — proceed with empty object
+  }
 
   try {
     const response = await fetch(url, {
@@ -112,7 +126,7 @@ export async function PATCH(
         "Content-Type": "application/json",
       },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(3000),
+      signal: AbortSignal.timeout(30000),
     });
 
     if (!response.ok) {
