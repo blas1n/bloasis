@@ -40,6 +40,13 @@ class ServiceConfig(BaseSettings):
     # Cache TTL
     preferences_cache_ttl: int = 3600  # 1 hour (user-specific)
 
+    # Credential encryption key (Fernet)
+    credential_encryption_key: str = ""
+
+    # Executor Service (for broker status check)
+    executor_host: str = "executor"
+    executor_port: int = 50060
+
     # Consul configuration
     consul_host: str = "consul"
     consul_port: int = 8500

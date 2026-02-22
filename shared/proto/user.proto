@@ -66,6 +66,29 @@ service UserService {
       get: "/v1/users/{user_id}/trading/status"
     };
   }
+
+  // ============================================================================
+  // Broker Configuration (Global settings - Phase 1)
+  // ============================================================================
+
+  // GetBrokerConfig retrieves broker credentials (internal only - Executor Service)
+  // No HTTP annotation - internal gRPC only
+  rpc GetBrokerConfig(GetBrokerConfigRequest) returns (GetBrokerConfigResponse);
+
+  // UpdateBrokerConfig saves broker credentials from frontend
+  rpc UpdateBrokerConfig(UpdateBrokerConfigRequest) returns (UpdateBrokerConfigResponse) {
+    option (google.api.http) = {
+      patch: "/v1/settings/broker"
+      body: "*"
+    };
+  }
+
+  // GetBrokerStatus checks broker connection status
+  rpc GetBrokerStatus(GetBrokerStatusRequest) returns (GetBrokerStatusResponse) {
+    option (google.api.http) = {
+      get: "/v1/settings/broker/status"
+    };
+  }
 }
 
 // User represents a user account
@@ -182,4 +205,45 @@ message GetTradingStatusResponse {
   string status = 2;  // "active", "inactive", "soft_stopped", "hard_stopped"
   string last_changed = 3;
   int32 next_poll_ms = 4;  // Client should wait this many ms before next poll (server-directed)
+}
+
+// ============================================================================
+// Broker Configuration Messages (Global settings - Phase 1)
+// ============================================================================
+
+// GetBrokerConfigRequest - internal request from Executor
+message GetBrokerConfigRequest {}
+
+// GetBrokerConfigResponse - decrypted broker credentials
+message GetBrokerConfigResponse {
+  string alpaca_api_key = 1;
+  string alpaca_secret_key = 2;
+  bool paper = 3;
+  bool configured = 4;  // Whether credentials are set
+}
+
+// UpdateBrokerConfigRequest - save broker credentials from frontend
+message UpdateBrokerConfigRequest {
+  string alpaca_api_key = 1;
+  string alpaca_secret_key = 2;
+  bool paper = 3;  // Phase 1: always true
+}
+
+// UpdateBrokerConfigResponse - save result
+message UpdateBrokerConfigResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// GetBrokerStatusRequest - check broker connection
+message GetBrokerStatusRequest {}
+
+// GetBrokerStatusResponse - broker connection status
+message GetBrokerStatusResponse {
+  bool configured = 1;     // Whether credentials are saved
+  bool connected = 2;      // Whether Alpaca API call succeeded
+  reserved 3;              // Removed: account_id (not used in Phase 1)
+  double equity = 4;       // Account equity (if connected)
+  double cash = 5;         // Account cash (if connected)
+  string error_message = 6; // Error details (if not connected)
 }

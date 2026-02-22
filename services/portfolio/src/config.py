@@ -44,6 +44,10 @@ class ServiceConfig(BaseSettings):
     market_data_host: str = "market-data"
     market_data_port: int = 50051
 
+    # Executor Service configuration
+    executor_host: str = "executor"
+    executor_port: int = 50060
+
     # Consul configuration
     consul_host: str = "consul"
     consul_port: int = 8500

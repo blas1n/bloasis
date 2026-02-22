@@ -10,7 +10,7 @@ Implements the UserService gRPC interface with:
 import logging
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 from uuid import uuid4
 
 import grpc
@@ -24,6 +24,10 @@ from .models import (
     preferences_to_cache_dict,
 )
 from .repositories import UserRepository
+from .repositories.broker_config_repository import BrokerConfigRepository
+
+if TYPE_CHECKING:
+    from .clients.executor_client import ExecutorClient
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +93,8 @@ class UserServicer(user_pb2_grpc.UserServiceServicer):
         redis_client: Optional[RedisClient] = None,
         postgres_client: Optional[PostgresClient] = None,
         repository: Optional[UserRepository] = None,
+        broker_config_repository: Optional[BrokerConfigRepository] = None,
+        executor_client: Optional["ExecutorClient"] = None,
         redpanda_client=None,
     ) -> None:
         """
@@ -98,11 +104,15 @@ class UserServicer(user_pb2_grpc.UserServiceServicer):
             redis_client: Redis client for caching.
             postgres_client: PostgreSQL client for persistence.
             repository: Repository for database operations.
+            broker_config_repository: Repository for broker config.
+            executor_client: Executor gRPC client for broker status.
             redpanda_client: Redpanda client for event publishing.
         """
         self.redis = redis_client
         self.postgres = postgres_client
         self.repository = repository or UserRepository(postgres_client)
+        self.broker_config_repo = broker_config_repository or BrokerConfigRepository(postgres_client)
+        self.executor_client = executor_client
         self.redpanda = redpanda_client
 
     async def GetUser(
@@ -138,7 +148,7 @@ class UserServicer(user_pb2_grpc.UserServiceServicer):
         except Exception as e:
             logger.error(f"Failed to get user: {e}")
             context.set_code(grpc.StatusCode.INTERNAL)
-            context.set_details(f"Failed to get user: {str(e)}")
+            context.set_details("Internal error")
             return user_pb2.GetUserResponse()
 
     async def CreateUser(
@@ -204,7 +214,7 @@ class UserServicer(user_pb2_grpc.UserServiceServicer):
         except Exception as e:
             logger.error(f"Failed to create user: {e}")
             context.set_code(grpc.StatusCode.INTERNAL)
-            context.set_details(f"Failed to create user: {str(e)}")
+            context.set_details("Internal error")
             return user_pb2.CreateUserResponse()
 
     async def ValidateCredentials(
@@ -301,7 +311,7 @@ class UserServicer(user_pb2_grpc.UserServiceServicer):
         except Exception as e:
             logger.error(f"Failed to get preferences: {e}")
             context.set_code(grpc.StatusCode.INTERNAL)
-            context.set_details(f"Failed to get preferences: {str(e)}")
+            context.set_details("Internal error")
             return user_pb2.GetPreferencesResponse()
 
     async def UpdateUserPreferences(
@@ -394,7 +404,7 @@ class UserServicer(user_pb2_grpc.UserServiceServicer):
         except Exception as e:
             logger.error(f"Failed to update preferences: {e}")
             context.set_code(grpc.StatusCode.INTERNAL)
-            context.set_details(f"Failed to update preferences: {str(e)}")
+            context.set_details("Internal error")
             return user_pb2.UpdatePreferencesResponse()
 
     async def _invalidate_cache(self, user_id: str) -> None:
@@ -436,6 +446,18 @@ class UserServicer(user_pb2_grpc.UserServiceServicer):
                     timestamp="",
                 )
 
+            # Check broker config is set up before allowing trading
+            if self.broker_config_repo:
+                is_configured = await self.broker_config_repo.is_configured()
+                if not is_configured:
+                    context.set_code(grpc.StatusCode.FAILED_PRECONDITION)
+                    context.set_details("Broker credentials not configured")
+                    return user_pb2.StartTradingResponse(
+                        success=False,
+                        message="Configure Alpaca API keys in Settings before starting trading",
+                        timestamp="",
+                    )
+
             # Update preferences to enable trading
             updated = await self.repository.update_preferences(
                 user_id=user_id,
@@ -476,7 +498,7 @@ class UserServicer(user_pb2_grpc.UserServiceServicer):
         except Exception as e:
             logger.error(f"Failed to start trading: {e}")
             context.set_code(grpc.StatusCode.INTERNAL)
-            context.set_details(f"Failed to start trading: {str(e)}")
+            context.set_details("Internal error")
             return user_pb2.StartTradingResponse(
                 success=False,
                 message="Internal error occurred",
@@ -575,7 +597,7 @@ class UserServicer(user_pb2_grpc.UserServiceServicer):
         except Exception as e:
             logger.error(f"Failed to stop trading: {e}")
             context.set_code(grpc.StatusCode.INTERNAL)
-            context.set_details(f"Failed to stop trading: {str(e)}")
+            context.set_details("Internal error")
             return user_pb2.StopTradingResponse(
                 success=False,
                 message="Internal error occurred",
@@ -626,5 +648,144 @@ class UserServicer(user_pb2_grpc.UserServiceServicer):
         except Exception as e:
             logger.error(f"Failed to get trading status: {e}")
             context.set_code(grpc.StatusCode.INTERNAL)
-            context.set_details(f"Failed to get trading status: {str(e)}")
+            context.set_details("Internal error")
             return user_pb2.GetTradingStatusResponse()
+
+    # ==================== Broker Configuration RPCs ====================
+
+    async def GetBrokerConfig(
+        self,
+        request: user_pb2.GetBrokerConfigRequest,
+        context: grpc.aio.ServicerContext,
+    ) -> user_pb2.GetBrokerConfigResponse:
+        """Get broker credentials (internal only - called by Executor).
+
+        Args:
+            request: Empty request.
+            context: gRPC servicer context.
+
+        Returns:
+            GetBrokerConfigResponse with decrypted credentials.
+        """
+        try:
+            config_data = await self.broker_config_repo.get_all_broker_config()
+            configured = bool(config_data.get("alpaca_api_key"))
+
+            return user_pb2.GetBrokerConfigResponse(
+                alpaca_api_key=config_data.get("alpaca_api_key", ""),
+                alpaca_secret_key=config_data.get("alpaca_secret_key", ""),
+                paper=config_data.get("alpaca_paper", "true").lower() == "true",
+                configured=configured,
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to get broker config: {e}")
+            context.set_code(grpc.StatusCode.INTERNAL)
+            context.set_details("Failed to get broker config")
+            return user_pb2.GetBrokerConfigResponse()
+
+    async def UpdateBrokerConfig(
+        self,
+        request: user_pb2.UpdateBrokerConfigRequest,
+        context: grpc.aio.ServicerContext,
+    ) -> user_pb2.UpdateBrokerConfigResponse:
+        """Save broker credentials from frontend.
+
+        Args:
+            request: Broker config with API keys.
+            context: gRPC servicer context.
+
+        Returns:
+            UpdateBrokerConfigResponse with success status.
+        """
+        try:
+            if not request.alpaca_api_key or not request.alpaca_secret_key:
+                context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
+                context.set_details("Both alpaca_api_key and alpaca_secret_key are required")
+                return user_pb2.UpdateBrokerConfigResponse(
+                    success=False,
+                    message="Both API key and secret key are required",
+                )
+
+            # Store encrypted credentials
+            await self.broker_config_repo.set_config("alpaca_api_key", request.alpaca_api_key)
+            await self.broker_config_repo.set_config("alpaca_secret_key", request.alpaca_secret_key)
+            await self.broker_config_repo.set_config("alpaca_paper", str(request.paper).lower())
+
+            logger.info("Broker configuration updated (key length: %d)", len(request.alpaca_api_key))
+            return user_pb2.UpdateBrokerConfigResponse(
+                success=True,
+                message="Broker configuration saved successfully",
+            )
+
+        except ValueError as e:
+            logger.error(f"Encryption error: {e}")
+            context.set_code(grpc.StatusCode.INTERNAL)
+            context.set_details("Failed to encrypt credentials")
+            return user_pb2.UpdateBrokerConfigResponse(
+                success=False,
+                message="Failed to encrypt credentials - check encryption key",
+            )
+        except Exception as e:
+            logger.error(f"Failed to update broker config: {e}")
+            context.set_code(grpc.StatusCode.INTERNAL)
+            context.set_details("Failed to update broker config")
+            return user_pb2.UpdateBrokerConfigResponse(
+                success=False,
+                message="Internal error",
+            )
+
+    async def GetBrokerStatus(
+        self,
+        request: user_pb2.GetBrokerStatusRequest,
+        context: grpc.aio.ServicerContext,
+    ) -> user_pb2.GetBrokerStatusResponse:
+        """Check broker connection status by calling Executor.GetAccount.
+
+        Args:
+            request: Empty request.
+            context: gRPC servicer context.
+
+        Returns:
+            GetBrokerStatusResponse with connection status.
+        """
+        try:
+            configured = await self.broker_config_repo.is_configured()
+
+            if not configured:
+                return user_pb2.GetBrokerStatusResponse(
+                    configured=False,
+                    connected=False,
+                    error_message="Broker credentials not configured",
+                )
+
+            if not self.executor_client:
+                return user_pb2.GetBrokerStatusResponse(
+                    configured=True,
+                    connected=False,
+                    error_message="Executor service not available",
+                )
+
+            # Test connection via Executor
+            account = await self.executor_client.get_account()
+            return user_pb2.GetBrokerStatusResponse(
+                configured=True,
+                connected=True,
+                equity=float(account.equity),
+                cash=float(account.cash),
+            )
+
+        except grpc.RpcError as e:
+            logger.warning(f"Broker connection check failed: {e.code()} - {e.details()}")
+            return user_pb2.GetBrokerStatusResponse(
+                configured=True,
+                connected=False,
+                error_message="Broker connection failed",
+            )
+        except Exception as e:
+            logger.error(f"Failed to check broker status: {e}")
+            return user_pb2.GetBrokerStatusResponse(
+                configured=await self.broker_config_repo.is_configured(),
+                connected=False,
+                error_message="Internal error",
+            )

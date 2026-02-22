@@ -47,13 +47,9 @@ service PortfolioService {
   }
 
   // RecordTrade records a completed trade for P&L tracking
-  // Called by Executor Service after order fills
-  rpc RecordTrade(RecordTradeRequest) returns (RecordTradeResponse) {
-    option (google.api.http) = {
-      post: "/v1/portfolio/{user_id}/trades"
-      body: "*"
-    };
-  }
+  // Called internally by Portfolio event consumer after order fills
+  // No HTTP annotation - internal gRPC only
+  rpc RecordTrade(RecordTradeRequest) returns (RecordTradeResponse);
 
   // GetTradeHistory returns trade history for a user
   // Supports filtering by symbol and date range

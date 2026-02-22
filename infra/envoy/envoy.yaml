@@ -120,6 +120,12 @@ static_resources:
                             timeout: 15s
 
                         - match:
+                            prefix: "/v1/settings"
+                          route:
+                            cluster: user-service
+                            timeout: 15s
+
+                        - match:
                             prefix: "/v1/classification"
                           route:
                             cluster: classification-service

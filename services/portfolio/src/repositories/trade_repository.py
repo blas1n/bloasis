@@ -6,8 +6,8 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Optional
 
+from shared.utils import PostgresClient
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import Trade, TradeRecord
 
@@ -17,13 +17,13 @@ logger = logging.getLogger(__name__)
 class TradeRepository:
     """Repository for trade data persistence."""
 
-    def __init__(self, session: AsyncSession) -> None:
-        """Initialize repository with database session.
+    def __init__(self, postgres_client: Optional[PostgresClient] = None) -> None:
+        """Initialize repository with PostgreSQL client.
 
         Args:
-            session: SQLAlchemy async session.
+            postgres_client: PostgreSQL client for database operations.
         """
-        self.session = session
+        self.postgres = postgres_client
 
     async def save_trade(
         self,
@@ -55,6 +55,9 @@ class TradeRepository:
         Returns:
             Trade domain object.
         """
+        if not self.postgres:
+            raise ValueError("Database client not available")
+
         if executed_at is None:
             executed_at = datetime.utcnow()
 
@@ -77,12 +80,14 @@ class TradeRepository:
             ai_reason=ai_reason,
         )
 
-        self.session.add(record)
-        await self.session.commit()
-        await self.session.refresh(record)
+        async with self.postgres.get_session() as session:
+            session.add(record)
+            await session.flush()
+            await session.refresh(record)
+            trade = Trade.from_record(record)
 
         logger.info(f"Saved trade: {order_id} {symbol} {action} {quantity}@{price}")
-        return Trade.from_record(record)
+        return trade
 
     async def get_trade_by_order_id(self, order_id: str) -> Optional[Trade]:
         """Get a trade by order ID.
@@ -93,9 +98,13 @@ class TradeRepository:
         Returns:
             Trade if found, None otherwise.
         """
-        stmt = select(TradeRecord).where(TradeRecord.order_id == order_id)
-        result = await self.session.execute(stmt)
-        record = result.scalar_one_or_none()
+        if not self.postgres:
+            return None
+
+        async with self.postgres.get_session() as session:
+            stmt = select(TradeRecord).where(TradeRecord.order_id == order_id)
+            result = await session.execute(stmt)
+            record = result.scalar_one_or_none()
 
         if record is None:
             return None
@@ -122,6 +131,9 @@ class TradeRepository:
         Returns:
             List of Trade domain objects.
         """
+        if not self.postgres:
+            return []
+
         user_uuid = uuid.UUID(user_id) if isinstance(user_id, str) else user_id
         stmt = select(TradeRecord).where(TradeRecord.user_id == user_uuid)
 
@@ -136,8 +148,9 @@ class TradeRepository:
 
         stmt = stmt.order_by(TradeRecord.executed_at.desc()).limit(limit)
 
-        result = await self.session.execute(stmt)
-        records = result.scalars().all()
+        async with self.postgres.get_session() as session:
+            result = await session.execute(stmt)
+            records = result.scalars().all()
 
         return [Trade.from_record(record) for record in records]
 

@@ -6,13 +6,31 @@ import { Badge } from "@/components/ui/Badge";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import { ErrorMessage } from "@/components/ui/ErrorMessage";
 import { formatCurrency, formatPercent } from "@/lib/formatters";
+import type { Position } from "@/lib/types";
 
 interface PositionsListProps {
-  userId: string;
+  userId?: string;
+  /** When provided, the component uses these props instead of fetching via hook. */
+  positions?: Position[];
+  isLoading?: boolean;
+  error?: string | null;
+  onRetry?: () => void;
 }
 
-export function PositionsList({ userId }: PositionsListProps) {
-  const { positions, isLoading, error, refetch } = usePortfolio(userId);
+export function PositionsList({
+  userId,
+  positions: propsPositions,
+  isLoading: propsIsLoading,
+  error: propsError,
+  onRetry: propsOnRetry,
+}: PositionsListProps) {
+  // Always call the hook (Rules of Hooks), but skip fetch when props are provided
+  const hook = usePortfolio(propsPositions !== undefined ? "" : userId || "");
+
+  const positions = propsPositions !== undefined ? propsPositions : hook.positions;
+  const isLoading = propsIsLoading !== undefined ? propsIsLoading : hook.isLoading;
+  const error = propsError !== undefined ? propsError : hook.error;
+  const onRetry = propsOnRetry || hook.refetch;
 
   if (isLoading) {
     return (
@@ -23,7 +41,7 @@ export function PositionsList({ userId }: PositionsListProps) {
   }
 
   if (error) {
-    return <ErrorMessage error={error} onRetry={refetch} />;
+    return <ErrorMessage error={error} onRetry={onRetry} />;
   }
 
   if (!positions || positions.length === 0) {

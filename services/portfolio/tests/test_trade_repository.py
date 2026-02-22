@@ -1,6 +1,7 @@
 """Tests for TradeRepository."""
 
 import uuid
+from contextlib import asynccontextmanager
 from datetime import datetime
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock
@@ -9,6 +10,18 @@ import pytest
 
 from src.models import Trade, TradeRecord
 from src.repositories.trade_repository import TradeRepository
+
+
+def _make_mock_postgres(mock_session):
+    """Create a mock PostgresClient that yields mock_session from get_session()."""
+    mock_postgres = MagicMock()
+
+    @asynccontextmanager
+    async def fake_get_session():
+        yield mock_session
+
+    mock_postgres.get_session = fake_get_session
+    return mock_postgres
 
 
 class TestTradeRepository:
@@ -21,9 +34,14 @@ class TestTradeRepository:
         return session
 
     @pytest.fixture
-    def repository(self, mock_session):
-        """Create a TradeRepository with mock session."""
-        return TradeRepository(mock_session)
+    def mock_postgres(self, mock_session):
+        """Create a mock PostgresClient."""
+        return _make_mock_postgres(mock_session)
+
+    @pytest.fixture
+    def repository(self, mock_postgres):
+        """Create a TradeRepository with mock postgres client."""
+        return TradeRepository(mock_postgres)
 
     @pytest.fixture
     def sample_trade_record(self):
@@ -53,7 +71,7 @@ class TestTradeRepository:
         price = Decimal("150.00")
 
         mock_session.add = MagicMock()
-        mock_session.commit = AsyncMock()
+        mock_session.flush = AsyncMock()
         mock_session.refresh = AsyncMock()
 
         await repository.save_trade(
@@ -66,7 +84,7 @@ class TestTradeRepository:
         )
 
         mock_session.add.assert_called_once()
-        mock_session.commit.assert_awaited_once()
+        mock_session.flush.assert_awaited_once()
         mock_session.refresh.assert_awaited_once()
 
     @pytest.mark.asyncio
@@ -75,7 +93,7 @@ class TestTradeRepository:
         user_id = str(uuid.uuid4())
 
         mock_session.add = MagicMock()
-        mock_session.commit = AsyncMock()
+        mock_session.flush = AsyncMock()
         mock_session.refresh = AsyncMock()
 
         await repository.save_trade(
@@ -91,6 +109,21 @@ class TestTradeRepository:
         )
 
         mock_session.add.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_save_trade_no_postgres(self):
+        """Test saving a trade without postgres client raises error."""
+        repo = TradeRepository(None)
+
+        with pytest.raises(ValueError, match="Database client not available"):
+            await repo.save_trade(
+                user_id=str(uuid.uuid4()),
+                order_id="order-123",
+                symbol="AAPL",
+                side="buy",
+                qty=Decimal("10"),
+                price=Decimal("150.00"),
+            )
 
     @pytest.mark.asyncio
     async def test_get_trade_by_order_id_found(self, repository, mock_session, sample_trade_record):
@@ -114,6 +147,13 @@ class TestTradeRepository:
 
         trade = await repository.get_trade_by_order_id("nonexistent")
 
+        assert trade is None
+
+    @pytest.mark.asyncio
+    async def test_get_trade_by_order_id_no_postgres(self):
+        """Test getting a trade without postgres client returns None."""
+        repo = TradeRepository(None)
+        trade = await repo.get_trade_by_order_id("order-123")
         assert trade is None
 
     @pytest.mark.asyncio
@@ -181,6 +221,13 @@ class TestTradeRepository:
         trades = await repository.get_trades(user_id)
 
         assert len(trades) == 0
+
+    @pytest.mark.asyncio
+    async def test_get_trades_no_postgres(self):
+        """Test getting trades without postgres client returns empty list."""
+        repo = TradeRepository(None)
+        trades = await repo.get_trades(str(uuid.uuid4()))
+        assert trades == []
 
     @pytest.mark.asyncio
     async def test_get_realized_pnl(self, repository, mock_session):

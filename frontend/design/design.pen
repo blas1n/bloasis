@@ -4860,6 +4860,1220 @@
         }
       ]
     }
+    ,
+    {
+      "type": "frame",
+      "id": "BkCfg",
+      "x": 50,
+      "y": 2100,
+      "name": "BLOASIS/Settings Card",
+      "reusable": true,
+      "width": 600,
+      "fill": "#1A2332",
+      "cornerRadius": 12,
+      "stroke": {
+        "thickness": 1,
+        "fill": "#2D3748"
+      },
+      "layout": "vertical",
+      "gap": 24,
+      "padding": 28,
+      "children": [
+        {
+          "type": "text",
+          "id": "SC001",
+          "name": "Title",
+          "fill": "#FFFFFF",
+          "content": "Broker Configuration",
+          "fontFamily": "Inter",
+          "fontSize": 18,
+          "fontWeight": "600"
+        },
+        {
+          "type": "text",
+          "id": "SC002",
+          "name": "Description",
+          "fill": "#6B7789",
+          "content": "Connect your Alpaca account for paper trading",
+          "fontFamily": "Inter",
+          "fontSize": 14,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "frame",
+          "id": "SC003",
+          "name": "API Key Field",
+          "width": "fill_container",
+          "layout": "vertical",
+          "gap": 8,
+          "children": [
+            {
+              "type": "text",
+              "id": "SC004",
+              "name": "Label",
+              "fill": "#B8C5D0",
+              "content": "API Key",
+              "fontFamily": "Inter",
+              "fontSize": 13,
+              "fontWeight": "500"
+            },
+            {
+              "type": "frame",
+              "id": "SC005",
+              "name": "Input",
+              "width": "fill_container",
+              "height": 42,
+              "fill": "#0F1923",
+              "cornerRadius": 8,
+              "stroke": {
+                "thickness": 1,
+                "fill": "#2D3748"
+              },
+              "padding": [
+                0,
+                14
+              ],
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "SC006",
+                  "name": "Placeholder",
+                  "fill": "#4A5568",
+                  "content": "PK••••••••••••••",
+                  "fontFamily": "JetBrains Mono",
+                  "fontSize": 14,
+                  "fontWeight": "normal"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "SC007",
+          "name": "Secret Key Field",
+          "width": "fill_container",
+          "layout": "vertical",
+          "gap": 8,
+          "children": [
+            {
+              "type": "text",
+              "id": "SC008",
+              "name": "Label",
+              "fill": "#B8C5D0",
+              "content": "Secret Key",
+              "fontFamily": "Inter",
+              "fontSize": 13,
+              "fontWeight": "500"
+            },
+            {
+              "type": "frame",
+              "id": "SC009",
+              "name": "Input",
+              "width": "fill_container",
+              "height": 42,
+              "fill": "#0F1923",
+              "cornerRadius": 8,
+              "stroke": {
+                "thickness": 1,
+                "fill": "#2D3748"
+              },
+              "padding": [
+                0,
+                14
+              ],
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "SC010",
+                  "name": "Placeholder",
+                  "fill": "#4A5568",
+                  "content": "••••••••••••••••••••",
+                  "fontFamily": "JetBrains Mono",
+                  "fontSize": 14,
+                  "fontWeight": "normal"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "SC011",
+          "name": "Paper Trading Toggle",
+          "width": "fill_container",
+          "gap": 12,
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "frame",
+              "id": "SC012",
+              "name": "Toggle",
+              "width": 44,
+              "height": 24,
+              "fill": "#00D9FF",
+              "cornerRadius": 12,
+              "padding": [
+                2,
+                2
+              ],
+              "justifyContent": "end",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "SC013",
+                  "name": "Knob",
+                  "width": 20,
+                  "height": 20,
+                  "fill": "#FFFFFF",
+                  "cornerRadius": 10
+                }
+              ]
+            },
+            {
+              "type": "text",
+              "id": "SC014",
+              "name": "Label",
+              "fill": "#B8C5D0",
+              "content": "Paper Trading (recommended)",
+              "fontFamily": "Inter",
+              "fontSize": 14,
+              "fontWeight": "500"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "SC015",
+          "name": "Buttons Row",
+          "width": "fill_container",
+          "gap": 12,
+          "children": [
+            {
+              "type": "frame",
+              "id": "SC016",
+              "name": "Save Button",
+              "fill": "#00D9FF",
+              "cornerRadius": 8,
+              "padding": [
+                12,
+                24
+              ],
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "SC017",
+                  "name": "Label",
+                  "fill": "#0A1628",
+                  "content": "Save Credentials",
+                  "fontFamily": "Inter",
+                  "fontSize": 14,
+                  "fontWeight": "600"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "SC018",
+              "name": "Test Button",
+              "fill": "transparent",
+              "cornerRadius": 8,
+              "stroke": {
+                "thickness": 1,
+                "fill": "#2D3748"
+              },
+              "padding": [
+                12,
+                24
+              ],
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "SC019",
+                  "name": "Label",
+                  "fill": "#B8C5D0",
+                  "content": "Test Connection",
+                  "fontFamily": "Inter",
+                  "fontSize": 14,
+                  "fontWeight": "500"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "StCon",
+      "x": 700,
+      "y": 2100,
+      "name": "BLOASIS/Connection Status Card",
+      "reusable": true,
+      "width": 400,
+      "fill": "#1A2332",
+      "cornerRadius": 12,
+      "stroke": {
+        "thickness": 1,
+        "fill": "#2D3748"
+      },
+      "layout": "vertical",
+      "gap": 20,
+      "padding": 28,
+      "children": [
+        {
+          "type": "text",
+          "id": "CS001",
+          "name": "Title",
+          "fill": "#FFFFFF",
+          "content": "Connection Status",
+          "fontFamily": "Inter",
+          "fontSize": 16,
+          "fontWeight": "600"
+        },
+        {
+          "type": "frame",
+          "id": "CS002",
+          "name": "Status Row",
+          "width": "fill_container",
+          "gap": 8,
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "frame",
+              "id": "CS003",
+              "name": "Status Dot",
+              "width": 12,
+              "height": 12,
+              "fill": "#00E676",
+              "cornerRadius": 6
+            },
+            {
+              "type": "text",
+              "id": "CS004",
+              "name": "Status Text",
+              "fill": "#00E676",
+              "content": "Connected to Alpaca",
+              "fontFamily": "Inter",
+              "fontSize": 14,
+              "fontWeight": "600"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "CS005",
+          "name": "Equity Row",
+          "width": "fill_container",
+          "justifyContent": "space_between",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "CS006",
+              "name": "Label",
+              "fill": "#6B7789",
+              "content": "Equity",
+              "fontFamily": "Inter",
+              "fontSize": 13,
+              "fontWeight": "500"
+            },
+            {
+              "type": "text",
+              "id": "CS007",
+              "name": "Value",
+              "fill": "#FFFFFF",
+              "content": "$100,000.00",
+              "fontFamily": "JetBrains Mono",
+              "fontSize": 16,
+              "fontWeight": "600"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "CS008",
+          "name": "Cash Row",
+          "width": "fill_container",
+          "justifyContent": "space_between",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "CS009",
+              "name": "Label",
+              "fill": "#6B7789",
+              "content": "Cash",
+              "fontFamily": "Inter",
+              "fontSize": 13,
+              "fontWeight": "500"
+            },
+            {
+              "type": "text",
+              "id": "CS010",
+              "name": "Value",
+              "fill": "#FFFFFF",
+              "content": "$50,000.00",
+              "fontFamily": "JetBrains Mono",
+              "fontSize": 16,
+              "fontWeight": "600"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "CS011",
+          "name": "Mode Badge",
+          "fill": "rgba(0, 217, 255, 0.1)",
+          "cornerRadius": 8,
+          "padding": [
+            6,
+            12
+          ],
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "CS012",
+              "name": "Label",
+              "fill": "#00D9FF",
+              "content": "Paper Trading",
+              "fontFamily": "Inter",
+              "fontSize": 12,
+              "fontWeight": "600"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "StPgS",
+      "x": 4660,
+      "y": 2260,
+      "name": "BLOASIS/Settings (Simple)",
+      "reusable": true,
+      "width": 1440,
+      "height": 900,
+      "fill": "#0A1628",
+      "layout": "vertical",
+      "children": [
+        {
+          "type": "frame",
+          "id": "SH001",
+          "name": "Header",
+          "width": "fill_container",
+          "height": 64,
+          "fill": "#1A2332",
+          "stroke": {
+            "thickness": {
+              "bottom": 1
+            },
+            "fill": "#2D3748"
+          },
+          "padding": [
+            0,
+            24
+          ],
+          "justifyContent": "space_between",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "frame",
+              "id": "SH002",
+              "name": "Left",
+              "gap": 16,
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "SH003",
+                  "name": "Logo",
+                  "width": 32,
+                  "height": 32,
+                  "fill": "#00D9FF",
+                  "cornerRadius": 6,
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "SH004",
+                      "name": "Text",
+                      "fill": "#0A1628",
+                      "content": "B",
+                      "fontFamily": "Inter",
+                      "fontSize": 18,
+                      "fontWeight": "700"
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "id": "SH005",
+                  "name": "Title",
+                  "fill": "#FFFFFF",
+                  "content": "BLOASIS",
+                  "fontFamily": "Inter",
+                  "fontSize": 20,
+                  "fontWeight": "700"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "SB001",
+          "name": "Body Container",
+          "width": "fill_container",
+          "height": "fill_container",
+          "children": [
+            {
+              "type": "frame",
+              "id": "SB002",
+              "name": "Sidebar",
+              "width": 180,
+              "height": "fill_container",
+              "fill": "#1A2332",
+              "stroke": {
+                "thickness": {
+                  "right": 1
+                },
+                "fill": "#2D3748"
+              },
+              "layout": "vertical",
+              "gap": 12,
+              "padding": 24,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "SN001",
+                  "name": "Dashboard Nav",
+                  "width": "fill_container",
+                  "cornerRadius": 8,
+                  "gap": 12,
+                  "padding": [
+                    12,
+                    16
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "SN002",
+                      "name": "Icon",
+                      "content": "\ud83d\udcca",
+                      "fontFamily": "Inter",
+                      "fontSize": 16,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "SN003",
+                      "name": "Label",
+                      "fill": "#B8C5D0",
+                      "content": "Dashboard",
+                      "fontFamily": "Inter",
+                      "fontSize": 14,
+                      "fontWeight": "500"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "SN004",
+                  "name": "Portfolio Nav",
+                  "width": "fill_container",
+                  "cornerRadius": 8,
+                  "gap": 12,
+                  "padding": [
+                    12,
+                    16
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "SN005",
+                      "name": "Icon",
+                      "content": "\ud83d\udcbc",
+                      "fontFamily": "Inter",
+                      "fontSize": 16,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "SN006",
+                      "name": "Label",
+                      "fill": "#B8C5D0",
+                      "content": "Portfolio",
+                      "fontFamily": "Inter",
+                      "fontSize": 14,
+                      "fontWeight": "500"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "SN007",
+                  "name": "Trading Nav",
+                  "width": "fill_container",
+                  "cornerRadius": 8,
+                  "gap": 12,
+                  "padding": [
+                    12,
+                    16
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "SN008",
+                      "name": "Icon",
+                      "content": "\u26a1",
+                      "fontFamily": "Inter",
+                      "fontSize": 16,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "SN009",
+                      "name": "Label",
+                      "fill": "#B8C5D0",
+                      "content": "Trading",
+                      "fontFamily": "Inter",
+                      "fontSize": 14,
+                      "fontWeight": "500"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "SN010",
+                  "name": "Settings Nav",
+                  "width": "fill_container",
+                  "fill": "rgba(0, 217, 255, 0.1)",
+                  "cornerRadius": 8,
+                  "gap": 12,
+                  "padding": [
+                    12,
+                    16
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "SN011",
+                      "name": "Icon",
+                      "content": "\u2699\ufe0f",
+                      "fontFamily": "Inter",
+                      "fontSize": 16,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "SN012",
+                      "name": "Label",
+                      "fill": "#00D9FF",
+                      "content": "Settings",
+                      "fontFamily": "Inter",
+                      "fontSize": 14,
+                      "fontWeight": "600"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "SM001",
+              "name": "Main Content",
+              "width": "fill_container",
+              "height": "fill_container",
+              "layout": "vertical",
+              "gap": 32,
+              "padding": 32,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "SM002",
+                  "name": "Page Title",
+                  "fill": "#FFFFFF",
+                  "content": "Settings",
+                  "fontFamily": "Inter",
+                  "fontSize": 24,
+                  "fontWeight": "700"
+                },
+                {
+                  "type": "frame",
+                  "id": "SM003",
+                  "name": "Content Row",
+                  "width": "fill_container",
+                  "gap": 24,
+                  "children": [
+                    {
+                      "id": "SM004",
+                      "type": "ref",
+                      "ref": "BkCfg",
+                      "name": "Broker Config Card",
+                      "width": "fill_container"
+                    },
+                    {
+                      "id": "SM005",
+                      "type": "ref",
+                      "ref": "StCon",
+                      "name": "Connection Status Card",
+                      "width": 400
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "StPgL",
+      "x": 4720,
+      "y": 3260,
+      "name": "BLOASIS/Settings (Light)",
+      "reusable": true,
+      "width": 1440,
+      "height": 900,
+      "fill": "#F0F4F8",
+      "layout": "vertical",
+      "children": [
+        {
+          "type": "frame",
+          "id": "LH001",
+          "name": "Header",
+          "width": "fill_container",
+          "height": 64,
+          "fill": "#FFFFFF",
+          "stroke": {
+            "thickness": {
+              "bottom": 1
+            },
+            "fill": "#CBD5E1"
+          },
+          "padding": [
+            0,
+            24
+          ],
+          "justifyContent": "space_between",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "frame",
+              "id": "LH002",
+              "name": "Left",
+              "gap": 16,
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "LH003",
+                  "name": "Logo",
+                  "width": 32,
+                  "height": 32,
+                  "fill": "#0891B2",
+                  "cornerRadius": 6,
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "LH004",
+                      "name": "Text",
+                      "fill": "#FFFFFF",
+                      "content": "B",
+                      "fontFamily": "Inter",
+                      "fontSize": 18,
+                      "fontWeight": "700"
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "id": "LH005",
+                  "name": "Title",
+                  "fill": "#0F172A",
+                  "content": "BLOASIS",
+                  "fontFamily": "Inter",
+                  "fontSize": 20,
+                  "fontWeight": "700"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "LH006",
+              "name": "Right",
+              "gap": 12,
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "LH007",
+                  "name": "Page Label",
+                  "fill": "#475569",
+                  "content": "Settings",
+                  "fontFamily": "Inter",
+                  "fontSize": 14,
+                  "fontWeight": "500"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "LB001",
+          "name": "Body Container",
+          "width": "fill_container",
+          "height": "fill_container",
+          "children": [
+            {
+              "type": "frame",
+              "id": "LB002",
+              "name": "Sidebar",
+              "width": 200,
+              "height": "fill_container",
+              "fill": "#FFFFFF",
+              "stroke": {
+                "thickness": {
+                  "right": 1
+                },
+                "fill": "#CBD5E1"
+              },
+              "layout": "vertical",
+              "gap": 4,
+              "padding": [
+                16,
+                12
+              ],
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "LN001",
+                  "name": "Dashboard Nav",
+                  "width": "fill_container",
+                  "cornerRadius": 8,
+                  "gap": 12,
+                  "padding": [
+                    10,
+                    14
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "LN002",
+                      "name": "Icon",
+                      "content": "\ud83d\udcca",
+                      "fontFamily": "Inter",
+                      "fontSize": 16,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "LN003",
+                      "name": "Label",
+                      "fill": "#475569",
+                      "content": "Dashboard",
+                      "fontFamily": "Inter",
+                      "fontSize": 14,
+                      "fontWeight": "500"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "LN004",
+                  "name": "Portfolio Nav",
+                  "width": "fill_container",
+                  "cornerRadius": 8,
+                  "gap": 12,
+                  "padding": [
+                    10,
+                    14
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "LN005",
+                      "name": "Icon",
+                      "content": "\ud83d\udcbc",
+                      "fontFamily": "Inter",
+                      "fontSize": 16,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "LN006",
+                      "name": "Label",
+                      "fill": "#475569",
+                      "content": "Portfolio",
+                      "fontFamily": "Inter",
+                      "fontSize": 14,
+                      "fontWeight": "500"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "LN007",
+                  "name": "Trading Nav",
+                  "width": "fill_container",
+                  "cornerRadius": 8,
+                  "gap": 12,
+                  "padding": [
+                    10,
+                    14
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "LN008",
+                      "name": "Icon",
+                      "content": "\u26a1",
+                      "fontFamily": "Inter",
+                      "fontSize": 16,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "LN009",
+                      "name": "Label",
+                      "fill": "#475569",
+                      "content": "Trading",
+                      "fontFamily": "Inter",
+                      "fontSize": 14,
+                      "fontWeight": "500"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "LN010",
+                  "name": "Settings Nav",
+                  "width": "fill_container",
+                  "fill": "rgba(8, 145, 178, 0.12)",
+                  "cornerRadius": 8,
+                  "gap": 12,
+                  "padding": [
+                    10,
+                    14
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "LN011",
+                      "name": "Icon",
+                      "content": "\u2699\ufe0f",
+                      "fontFamily": "Inter",
+                      "fontSize": 16,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "LN012",
+                      "name": "Label",
+                      "fill": "#0891B2",
+                      "content": "Settings",
+                      "fontFamily": "Inter",
+                      "fontSize": 14,
+                      "fontWeight": "600"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "LM001",
+              "name": "Main Content",
+              "width": "fill_container",
+              "height": "fill_container",
+              "layout": "vertical",
+              "gap": 24,
+              "padding": 32,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "LM002",
+                  "name": "Page Title",
+                  "fill": "#0F172A",
+                  "content": "Settings",
+                  "fontFamily": "Inter",
+                  "fontSize": 24,
+                  "fontWeight": "700"
+                },
+                {
+                  "type": "frame",
+                  "id": "LM003",
+                  "name": "Broker Config Card",
+                  "width": "fill_container",
+                  "fill": "#FFFFFF",
+                  "cornerRadius": 12,
+                  "stroke": {
+                    "thickness": 1,
+                    "fill": "#CBD5E1"
+                  },
+                  "layout": "vertical",
+                  "gap": 20,
+                  "padding": 24,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "LM004",
+                      "name": "Title",
+                      "fill": "#0F172A",
+                      "content": "Broker Configuration",
+                      "fontFamily": "Inter",
+                      "fontSize": 18,
+                      "fontWeight": "600"
+                    },
+                    {
+                      "type": "text",
+                      "id": "LM005",
+                      "name": "Description",
+                      "fill": "#475569",
+                      "content": "Connect your Alpaca account for paper trading",
+                      "fontFamily": "Inter",
+                      "fontSize": 14,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "LM006",
+                      "name": "Fields Row",
+                      "width": "fill_container",
+                      "gap": 16,
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "LM007",
+                          "name": "API Key Field",
+                          "width": "fill_container",
+                          "layout": "vertical",
+                          "gap": 6,
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "LM008",
+                              "name": "Label",
+                              "fill": "#374151",
+                              "content": "API Key",
+                              "fontFamily": "Inter",
+                              "fontSize": 13,
+                              "fontWeight": "500"
+                            },
+                            {
+                              "type": "frame",
+                              "id": "LM009",
+                              "name": "Input",
+                              "width": "fill_container",
+                              "height": 40,
+                              "fill": "#F8FAFC",
+                              "cornerRadius": 8,
+                              "stroke": {
+                                "thickness": 1,
+                                "fill": "#CBD5E1"
+                              },
+                              "padding": [
+                                0,
+                                12
+                              ],
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "LM010",
+                                  "name": "Placeholder",
+                                  "fill": "#94A3B8",
+                                  "content": "PK...",
+                                  "fontFamily": "JetBrains Mono",
+                                  "fontSize": 14,
+                                  "fontWeight": "normal"
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "LM011",
+                          "name": "Secret Key Field",
+                          "width": "fill_container",
+                          "layout": "vertical",
+                          "gap": 6,
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "LM012",
+                              "name": "Label",
+                              "fill": "#374151",
+                              "content": "Secret Key",
+                              "fontFamily": "Inter",
+                              "fontSize": 13,
+                              "fontWeight": "500"
+                            },
+                            {
+                              "type": "frame",
+                              "id": "LM013",
+                              "name": "Input",
+                              "width": "fill_container",
+                              "height": 40,
+                              "fill": "#F8FAFC",
+                              "cornerRadius": 8,
+                              "stroke": {
+                                "thickness": 1,
+                                "fill": "#CBD5E1"
+                              },
+                              "padding": [
+                                0,
+                                12
+                              ],
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "LM014",
+                                  "name": "Placeholder",
+                                  "fill": "#94A3B8",
+                                  "content": "••••••••••",
+                                  "fontFamily": "JetBrains Mono",
+                                  "fontSize": 14,
+                                  "fontWeight": "normal"
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "LM015",
+                      "name": "Actions Row",
+                      "width": "fill_container",
+                      "justifyContent": "space_between",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "LM016",
+                          "name": "Buttons",
+                          "gap": 12,
+                          "children": [
+                            {
+                              "type": "frame",
+                              "id": "LM017",
+                              "name": "Save Button",
+                              "fill": "#0891B2",
+                              "cornerRadius": 8,
+                              "padding": [
+                                10,
+                                20
+                              ],
+                              "justifyContent": "center",
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "LM018",
+                                  "name": "Label",
+                                  "fill": "#FFFFFF",
+                                  "content": "Save Credentials",
+                                  "fontFamily": "Inter",
+                                  "fontSize": 14,
+                                  "fontWeight": "600"
+                                }
+                              ]
+                            },
+                            {
+                              "type": "frame",
+                              "id": "LM019",
+                              "name": "Test Button",
+                              "fill": "transparent",
+                              "cornerRadius": 8,
+                              "stroke": {
+                                "thickness": 1,
+                                "fill": "#CBD5E1"
+                              },
+                              "padding": [
+                                10,
+                                20
+                              ],
+                              "justifyContent": "center",
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "LM020",
+                                  "name": "Label",
+                                  "fill": "#475569",
+                                  "content": "Test Connection",
+                                  "fontFamily": "Inter",
+                                  "fontSize": 14,
+                                  "fontWeight": "500"
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "LM021",
+                          "name": "Status Badge",
+                          "gap": 8,
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "frame",
+                              "id": "LM022",
+                              "name": "Dot",
+                              "width": 10,
+                              "height": 10,
+                              "fill": "#059669",
+                              "cornerRadius": 5
+                            },
+                            {
+                              "type": "text",
+                              "id": "LM023",
+                              "name": "Text",
+                              "fill": "#059669",
+                              "content": "Connected",
+                              "fontFamily": "Inter",
+                              "fontSize": 13,
+                              "fontWeight": "600"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
   ],
   "variables": {
     "bg-base-dark": {

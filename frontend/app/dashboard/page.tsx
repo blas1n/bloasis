@@ -9,14 +9,14 @@ import { formatCurrency, formatPercent } from "@/lib/formatters";
 
 export default function DashboardPage() {
   const userId = "00000000-0000-0000-0000-000000000001";
-  const { summary } = usePortfolio(userId);
+  const { summary, isLoading, error, refetch } = usePortfolio(userId);
 
   return (
     <div className="p-8 space-y-8">
       {/* Row 1: Market Regime + Portfolio Summary */}
       <div className="grid grid-cols-1 lg:grid-cols-[480px_1fr] gap-6">
         <MarketRegime />
-        <PortfolioSummary userId={userId} variant="dashboard" />
+        <PortfolioSummary summary={summary} isLoading={isLoading} error={error} onRetry={refetch} variant="dashboard" />
       </div>
 
       {/* Row 2: AI Trading Control */}

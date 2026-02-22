@@ -158,6 +158,34 @@ export interface TradingControlResponse {
 // User Preferences Extension
 // ============================================================================
 
+// ============================================================================
+// Broker Config Types
+// ============================================================================
+
+export interface BrokerConfig {
+  apiKey: string;
+  secretKey: string;
+  paper: boolean;
+}
+
+export interface BrokerStatus {
+  configured: boolean;
+  connected: boolean;
+  equity: number;
+  cash: number;
+  errorMessage: string;
+}
+
+export interface SyncResponse {
+  success: boolean;
+  positionsSynced: number;
+  errorMessage: string;
+}
+
+// ============================================================================
+// User Preferences Extension
+// ============================================================================
+
 export type RiskProfile = "conservative" | "moderate" | "aggressive";
 
 export interface UserPreferences {

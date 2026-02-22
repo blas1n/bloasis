@@ -1932,20 +1932,40 @@ class TestSyncWithAlpaca:
         """Create mock Repository."""
         mock = AsyncMock()
         mock.get_position_by_symbol = AsyncMock(return_value=None)
+        mock.get_position_domain_objects = AsyncMock(return_value=[])
         mock.create_position = AsyncMock()
         mock.update_position = AsyncMock()
+        mock.update_cash_balance = AsyncMock()
+        mock.delete_position = AsyncMock()
         return mock
 
     @pytest.fixture
-    def mock_alpaca_client(self) -> AsyncMock:
-        """Create mock Alpaca client."""
+    def mock_executor_client(self) -> AsyncMock:
+        """Create mock Executor client."""
+        from src.clients.executor_client import AlpacaAccountData, AlpacaPositionData
+
         mock = AsyncMock()
-        position = MagicMock()
-        position.symbol = "AAPL"
-        position.qty = "10"
-        position.avg_entry_price = "150.00"
-        position.current_price = "175.00"
-        mock.get_positions = AsyncMock(return_value=[position])
+        mock.get_positions = AsyncMock(
+            return_value=[
+                AlpacaPositionData(
+                    symbol="AAPL",
+                    qty=Decimal("10"),
+                    avg_entry_price=Decimal("150.00"),
+                    current_price=Decimal("175.00"),
+                    market_value=Decimal("1750.00"),
+                    unrealized_pl=Decimal("250.00"),
+                    side="long",
+                )
+            ]
+        )
+        mock.get_account = AsyncMock(
+            return_value=AlpacaAccountData(
+                cash=Decimal("50000.00"),
+                buying_power=Decimal("100000.00"),
+                portfolio_value=Decimal("51750.00"),
+                equity=Decimal("51750.00"),
+            )
+        )
         return mock
 
     @pytest.fixture
@@ -1962,10 +1982,10 @@ class TestSyncWithAlpaca:
         mock_redis: AsyncMock,
         mock_postgres: MagicMock,
         mock_repository: AsyncMock,
-        mock_alpaca_client: AsyncMock,
+        mock_executor_client: AsyncMock,
         mock_context: MagicMock,
     ) -> None:
-        """Should sync positions from Alpaca."""
+        """Should sync positions and cash from Alpaca via Executor."""
         from shared.generated import portfolio_pb2
 
         from src.service import PortfolioServicer
@@ -1974,7 +1994,7 @@ class TestSyncWithAlpaca:
             redis_client=mock_redis,
             postgres_client=mock_postgres,
             repository=mock_repository,
-            alpaca_client=mock_alpaca_client,
+            executor_client=mock_executor_client,
         )
 
         request = portfolio_pb2.SyncWithAlpacaRequest(user_id="user123")
@@ -1982,7 +2002,9 @@ class TestSyncWithAlpaca:
 
         assert response.success is True
         assert response.positions_synced == 1
-        mock_alpaca_client.get_positions.assert_called_once()
+        mock_executor_client.get_positions.assert_called_once_with("user123")
+        mock_executor_client.get_account.assert_called_once_with("user123")
+        mock_repository.update_cash_balance.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_sync_with_alpaca_no_client(
@@ -1992,7 +2014,7 @@ class TestSyncWithAlpaca:
         mock_repository: AsyncMock,
         mock_context: MagicMock,
     ) -> None:
-        """Should return error when Alpaca client not configured."""
+        """Should return error when Executor client not configured."""
         from shared.generated import portfolio_pb2
 
         from src.service import PortfolioServicer
@@ -2001,7 +2023,7 @@ class TestSyncWithAlpaca:
             redis_client=mock_redis,
             postgres_client=mock_postgres,
             repository=mock_repository,
-            alpaca_client=None,
+            executor_client=None,
         )
 
         request = portfolio_pb2.SyncWithAlpacaRequest(user_id="user123")
@@ -2016,7 +2038,7 @@ class TestSyncWithAlpaca:
         mock_redis: AsyncMock,
         mock_postgres: MagicMock,
         mock_repository: AsyncMock,
-        mock_alpaca_client: AsyncMock,
+        mock_executor_client: AsyncMock,
         mock_context: MagicMock,
     ) -> None:
         """Should return error when user_id is missing."""
@@ -2028,7 +2050,7 @@ class TestSyncWithAlpaca:
             redis_client=mock_redis,
             postgres_client=mock_postgres,
             repository=mock_repository,
-            alpaca_client=mock_alpaca_client,
+            executor_client=mock_executor_client,
         )
 
         request = portfolio_pb2.SyncWithAlpacaRequest(user_id="")
@@ -2042,7 +2064,7 @@ class TestSyncWithAlpaca:
         mock_redis: AsyncMock,
         mock_postgres: MagicMock,
         mock_repository: AsyncMock,
-        mock_alpaca_client: AsyncMock,
+        mock_executor_client: AsyncMock,
         mock_context: MagicMock,
     ) -> None:
         """Should update existing position during sync."""
@@ -2067,7 +2089,7 @@ class TestSyncWithAlpaca:
             redis_client=mock_redis,
             postgres_client=mock_postgres,
             repository=mock_repository,
-            alpaca_client=mock_alpaca_client,
+            executor_client=mock_executor_client,
         )
 
         request = portfolio_pb2.SyncWithAlpacaRequest(user_id="user123")
@@ -2075,6 +2097,46 @@ class TestSyncWithAlpaca:
 
         assert response.success is True
         mock_repository.update_position.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_sync_deletes_stale_positions(
+        self,
+        mock_redis: AsyncMock,
+        mock_postgres: MagicMock,
+        mock_repository: AsyncMock,
+        mock_executor_client: AsyncMock,
+        mock_context: MagicMock,
+    ) -> None:
+        """Should delete positions that no longer exist in Alpaca."""
+        from shared.generated import portfolio_pb2
+
+        from src.service import PortfolioServicer
+
+        # DB has AAPL (will stay) and TSLA (stale, should be deleted)
+        stale_position = Position(
+            symbol="TSLA",
+            quantity=5,
+            avg_cost=Decimal("200.00"),
+            current_price=Decimal("210.00"),
+            current_value=Decimal("1050.00"),
+            unrealized_pnl=Decimal("50.00"),
+            unrealized_pnl_percent=5.0,
+            currency="USD",
+        )
+        mock_repository.get_position_domain_objects = AsyncMock(return_value=[stale_position])
+
+        servicer = PortfolioServicer(
+            redis_client=mock_redis,
+            postgres_client=mock_postgres,
+            repository=mock_repository,
+            executor_client=mock_executor_client,
+        )
+
+        request = portfolio_pb2.SyncWithAlpacaRequest(user_id="user123")
+        response = await servicer.SyncWithAlpaca(request, mock_context)
+
+        assert response.success is True
+        mock_repository.delete_position.assert_called_once_with("user123", "TSLA")
 
 
 class TestUpdatePositionFromTrade:
@@ -2271,3 +2333,183 @@ class TestUpdatePositionFromTrade:
 
         mock_repository.update_position.assert_not_called()
         mock_repository.delete_position.assert_not_called()
+
+
+class TestHandleOrderFilled:
+    """Tests for _handle_order_filled event handler."""
+
+    @pytest.fixture
+    def mock_redis(self) -> AsyncMock:
+        """Create mock Redis client."""
+        mock = AsyncMock()
+        mock.delete = AsyncMock()
+        return mock
+
+    @pytest.fixture
+    def mock_postgres(self) -> MagicMock:
+        """Create mock PostgreSQL client."""
+        return MagicMock()
+
+    @pytest.fixture
+    def mock_repository(self) -> AsyncMock:
+        """Create mock Repository."""
+        mock = AsyncMock()
+        mock.get_position_by_symbol = AsyncMock(return_value=None)
+        mock.create_position = AsyncMock()
+        mock.update_position = AsyncMock()
+        mock.delete_position = AsyncMock()
+        return mock
+
+    @pytest.fixture
+    def mock_trade_repository(self) -> AsyncMock:
+        """Create mock Trade Repository."""
+        mock = AsyncMock()
+        mock.get_trade_by_order_id = AsyncMock(return_value=None)
+        mock.save_trade = AsyncMock()
+        mock.get_realized_pnl = AsyncMock(return_value=Decimal("0"))
+        return mock
+
+    @pytest.mark.asyncio
+    async def test_handle_buy_fill(
+        self,
+        mock_redis: AsyncMock,
+        mock_postgres: MagicMock,
+        mock_repository: AsyncMock,
+        mock_trade_repository: AsyncMock,
+    ) -> None:
+        """Should create position and record trade on buy fill."""
+        from src.service import PortfolioServicer
+
+        servicer = PortfolioServicer(
+            redis_client=mock_redis,
+            postgres_client=mock_postgres,
+            repository=mock_repository,
+            trade_repository=mock_trade_repository,
+        )
+
+        event = {
+            "event_type": "order_filled",
+            "user_id": "user123",
+            "order_id": "order-abc",
+            "symbol": "AAPL",
+            "side": "buy",
+            "filled_qty": 10,
+            "filled_price": 150.0,
+            "commission": 0.0,
+        }
+
+        await servicer._handle_order_filled(event)
+
+        mock_trade_repository.save_trade.assert_called_once()
+        mock_repository.create_position.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_handle_fill_idempotent(
+        self,
+        mock_redis: AsyncMock,
+        mock_postgres: MagicMock,
+        mock_repository: AsyncMock,
+        mock_trade_repository: AsyncMock,
+    ) -> None:
+        """Should skip already-recorded order fills."""
+        from src.service import PortfolioServicer
+
+        # Simulate existing trade
+        mock_trade_repository.get_trade_by_order_id = AsyncMock(return_value=MagicMock())
+
+        servicer = PortfolioServicer(
+            redis_client=mock_redis,
+            postgres_client=mock_postgres,
+            repository=mock_repository,
+            trade_repository=mock_trade_repository,
+        )
+
+        event = {
+            "event_type": "order_filled",
+            "user_id": "user123",
+            "order_id": "order-abc",
+            "symbol": "AAPL",
+            "side": "buy",
+            "filled_qty": 10,
+            "filled_price": 150.0,
+        }
+
+        await servicer._handle_order_filled(event)
+
+        mock_trade_repository.save_trade.assert_not_called()
+        mock_repository.create_position.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_handle_fill_missing_fields(
+        self,
+        mock_redis: AsyncMock,
+        mock_postgres: MagicMock,
+        mock_repository: AsyncMock,
+        mock_trade_repository: AsyncMock,
+    ) -> None:
+        """Should skip events with missing required fields."""
+        from src.service import PortfolioServicer
+
+        servicer = PortfolioServicer(
+            redis_client=mock_redis,
+            postgres_client=mock_postgres,
+            repository=mock_repository,
+            trade_repository=mock_trade_repository,
+        )
+
+        # Missing order_id
+        await servicer._handle_order_filled({"user_id": "user123"})
+        mock_trade_repository.save_trade.assert_not_called()
+
+        # Missing user_id
+        await servicer._handle_order_filled({"order_id": "order-abc"})
+        mock_trade_repository.save_trade.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_handle_sell_fill_with_pnl(
+        self,
+        mock_redis: AsyncMock,
+        mock_postgres: MagicMock,
+        mock_repository: AsyncMock,
+        mock_trade_repository: AsyncMock,
+    ) -> None:
+        """Should calculate realized P&L for sell fills."""
+        from src.service import PortfolioServicer
+
+        existing_position = Position(
+            symbol="AAPL",
+            quantity=10,
+            avg_cost=Decimal("140.00"),
+            current_price=Decimal("175.00"),
+            current_value=Decimal("1750.00"),
+            unrealized_pnl=Decimal("350.00"),
+            unrealized_pnl_percent=25.0,
+            currency="USD",
+        )
+        mock_repository.get_position_by_symbol = AsyncMock(return_value=existing_position)
+
+        servicer = PortfolioServicer(
+            redis_client=mock_redis,
+            postgres_client=mock_postgres,
+            repository=mock_repository,
+            trade_repository=mock_trade_repository,
+        )
+
+        event = {
+            "event_type": "order_filled",
+            "user_id": "user123",
+            "order_id": "order-sell-1",
+            "symbol": "AAPL",
+            "side": "sell",
+            "filled_qty": 5,
+            "filled_price": 175.0,
+            "commission": 1.0,
+        }
+
+        await servicer._handle_order_filled(event)
+
+        mock_trade_repository.save_trade.assert_called_once()
+        call_kwargs = mock_trade_repository.save_trade.call_args.kwargs
+        assert call_kwargs["side"] == "sell"
+        # Realized P&L should be non-zero for a profitable sell
+        assert call_kwargs["realized_pnl"] != Decimal("0")
