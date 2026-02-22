@@ -1,5 +1,7 @@
 """Tests for Executor Service."""
 
+from unittest.mock import AsyncMock
+
 import pytest
 from shared.generated import executor_pb2
 
@@ -358,3 +360,232 @@ class TestRiskApprovalVerification:
         result = await servicer._verify_risk_approval("approval-123")
 
         assert result is False
+
+
+class TestGetPositions:
+    """Tests for GetPositions RPC."""
+
+    @pytest.fixture
+    def servicer(self, mock_alpaca_client, mock_event_publisher, mock_redis_client):
+        """Create ExecutorServicer with mocks."""
+        return ExecutorServicer(
+            alpaca_client=mock_alpaca_client,
+            event_publisher=mock_event_publisher,
+            redis_client=mock_redis_client,
+        )
+
+    @pytest.mark.asyncio
+    async def test_get_positions_success(self, servicer, mock_grpc_context):
+        """Test successful positions retrieval."""
+        request = executor_pb2.GetPositionsRequest(user_id="test-user")
+
+        response = await servicer.GetPositions(request, mock_grpc_context)
+
+        assert len(response.positions) == 1
+        assert response.positions[0].symbol == "AAPL"
+        assert response.positions[0].qty == 10.0
+        assert response.positions[0].avg_entry_price == 150.0
+        assert response.positions[0].current_price == 175.5
+
+    @pytest.mark.asyncio
+    async def test_get_positions_empty(
+        self, servicer, mock_grpc_context, mock_alpaca_client
+    ):
+        """Test positions retrieval with no positions."""
+        mock_alpaca_client.get_positions.return_value = []
+
+        request = executor_pb2.GetPositionsRequest(user_id="test-user")
+
+        response = await servicer.GetPositions(request, mock_grpc_context)
+
+        assert len(response.positions) == 0
+
+    @pytest.mark.asyncio
+    async def test_get_positions_failure(
+        self, servicer, mock_grpc_context, mock_alpaca_client
+    ):
+        """Test positions retrieval failure."""
+        mock_alpaca_client.get_positions.side_effect = Exception("API error")
+
+        request = executor_pb2.GetPositionsRequest(user_id="test-user")
+
+        await servicer.GetPositions(request, mock_grpc_context)
+
+        mock_grpc_context.abort.assert_called()
+
+
+class TestGetOrderStatusEnsureClient:
+    """Tests that GetOrderStatus calls _ensure_alpaca_client."""
+
+    @pytest.mark.asyncio
+    async def test_get_order_status_calls_ensure(
+        self, mock_event_publisher, mock_redis_client, mock_grpc_context
+    ):
+        """Should call _ensure_alpaca_client before getting order status."""
+        mock_user_client = AsyncMock()
+        from src.clients.user_client import BrokerConfig
+
+        mock_user_client.get_broker_config = AsyncMock(
+            return_value=BrokerConfig(
+                alpaca_api_key="test-key",
+                alpaca_secret_key="test-secret",
+                paper=True,
+                configured=True,
+            )
+        )
+
+        servicer = ExecutorServicer(
+            alpaca_client=None,
+            event_publisher=mock_event_publisher,
+            redis_client=mock_redis_client,
+            user_client=mock_user_client,
+        )
+
+        request = executor_pb2.GetOrderStatusRequest(order_id="order-123")
+        await servicer.GetOrderStatus(request, mock_grpc_context)
+
+        # Verify that _ensure_alpaca_client was called (client was created)
+        assert servicer.alpaca is not None
+        mock_user_client.get_broker_config.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_get_order_status_fails_without_config(
+        self, mock_event_publisher, mock_redis_client, mock_grpc_context
+    ):
+        """Should fail when no alpaca client and no user client."""
+        servicer = ExecutorServicer(
+            alpaca_client=None,
+            event_publisher=mock_event_publisher,
+            redis_client=mock_redis_client,
+            user_client=None,
+        )
+
+        request = executor_pb2.GetOrderStatusRequest(order_id="order-123")
+
+        with pytest.raises(ValueError, match="Alpaca"):
+            await servicer.GetOrderStatus(request, mock_grpc_context)
+
+
+class TestCancelOrderEnsureClient:
+    """Tests that CancelOrder calls _ensure_alpaca_client."""
+
+    @pytest.mark.asyncio
+    async def test_cancel_order_calls_ensure(
+        self, mock_event_publisher, mock_redis_client, mock_grpc_context
+    ):
+        """Should call _ensure_alpaca_client before cancelling order."""
+        mock_user_client = AsyncMock()
+        from src.clients.user_client import BrokerConfig
+
+        mock_user_client.get_broker_config = AsyncMock(
+            return_value=BrokerConfig(
+                alpaca_api_key="test-key",
+                alpaca_secret_key="test-secret",
+                paper=True,
+                configured=True,
+            )
+        )
+
+        servicer = ExecutorServicer(
+            alpaca_client=None,
+            event_publisher=mock_event_publisher,
+            redis_client=mock_redis_client,
+            user_client=mock_user_client,
+        )
+
+        request = executor_pb2.CancelOrderRequest(
+            user_id="test-user",
+            order_id="order-123",
+        )
+        await servicer.CancelOrder(request, mock_grpc_context)
+
+        # Verify that _ensure_alpaca_client was called (client was created)
+        assert servicer.alpaca is not None
+        mock_user_client.get_broker_config.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_cancel_order_fails_without_config(
+        self, mock_event_publisher, mock_redis_client, mock_grpc_context
+    ):
+        """Should fail when no alpaca client and no user client."""
+        servicer = ExecutorServicer(
+            alpaca_client=None,
+            event_publisher=mock_event_publisher,
+            redis_client=mock_redis_client,
+            user_client=None,
+        )
+
+        request = executor_pb2.CancelOrderRequest(
+            user_id="test-user",
+            order_id="order-123",
+        )
+
+        with pytest.raises(ValueError, match="Alpaca"):
+            await servicer.CancelOrder(request, mock_grpc_context)
+
+
+class TestEnsureAlpacaClient:
+    """Tests for _ensure_alpaca_client dynamic config."""
+
+    @pytest.mark.asyncio
+    async def test_ensure_with_existing_client(
+        self, mock_alpaca_client, mock_event_publisher, mock_redis_client
+    ):
+        """Should do nothing when alpaca_client already has valid keys."""
+        mock_alpaca_client.api_key = "test-key"
+        mock_alpaca_client.secret_key = "test-secret"
+
+        servicer = ExecutorServicer(
+            alpaca_client=mock_alpaca_client,
+            event_publisher=mock_event_publisher,
+            redis_client=mock_redis_client,
+        )
+
+        await servicer._ensure_alpaca_client()
+
+        # No error raised, client still set
+        assert servicer.alpaca is mock_alpaca_client
+
+    @pytest.mark.asyncio
+    async def test_ensure_with_user_client(
+        self, mock_event_publisher, mock_redis_client
+    ):
+        """Should fetch config from User Service when no alpaca_client."""
+        mock_user_client = AsyncMock()
+        from src.clients.user_client import BrokerConfig
+
+        mock_user_client.get_broker_config = AsyncMock(
+            return_value=BrokerConfig(
+                alpaca_api_key="test-key",
+                alpaca_secret_key="test-secret",
+                paper=True,
+                configured=True,
+            )
+        )
+
+        servicer = ExecutorServicer(
+            alpaca_client=None,
+            event_publisher=mock_event_publisher,
+            redis_client=mock_redis_client,
+            user_client=mock_user_client,
+        )
+
+        await servicer._ensure_alpaca_client()
+
+        mock_user_client.get_broker_config.assert_called_once()
+        assert servicer.alpaca is not None
+
+    @pytest.mark.asyncio
+    async def test_ensure_no_config_available(
+        self, mock_event_publisher, mock_redis_client
+    ):
+        """Should raise when no client and no user client."""
+        servicer = ExecutorServicer(
+            alpaca_client=None,
+            event_publisher=mock_event_publisher,
+            redis_client=mock_redis_client,
+            user_client=None,
+        )
+
+        with pytest.raises(ValueError, match="Alpaca"):
+            await servicer._ensure_alpaca_client()

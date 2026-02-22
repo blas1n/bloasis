@@ -472,6 +472,11 @@ services:
       CONSUL_HOST: consul
       CONSUL_PORT: "8500"
       DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://postgres:postgres@postgres:5432/bloasis}
+      # Credential encryption for broker API keys
+      CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:-}
+      # Executor Service (for broker status check)
+      EXECUTOR_HOST: executor
+      EXECUTOR_PORT: "50060"
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       LOG_FILE: /logs/user.log
     depends_on:
@@ -576,6 +581,9 @@ services:
       CONSUL_HOST: consul
       CONSUL_PORT: "8500"
       DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://postgres:postgres@postgres:5432/bloasis}
+      # Executor Service (for SyncWithAlpaca)
+      EXECUTOR_HOST: executor
+      EXECUTOR_PORT: "50060"
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       LOG_FILE: /logs/portfolio.log
     depends_on:
@@ -673,10 +681,9 @@ services:
       CONSUL_HOST: consul
       CONSUL_PORT: "8500"
       DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://postgres:postgres@postgres:5432/bloasis}
-      # Alpaca API credentials
-      ALPACA_API_KEY: ${ALPACA_API_KEY:?ALPACA_API_KEY is required}
-      ALPACA_SECRET_KEY: ${ALPACA_SECRET_KEY:?ALPACA_SECRET_KEY is required}
-      ALPACA_PAPER: ${ALPACA_PAPER:-true}
+      # User Service (single source of truth for broker config)
+      USER_SERVICE_HOST: user
+      USER_SERVICE_PORT: "50052"
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       LOG_FILE: /logs/executor.log
     depends_on:
@@ -685,6 +692,8 @@ services:
       redpanda:
         condition: service_healthy
       consul:
+        condition: service_healthy
+      user:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "grpc_health_probe", "-addr=:50060"]

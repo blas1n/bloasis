@@ -17,7 +17,7 @@ class RedisClient:
         self,
         host: str | None = None,
         port: int | None = None,
-        client: redis.Redis | None = None,
+        client: "redis.Redis[str] | None" = None,
     ):
         """Initialize Redis client.
 
@@ -28,7 +28,7 @@ class RedisClient:
         """
         self.host = host or config.redis_host
         self.port = port or config.redis_port
-        self._client = client
+        self._client: redis.Redis[str] | None = client
 
     async def connect(self) -> None:
         """Connect to Redis."""
@@ -138,6 +138,24 @@ class RedisClient:
             raise RuntimeError("Redis client not connected")
 
         return await self._client.expire(key, seconds)
+
+    async def scan(
+        self, cursor: int = 0, match: str | None = None, count: int | None = None
+    ) -> tuple[int, list[str]]:
+        """Incrementally iterate over keys.
+
+        Args:
+            cursor: Cursor position (0 to start)
+            match: Optional glob-style pattern to filter keys
+            count: Hint for number of keys per iteration
+
+        Returns:
+            Tuple of (next_cursor, list_of_keys)
+        """
+        if self._client is None:
+            raise RuntimeError("Redis client not connected")
+
+        return await self._client.scan(cursor=cursor, match=match, count=count)
 
     async def delete(self, key: str) -> int:
         """Delete a key.

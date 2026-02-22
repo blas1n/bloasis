@@ -19,7 +19,9 @@ from shared.utils import (
     setup_logger,
 )
 
+from .clients.executor_client import ExecutorClient
 from .config import config
+from .repositories import TradeRepository
 from .service import PortfolioServicer
 
 logger = setup_logger(__name__)
@@ -28,11 +30,12 @@ logger = setup_logger(__name__)
 redis_client: Optional[RedisClient] = None
 postgres_client: Optional[PostgresClient] = None
 consul_client: Optional[ConsulClient] = None
+executor_client: Optional[ExecutorClient] = None
 
 
 async def serve() -> None:
     """Start and run the gRPC server."""
-    global redis_client, postgres_client, consul_client
+    global redis_client, postgres_client, consul_client, executor_client
 
     logger.info(f"Starting {config.service_name} service...")
 
@@ -44,6 +47,15 @@ async def serve() -> None:
     postgres_client = PostgresClient()
     await postgres_client.connect()
     logger.info("PostgreSQL client connected")
+
+    # Initialize Executor client for Alpaca operations
+    executor_client = ExecutorClient()
+    try:
+        await executor_client.connect()
+        logger.info("Executor client connected")
+    except Exception as e:
+        logger.warning(f"Executor client connection failed (non-fatal): {e}")
+        executor_client = None
 
     # Initialize Consul client if enabled
     if config.consul_enabled:
@@ -66,6 +78,9 @@ async def serve() -> None:
                 "Consul service registration failed - service will continue without Consul"
             )
 
+    # Initialize repositories
+    trade_repository = TradeRepository(postgres_client)
+
     # Create gRPC server
     server = grpc.aio.server()
 
@@ -73,8 +88,17 @@ async def serve() -> None:
     servicer = PortfolioServicer(
         redis_client=redis_client,
         postgres_client=postgres_client,
+        trade_repository=trade_repository,
+        executor_client=executor_client,
     )
     portfolio_pb2_grpc.add_PortfolioServiceServicer_to_server(servicer, server)
+
+    # Start order fill event consumer
+    try:
+        await servicer.start_order_fill_consumer(config.redpanda_brokers)
+        logger.info("Order fill consumer started")
+    except Exception as e:
+        logger.warning(f"Order fill consumer failed to start (non-fatal): {e}")
 
     # Add health check service
     health_servicer = health.HealthServicer()
@@ -93,11 +117,18 @@ async def serve() -> None:
     # Handle shutdown
     async def shutdown() -> None:
         logger.info("Shutting down...")
+        # Stop event consumer
+        if servicer:
+            await servicer.stop_order_fill_consumer()
+            logger.info("Order fill consumer stopped")
         # Deregister from Consul first (so traffic stops coming)
         if consul_client:
             await consul_client.deregister_all()
             logger.info("Consul services deregistered")
         await server.stop(grace=5)
+        if executor_client:
+            await executor_client.close()
+            logger.info("Executor client disconnected")
         if postgres_client:
             await postgres_client.close()
             logger.info("PostgreSQL client disconnected")

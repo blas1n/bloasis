@@ -16,6 +16,7 @@ class EventPublisher:
 
     TOPIC_ORDER_EXECUTED = "order-executed"
     TOPIC_ORDER_CANCELLED = "order-cancelled"
+    TOPIC_ORDER_FILLED = "order-filled"
 
     def __init__(self, producer: AIOKafkaProducer | None = None):
         """Initialize event publisher.
@@ -92,6 +93,54 @@ class EventPublisher:
             logger.info(f"Published order executed event: {order_id}")
         except Exception as e:
             logger.error(f"Failed to publish order executed event: {e}")
+            raise
+
+    async def publish_order_filled(
+        self,
+        user_id: str,
+        order_id: str,
+        symbol: str,
+        side: str,
+        filled_qty: float,
+        filled_price: float,
+        commission: float = 0.0,
+    ) -> None:
+        """Publish an order filled event for Portfolio consumption.
+
+        Args:
+            user_id: User who placed the order
+            order_id: Alpaca order ID
+            symbol: Stock ticker symbol
+            side: Order side (buy/sell)
+            filled_qty: Quantity filled
+            filled_price: Average fill price
+            commission: Commission charged
+        """
+        if self._producer is None:
+            logger.warning("Producer not connected, skipping event publish")
+            return
+
+        event = {
+            "event_type": "order_filled",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "user_id": user_id,
+            "order_id": order_id,
+            "symbol": symbol,
+            "side": side,
+            "filled_qty": filled_qty,
+            "filled_price": filled_price,
+            "commission": commission,
+        }
+
+        try:
+            await self._producer.send_and_wait(
+                self.TOPIC_ORDER_FILLED,
+                value=event,
+                key=user_id.encode("utf-8"),
+            )
+            logger.info(f"Published order filled event: {order_id}")
+        except Exception as e:
+            logger.error(f"Failed to publish order filled event: {e}")
             raise
 
     async def publish_order_cancelled(

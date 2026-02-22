@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { api } from "@/lib/api";
 import type { PortfolioSummary, Position } from "@/lib/types";
 
@@ -17,10 +17,22 @@ export function usePortfolio(userId: string): UsePortfolioResult {
   const [positions, setPositions] = useState<Position[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const isInitialLoad = useRef(true);
 
   const fetchData = useCallback(async () => {
-    setIsLoading(true);
+    // Skip fetch if userId is empty (component in props-only mode)
+    if (!userId) return;
+
+    // Only show loading skeleton on initial load
+    if (isInitialLoad.current) {
+      setIsLoading(true);
+    }
     setError(null);
+
+    // Auto-sync with Alpaca on first load (fire-and-forget on subsequent polls)
+    if (isInitialLoad.current) {
+      await api.syncWithAlpaca(userId).catch(() => {});
+    }
 
     const [summaryRes, positionsRes] = await Promise.all([
       api.getPortfolioSummary(userId),
@@ -30,14 +42,26 @@ export function usePortfolio(userId: string): UsePortfolioResult {
     if (summaryRes.error || positionsRes.error) {
       setError(summaryRes.error || positionsRes.error || "Unknown error");
     } else {
-      setSummary(summaryRes.data);
-      setPositions(positionsRes.data?.positions || []);
+      setSummary((prev) => {
+        const next = summaryRes.data;
+        return JSON.stringify(prev) === JSON.stringify(next) ? prev : next;
+      });
+      setPositions((prev) => {
+        const next = positionsRes.data?.positions || [];
+        return JSON.stringify(prev) === JSON.stringify(next) ? prev : next;
+      });
     }
 
     setIsLoading(false);
+    isInitialLoad.current = false;
   }, [userId]);
 
   useEffect(() => {
+    if (!userId) {
+      setIsLoading(false);
+      return;
+    }
+
     fetchData();
 
     // Refresh every 30 seconds

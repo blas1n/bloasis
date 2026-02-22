@@ -2,13 +2,13 @@
 
 import logging
 from decimal import Decimal
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
-from .config import config
-from .models import AccountInfo, OrderResult, OrderStatus
+from .models import AccountInfo, OrderResult, OrderStatus, PositionInfo
 
 if TYPE_CHECKING:
     from alpaca.trading.client import TradingClient
+    from alpaca.trading.models import Position, TradeAccount
 
 logger = logging.getLogger(__name__)
 
@@ -33,8 +33,8 @@ class AlpacaClient:
             secret_key: Alpaca secret key (default from config)
             paper: Use paper trading (default True, required for Phase 1)
         """
-        self.api_key = api_key or config.alpaca_api_key
-        self.secret_key = secret_key or config.alpaca_secret_key
+        self.api_key = api_key or ""
+        self.secret_key = secret_key or ""
         self.paper = paper
         self._client: "TradingClient | None" = None
 
@@ -266,7 +266,7 @@ class AlpacaClient:
             AccountInfo with balance details
         """
         client = self._get_client()
-        account = client.get_account()
+        account = cast("TradeAccount", client.get_account())
 
         return AccountInfo(
             cash=Decimal(str(account.cash)),
@@ -274,6 +274,33 @@ class AlpacaClient:
             portfolio_value=Decimal(str(account.portfolio_value)),
             equity=Decimal(str(account.equity)),
         )
+
+    async def get_positions(self) -> list[PositionInfo]:
+        """Get all open positions from Alpaca.
+
+        Returns:
+            List of PositionInfo with current position data.
+        """
+        try:
+            client = self._get_client()
+            positions = cast(list["Position"], client.get_all_positions())
+
+            return [
+                PositionInfo(
+                    symbol=pos.symbol,
+                    qty=Decimal(str(pos.qty)),
+                    avg_entry_price=Decimal(str(pos.avg_entry_price)),
+                    current_price=Decimal(str(pos.current_price)),
+                    market_value=Decimal(str(pos.market_value)),
+                    unrealized_pl=Decimal(str(pos.unrealized_pl)),
+                    unrealized_plpc=Decimal(str(pos.unrealized_plpc)),
+                    side=pos.side.value if hasattr(pos.side, "value") else str(pos.side),
+                )
+                for pos in positions
+            ]
+        except Exception as e:
+            logger.error(f"Failed to get positions: {e}")
+            raise
 
     def _to_order_result(self, order) -> OrderResult:
         """Convert Alpaca order to OrderResult.

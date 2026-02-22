@@ -4,6 +4,8 @@
 
 import type {
   ApiResponse,
+  BrokerConfig,
+  BrokerStatus,
   CandidateSymbolsResponse,
   MarketRegimeResponse,
   PersonalizedStrategyResponse,
@@ -11,6 +13,7 @@ import type {
   PositionsResponse,
   SectorAnalysisResponse,
   StockPicksResponse,
+  SyncResponse,
   TradeHistoryResponse,
   TradingStatus,
   TradingControlResponse,
@@ -169,6 +172,36 @@ class ApiClient {
       return { data: result.data.preferences };
     }
     return { data: null as unknown as UserPreferences, error: result.error };
+  }
+  // ========================================================================
+  // Broker Config APIs
+  // ========================================================================
+
+  async updateBrokerConfig(
+    config: BrokerConfig
+  ): Promise<ApiResponse<{ success: boolean }>> {
+    return this.request<{ success: boolean }>("/v1/settings/broker", {
+      method: "PATCH",
+      body: JSON.stringify({
+        alpaca_api_key: config.apiKey,
+        alpaca_secret_key: config.secretKey,
+        paper: config.paper,
+      }),
+    });
+  }
+
+  async getBrokerStatus(): Promise<ApiResponse<BrokerStatus>> {
+    return this.request<BrokerStatus>("/v1/settings/broker/status");
+  }
+
+  // ========================================================================
+  // Portfolio Sync APIs
+  // ========================================================================
+
+  async syncWithAlpaca(userId: string): Promise<ApiResponse<SyncResponse>> {
+    return this.request<SyncResponse>(`/v1/portfolio/${userId}/sync`, {
+      method: "POST",
+    });
   }
 }
 

@@ -12,11 +12,6 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, Optional
 
 import grpc
-
-if TYPE_CHECKING:
-    from typing import Any
-
-    AlpacaClient = Any  # Executor service's AlpacaClient
 from shared.generated import portfolio_pb2, portfolio_pb2_grpc
 from shared.generated.common_pb2 import Money
 from shared.utils import PostgresClient, RedisClient
@@ -24,6 +19,9 @@ from shared.utils import PostgresClient, RedisClient
 from .models import Portfolio, Position
 from .pnl_calculator import PnLCalculator
 from .repositories import PortfolioRepository, TradeRepository
+
+if TYPE_CHECKING:
+    from .clients.executor_client import ExecutorClient
 
 logger = logging.getLogger(__name__)
 
@@ -184,7 +182,7 @@ class PortfolioServicer(portfolio_pb2_grpc.PortfolioServiceServicer):
         postgres_client: Optional[PostgresClient] = None,
         repository: Optional[PortfolioRepository] = None,
         trade_repository: Optional[TradeRepository] = None,
-        alpaca_client: Optional["AlpacaClient"] = None,
+        executor_client: Optional["ExecutorClient"] = None,
     ) -> None:
         """
         Initialize the servicer with required clients.
@@ -194,13 +192,14 @@ class PortfolioServicer(portfolio_pb2_grpc.PortfolioServiceServicer):
             postgres_client: PostgreSQL client for persistence.
             repository: Repository for database operations.
             trade_repository: Repository for trade operations.
-            alpaca_client: Alpaca client for broker sync.
+            executor_client: Executor gRPC client for Alpaca operations.
         """
         self.redis = redis_client
         self.postgres = postgres_client
         self.repository = repository or PortfolioRepository(postgres_client)
         self.trade_repository = trade_repository
-        self.alpaca_client = alpaca_client
+        self.executor_client = executor_client
+        self._fill_consumer = None
 
     async def GetPortfolio(
         self,
@@ -726,7 +725,11 @@ class PortfolioServicer(portfolio_pb2_grpc.PortfolioServiceServicer):
         request: portfolio_pb2.SyncWithAlpacaRequest,
         context: grpc.aio.ServicerContext,
     ) -> portfolio_pb2.SyncWithAlpacaResponse:
-        """Sync positions with Alpaca account.
+        """Sync positions and cash with Alpaca account via Executor Service.
+
+        Fetches positions and account data from Alpaca through the Executor
+        gRPC client, then updates the local DB. Stale positions (present in DB
+        but absent in Alpaca) are deleted.
 
         Args:
             request: The gRPC request containing user_id.
@@ -742,19 +745,28 @@ class PortfolioServicer(portfolio_pb2_grpc.PortfolioServiceServicer):
                 context.set_details("user_id is required")
                 return portfolio_pb2.SyncWithAlpacaResponse()
 
-            if self.alpaca_client is None:
+            if self.executor_client is None:
                 return portfolio_pb2.SyncWithAlpacaResponse(
                     success=False,
                     positions_synced=0,
-                    error_message="Alpaca client not configured",
+                    error_message="Executor client not configured",
                 )
 
-            # Get positions from Alpaca
-            alpaca_positions = await self.alpaca_client.get_positions()
+            # Fetch positions and account from Alpaca via Executor
+            alpaca_positions = await self.executor_client.get_positions(user_id)
+            account = await self.executor_client.get_account(user_id)
+
+            # Sync cash balance
+            await self.repository.update_cash_balance(
+                user_id, account.cash, "set"
+            )
+
+            # Build set of Alpaca symbols for stale-position detection
+            alpaca_symbols: set[str] = set()
             synced_count = 0
 
             for pos in alpaca_positions:
-                # Update or create position
+                alpaca_symbols.add(pos.symbol)
                 existing = await self.repository.get_position_by_symbol(user_id, pos.symbol)
 
                 if existing:
@@ -762,18 +774,25 @@ class PortfolioServicer(portfolio_pb2_grpc.PortfolioServiceServicer):
                         user_id=user_id,
                         symbol=pos.symbol,
                         quantity_delta=int(pos.qty) - existing.quantity,
-                        cost_per_share=Decimal(str(pos.avg_entry_price)),
-                        current_price=Decimal(str(pos.current_price)),
+                        cost_per_share=pos.avg_entry_price,
+                        current_price=pos.current_price,
                     )
                 else:
                     await self.repository.create_position(
                         user_id=user_id,
                         symbol=pos.symbol,
                         quantity=int(pos.qty),
-                        cost_per_share=Decimal(str(pos.avg_entry_price)),
+                        cost_per_share=pos.avg_entry_price,
                         currency="USD",
                     )
                 synced_count += 1
+
+            # Delete stale positions (in DB but no longer in Alpaca)
+            db_positions = await self.repository.get_position_domain_objects(user_id)
+            for db_pos in db_positions:
+                if db_pos.symbol not in alpaca_symbols:
+                    await self.repository.delete_position(user_id, db_pos.symbol)
+                    logger.info(f"Deleted stale position {db_pos.symbol} for user {user_id}")
 
             # Invalidate cache
             await self._invalidate_user_cache(user_id)
@@ -1011,3 +1030,99 @@ class PortfolioServicer(portfolio_pb2_grpc.PortfolioServiceServicer):
                         quantity_delta=-int(qty),
                         current_price=price,
                     )
+
+    # ==================== Order Fill Event Consumer ====================
+
+    async def start_order_fill_consumer(self, brokers: str) -> None:
+        """Start consuming order-filled events from Redpanda.
+
+        Args:
+            brokers: Redpanda broker addresses.
+        """
+        from shared.utils.event_consumer import EventConsumer
+
+        self._fill_consumer = EventConsumer(
+            brokers=brokers,
+            group_id="portfolio-service",
+            topics=["order-filled"],
+        )
+        self._fill_consumer.register_handler(
+            "order_filled",
+            self._handle_order_filled,
+        )
+        await self._fill_consumer.start()
+        logger.info("Order fill consumer started")
+
+    async def stop_order_fill_consumer(self) -> None:
+        """Stop the order-filled event consumer."""
+        if self._fill_consumer:
+            await self._fill_consumer.stop()
+            logger.info("Order fill consumer stopped")
+
+    async def _handle_order_filled(self, event: dict) -> None:
+        """Handle an order-filled event from Executor.
+
+        Idempotent: skips if order_id already recorded.
+
+        Args:
+            event: Order filled event dict with user_id, order_id,
+                   symbol, side, filled_qty, filled_price, commission.
+        """
+        order_id = event.get("order_id")
+        user_id = event.get("user_id")
+
+        if not order_id or not user_id:
+            logger.warning("Invalid order filled event: missing order_id or user_id")
+            return
+
+        # Idempotency check — skip if already recorded
+        if self.trade_repository:
+            existing = await self.trade_repository.get_trade_by_order_id(order_id)
+            if existing:
+                logger.info(f"Order {order_id} already recorded, skipping")
+                return
+
+        symbol = event.get("symbol", "")
+        side = event.get("side", "")
+        filled_qty = Decimal(str(event.get("filled_qty", 0)))
+        filled_price = Decimal(str(event.get("filled_price", 0)))
+        commission = Decimal(str(event.get("commission", 0)))
+
+        # Record trade
+        if self.trade_repository:
+            realized_pnl = Decimal("0")
+            if side.lower() == "sell":
+                position = await self.repository.get_position_by_symbol(user_id, symbol)
+                if position:
+                    pnl_calculator = PnLCalculator()
+                    realized_pnl = pnl_calculator.calculate_trade_pnl(
+                        side=side,
+                        qty=filled_qty,
+                        price=filled_price,
+                        avg_cost=position.avg_cost,
+                        commission=commission,
+                    )
+
+            await self.trade_repository.save_trade(
+                user_id=user_id,
+                order_id=order_id,
+                symbol=symbol,
+                side=side,
+                qty=filled_qty,
+                price=filled_price,
+                commission=commission,
+                realized_pnl=realized_pnl,
+            )
+
+        # Update position
+        await self._update_position_from_trade(
+            user_id=user_id,
+            symbol=symbol,
+            side=side,
+            qty=filled_qty,
+            price=filled_price,
+        )
+
+        # Invalidate cache
+        await self._invalidate_user_cache(user_id)
+        logger.info(f"Processed order fill: {order_id} ({side} {filled_qty} {symbol})")

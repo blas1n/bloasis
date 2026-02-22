@@ -57,3 +57,17 @@ class AccountInfo:
     buying_power: Decimal
     portfolio_value: Decimal
     equity: Decimal
+
+
+@dataclass
+class PositionInfo:
+    """Position information from Alpaca."""
+
+    symbol: str
+    qty: Decimal
+    avg_entry_price: Decimal
+    current_price: Decimal
+    market_value: Decimal
+    unrealized_pl: Decimal
+    unrealized_plpc: Decimal
+    side: str

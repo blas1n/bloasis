@@ -12,6 +12,7 @@ from .models import OrderStatus, OrderType
 
 if TYPE_CHECKING:
     from .alpaca_client import AlpacaClient
+    from .clients.user_client import UserClient
     from .utils.event_publisher import EventPublisher
     from .utils.redis_client import RedisClient
 
@@ -27,22 +28,65 @@ class ExecutorServicer(executor_pb2_grpc.ExecutorServiceServicer):
 
     def __init__(
         self,
-        alpaca_client: "AlpacaClient",
+        alpaca_client: "AlpacaClient | None",
         event_publisher: "EventPublisher",
         redis_client: "RedisClient",
+        user_client: "UserClient | None" = None,
     ) -> None:
         """Initialize Executor servicer.
 
         Args:
-            alpaca_client: Client for Alpaca trading API
+            alpaca_client: Client for Alpaca trading API (None at startup, created dynamically)
             event_publisher: Publisher for execution events
             redis_client: Redis client for order tracking
+            user_client: User Service gRPC client for dynamic broker config
         """
         self.alpaca = alpaca_client
         self.publisher = event_publisher
         self.redis = redis_client
+        self.user_client = user_client
         self.user_trading_status: dict[str, dict] = {}  # {user_id: {enabled, stop_mode, timestamp}}
         self.trading_control_consumer = None
+
+    async def _ensure_alpaca_client(self) -> "AlpacaClient":
+        """Ensure Alpaca client is configured with valid credentials.
+
+        Fetches credentials from User Service (DB) on first call.
+        Credentials are cached in self.alpaca for subsequent calls.
+
+        Returns:
+            Configured AlpacaClient instance.
+
+        Raises:
+            ValueError: If no Alpaca credentials are available.
+        """
+        from .alpaca_client import AlpacaClient
+
+        # If already configured with valid keys, skip
+        if self.alpaca and self.alpaca.api_key and self.alpaca.secret_key:
+            return self.alpaca
+
+        # Fetch from User Service (single source of truth)
+        if not self.user_client:
+            raise ValueError("Alpaca client not configured and User Service unavailable")
+
+        try:
+            broker_config = await self.user_client.get_broker_config()
+            if broker_config.configured:
+                self.alpaca = AlpacaClient(
+                    api_key=broker_config.alpaca_api_key,
+                    secret_key=broker_config.alpaca_secret_key,
+                    paper=True,
+                )
+                logger.info("Alpaca client refreshed from User Service broker config")
+                return self.alpaca
+            else:
+                raise ValueError("Alpaca credentials not configured in User Service")
+        except ValueError:
+            raise
+        except Exception as e:
+            logger.warning(f"Failed to fetch broker config from User Service: {e}")
+            raise ValueError(f"Alpaca client not configured: {e}") from e
 
     async def ExecuteOrder(
         self,
@@ -62,6 +106,9 @@ class ExecutorServicer(executor_pb2_grpc.ExecutorServiceServicer):
             Execution result with order ID and status
         """
         logger.info(f"Executing order: {request.symbol} {request.side} {request.qty}")
+
+        # Ensure Alpaca client has credentials
+        alpaca = await self._ensure_alpaca_client()
 
         # Validate request
         if not request.user_id:
@@ -106,7 +153,7 @@ class ExecutorServicer(executor_pb2_grpc.ExecutorServiceServicer):
 
         try:
             if order_type == OrderType.MARKET.value:
-                result = await self.alpaca.submit_market_order(
+                result = await alpaca.submit_market_order(
                     symbol=request.symbol,
                     qty=Decimal(str(request.qty)),
                     side=request.side,
@@ -118,7 +165,7 @@ class ExecutorServicer(executor_pb2_grpc.ExecutorServiceServicer):
                         success=False,
                         error_message="limit_price required for limit orders",
                     )
-                result = await self.alpaca.submit_limit_order(
+                result = await alpaca.submit_limit_order(
                     symbol=request.symbol,
                     qty=Decimal(str(request.qty)),
                     side=request.side,
@@ -131,7 +178,7 @@ class ExecutorServicer(executor_pb2_grpc.ExecutorServiceServicer):
                         success=False,
                         error_message="stop_loss and take_profit required for bracket orders",
                     )
-                result = await self.alpaca.submit_bracket_order(
+                result = await alpaca.submit_bracket_order(
                     symbol=request.symbol,
                     qty=Decimal(str(request.qty)),
                     side=request.side,
@@ -192,8 +239,10 @@ class ExecutorServicer(executor_pb2_grpc.ExecutorServiceServicer):
         if not request.order_id:
             await context.abort(grpc.StatusCode.INVALID_ARGUMENT, "order_id is required")
 
+        alpaca = await self._ensure_alpaca_client()
+
         try:
-            result = await self.alpaca.get_order_status(request.order_id)
+            result = await alpaca.get_order_status(request.order_id)
 
             return executor_pb2.GetOrderStatusResponse(
                 order_id=result.order_id,
@@ -229,7 +278,9 @@ class ExecutorServicer(executor_pb2_grpc.ExecutorServiceServicer):
                 message="order_id is required",
             )
 
-        success = await self.alpaca.cancel_order(request.order_id)
+        alpaca = await self._ensure_alpaca_client()
+
+        success = await alpaca.cancel_order(request.order_id)
 
         if success:
             await self.publisher.publish_order_cancelled(
@@ -262,8 +313,10 @@ class ExecutorServicer(executor_pb2_grpc.ExecutorServiceServicer):
         """
         logger.info(f"Getting account info for user: {request.user_id}")
 
+        alpaca = await self._ensure_alpaca_client()
+
         try:
-            account = await self.alpaca.get_account()
+            account = await alpaca.get_account()
 
             return executor_pb2.GetAccountResponse(
                 cash=float(account.cash),
@@ -273,7 +326,47 @@ class ExecutorServicer(executor_pb2_grpc.ExecutorServiceServicer):
             )
         except Exception as e:
             logger.error(f"Failed to get account info: {e}")
-            await context.abort(grpc.StatusCode.INTERNAL, f"Failed to get account: {e}")
+            await context.abort(grpc.StatusCode.INTERNAL, "Failed to get account info")
+
+    async def GetPositions(
+        self,
+        request: executor_pb2.GetPositionsRequest,
+        context: grpc.aio.ServicerContext,
+    ) -> executor_pb2.GetPositionsResponse:
+        """Get all open positions from Alpaca.
+
+        Args:
+            request: Positions request with user_id
+            context: gRPC context
+
+        Returns:
+            List of open positions
+        """
+        logger.info(f"Getting positions for user: {request.user_id}")
+
+        alpaca = await self._ensure_alpaca_client()
+
+        try:
+            positions = await alpaca.get_positions()
+
+            proto_positions = [
+                executor_pb2.AlpacaPosition(
+                    symbol=pos.symbol,
+                    qty=float(pos.qty),
+                    avg_entry_price=float(pos.avg_entry_price),
+                    current_price=float(pos.current_price),
+                    market_value=float(pos.market_value),
+                    unrealized_pl=float(pos.unrealized_pl),
+                    unrealized_plpc=float(pos.unrealized_plpc),
+                    side=pos.side,
+                )
+                for pos in positions
+            ]
+
+            return executor_pb2.GetPositionsResponse(positions=proto_positions)
+        except Exception as e:
+            logger.error(f"Failed to get positions: {e}")
+            await context.abort(grpc.StatusCode.INTERNAL, "Failed to get positions")
 
     async def _verify_risk_approval(self, approval_id: str) -> bool:
         """Verify risk approval exists and is valid.
@@ -418,6 +511,7 @@ class ExecutorServicer(executor_pb2_grpc.ExecutorServiceServicer):
             Number of orders cancelled
         """
         cancelled = 0
+        alpaca = await self._ensure_alpaca_client()
 
         # Find all user orders in Redis
         try:
@@ -433,17 +527,18 @@ class ExecutorServicer(executor_pb2_grpc.ExecutorServiceServicer):
                     break
 
             # Check each order
-            for key in keys_to_check:
+            for raw_key in keys_to_check:
                 try:
+                    key = raw_key.decode("utf-8") if isinstance(raw_key, bytes) else raw_key
                     order_data = await self.redis.hgetall(key)
                     if (order_data.get("user_id") == user_id and
                         order_data.get("status") in ["new", "partially_filled"]):
-                        order_id = (key.decode("utf-8") if isinstance(key, bytes) else key).split(":")[-1]
+                        order_id = key.split(":")[-1]
 
                         # Cancel via Alpaca
-                        if await self.alpaca.cancel_order(order_id):
+                        if await alpaca.cancel_order(order_id):
                             cancelled += 1
-                            await self.redis.hset(key, "status", "cancelled")
+                            await self.redis.hset(key, {"status": "cancelled"})
                             logger.info(f"Cancelled order {order_id} for user {user_id}")
                 except Exception as e:
                     logger.warning(f"Failed to cancel order {key}: {e}")

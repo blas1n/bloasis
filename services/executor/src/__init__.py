@@ -1,7 +1,7 @@
 """Executor Service - Alpaca paper trading integration."""
 
 from .alpaca_client import AlpacaClient
-from .models import AccountInfo, OrderResult, OrderSide, OrderStatus, OrderType
+from .models import AccountInfo, OrderResult, OrderSide, OrderStatus, OrderType, PositionInfo
 from .service import ExecutorServicer
 
 __all__ = [
@@ -12,4 +12,5 @@ __all__ = [
     "OrderSide",
     "OrderType",
     "AccountInfo",
+    "PositionInfo",
 ]

@@ -20,11 +20,14 @@ from shared.utils import (
     setup_logger,
 )
 
+from .clients.executor_client import ExecutorClient
 from .config import config
 from .repositories import UserRepository
+from .repositories.broker_config_repository import BrokerConfigRepository
 from .service import UserServicer
 
 logger = setup_logger(__name__)
+
 
 # Global clients for health check status
 redis_client: Optional[RedisClient] = None
@@ -68,8 +71,18 @@ async def serve() -> None:
                 "Consul service registration failed - service will continue without Consul"
             )
 
-    # Initialize repository
+    # Initialize repositories
     repository = UserRepository(postgres_client)
+    broker_config_repo = BrokerConfigRepository(postgres_client)
+
+    # Initialize Executor client (for broker status checks)
+    executor_client = ExecutorClient()
+    try:
+        await executor_client.connect()
+        logger.info("Executor client connected")
+    except Exception as e:
+        logger.warning(f"Executor client connection failed (non-fatal): {e}")
+        executor_client = None
 
     # Create gRPC server
     server = grpc.aio.server()
@@ -79,6 +92,8 @@ async def serve() -> None:
         redis_client=redis_client,
         postgres_client=postgres_client,
         repository=repository,
+        broker_config_repository=broker_config_repo,
+        executor_client=executor_client,
     )
     user_pb2_grpc.add_UserServiceServicer_to_server(servicer, server)
 
@@ -108,6 +123,9 @@ async def serve() -> None:
         if postgres_client:
             await postgres_client.close()
             logger.info("PostgreSQL client disconnected")
+        if executor_client:
+            await executor_client.close()
+            logger.info("Executor client disconnected")
         if redis_client:
             await redis_client.close()
             logger.info("Redis client disconnected")

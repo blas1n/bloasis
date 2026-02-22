@@ -44,10 +44,37 @@ topics:
       retention.ms: 2592000000   # 30 days retention (audit trail)
       cleanup.policy: delete
 
-  # Execution Events - Published by Executor Service
+  # Execution Events (generic) - Published by Executor Service
   # Consumers: Portfolio Service, Notification Service
   - name: execution-events
     partitions: 6
+    replication_factor: 1
+    config:
+      retention.ms: 7776000000   # 90 days retention (compliance)
+      cleanup.policy: delete
+
+  # Order Executed - Published by Executor Service when order is submitted
+  # Consumers: Notification Service
+  - name: order-executed
+    partitions: 3
+    replication_factor: 1
+    config:
+      retention.ms: 7776000000   # 90 days retention (compliance)
+      cleanup.policy: delete
+
+  # Order Filled - Published by Executor Service when order is filled
+  # Consumers: Portfolio Service (trade recording + position sync)
+  - name: order-filled
+    partitions: 3
+    replication_factor: 1
+    config:
+      retention.ms: 7776000000   # 90 days retention (compliance)
+      cleanup.policy: delete
+
+  # Order Cancelled - Published by Executor Service when order is cancelled
+  # Consumers: Notification Service
+  - name: order-cancelled
+    partitions: 3
     replication_factor: 1
     config:
       retention.ms: 7776000000   # 90 days retention (compliance)
@@ -101,6 +128,7 @@ consumer_groups:
       - regime-events
       - strategy-events
       - execution-events
+      - order-filled          # Trade recording + position sync
     min_priority: 0  # All priorities
 
   # Notification Service - Broadcasts to users
@@ -109,6 +137,9 @@ consumer_groups:
       - alert-events
       - risk-events
       - execution-events
+      - order-executed
+      - order-filled
+      - order-cancelled
       - portfolio-events
       - trading-control-events
     min_priority: 0  # All priorities

@@ -1,19 +1,27 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useTradingControl } from "@/hooks/useTradingControl";
+import { api } from "@/lib/api";
 
 export function AITradingControl({ userId }: { userId: string }) {
   const { status, isLoading, error, startTrading, stopTrading } =
     useTradingControl(userId);
   const [showStopDialog, setShowStopDialog] = useState(false);
+  const [brokerConfigured, setBrokerConfigured] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    api.getBrokerStatus().then((res) => {
+      if (!res.error) {
+        setBrokerConfigured(res.data.configured);
+      }
+    });
+  }, []);
 
   const handleToggle = async () => {
     if (status?.tradingEnabled) {
-      // OFF로 전환: Stop 모드 선택 다이얼로그 표시
       setShowStopDialog(true);
     } else {
-      // ON으로 전환
       await startTrading();
     }
   };
@@ -24,12 +32,13 @@ export function AITradingControl({ userId }: { userId: string }) {
   };
 
   const isActive = status?.tradingEnabled && status.status === "active";
+  const isDisabled = isLoading || brokerConfigured === false;
 
   return (
     <div className="bg-bg-elevated p-6 rounded-lg border border-border-custom">
       <div className="flex items-center justify-between mb-4">
         <div>
-          <h3 className="text-lg font-semibold text-text-primary">🤖 AI Auto Trading</h3>
+          <h3 className="text-lg font-semibold text-text-primary">AI Auto Trading</h3>
           <p className="text-sm text-text-muted mt-1">
             AI analyzes market and executes trades automatically
           </p>
@@ -37,7 +46,7 @@ export function AITradingControl({ userId }: { userId: string }) {
 
         <button
           onClick={handleToggle}
-          disabled={isLoading}
+          disabled={isDisabled}
           className={`px-8 py-3 rounded-full font-bold text-lg transition-colors disabled:opacity-50 ${
             isActive
               ? "bg-theme-success text-white hover:opacity-90"
@@ -58,6 +67,16 @@ export function AITradingControl({ userId }: { userId: string }) {
           System is currently {isActive ? "ACTIVE" : "INACTIVE"}
         </span>
       </div>
+
+      {brokerConfigured === false && (
+        <p className="mt-3 text-sm text-yellow-400">
+          Configure Alpaca API keys in{" "}
+          <a href="/dashboard/settings" className="underline hover:text-yellow-300">
+            Settings
+          </a>{" "}
+          to enable trading.
+        </p>
+      )}
 
       {error && (
         <p className="mt-2 text-xs text-red-400">{error}</p>

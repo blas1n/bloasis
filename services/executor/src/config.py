@@ -20,17 +20,16 @@ class Settings(BaseSettings):
     service_name: str = "executor"
     grpc_port: int = 50060
 
-    # Alpaca settings
-    alpaca_api_key: str = ""
-    alpaca_secret_key: str = ""
-    alpaca_paper: bool = True  # Always paper trading in Phase 1
-
     # Redis connection
     redis_host: str = "redis"
     redis_port: int = 6379
 
     # Redpanda Event Streaming
     redpanda_brokers: str = "redpanda:9092"
+
+    # User Service (for dynamic broker config)
+    user_service_host: str = "user"
+    user_service_port: int = 50052
 
     # Consul Service Discovery
     consul_host: str = "consul"

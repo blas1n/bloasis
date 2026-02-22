@@ -18,7 +18,7 @@ from grpc_health.v1 import health, health_pb2, health_pb2_grpc
 from shared.generated import executor_pb2_grpc
 from shared.utils.event_consumer import EventConsumer
 
-from .alpaca_client import AlpacaClient
+from .clients.user_client import UserClient
 from .config import config
 from .service import ExecutorServicer
 from .utils.event_publisher import EventPublisher
@@ -33,7 +33,6 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Global clients for shutdown
-alpaca_client: AlpacaClient | None = None
 event_publisher: EventPublisher | None = None
 redis_client: RedisClient | None = None
 trading_control_consumer: EventConsumer | None = None
@@ -41,16 +40,11 @@ trading_control_consumer: EventConsumer | None = None
 
 async def serve() -> None:
     """Start and run the gRPC server."""
-    global alpaca_client, event_publisher, redis_client, trading_control_consumer
+    global event_publisher, redis_client, trading_control_consumer
 
     logger.info(f"Starting {config.service_name} service on port {config.grpc_port}...")
 
-    # Initialize clients
-    alpaca_client = AlpacaClient(
-        api_key=config.alpaca_api_key,
-        secret_key=config.alpaca_secret_key,
-        paper=config.alpaca_paper,
-    )
+    # Initialize clients (AlpacaClient is created on-demand from User Service DB)
     event_publisher = EventPublisher()
     redis_client = RedisClient()
 
@@ -61,6 +55,15 @@ async def serve() -> None:
     except Exception as e:
         logger.error(f"Failed to initialize clients: {e}")
         raise
+
+    # Initialize User Service client for dynamic broker config
+    user_client = UserClient()
+    try:
+        await user_client.connect()
+        logger.info("User Service client connected")
+    except Exception as e:
+        logger.warning(f"User Service client connection failed (non-fatal): {e}")
+        user_client = None
 
     logger.info("All clients connected")
 
@@ -76,9 +79,10 @@ async def serve() -> None:
 
     # Create and register servicer
     servicer = ExecutorServicer(
-        alpaca_client=alpaca_client,
+        alpaca_client=None,
         event_publisher=event_publisher,
         redis_client=redis_client,
+        user_client=user_client,
     )
     executor_pb2_grpc.add_ExecutorServiceServicer_to_server(servicer, server)
 

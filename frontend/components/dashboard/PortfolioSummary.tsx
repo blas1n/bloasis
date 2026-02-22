@@ -2,17 +2,35 @@
 
 import { usePortfolio } from "@/hooks/usePortfolio";
 import { Card } from "@/components/ui/Card";
-import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import { ErrorMessage } from "@/components/ui/ErrorMessage";
 import { formatCurrency, formatPercent } from "@/lib/formatters";
+import type { PortfolioSummary as PortfolioSummaryType } from "@/lib/types";
 
 interface PortfolioSummaryProps {
-  userId: string;
+  userId?: string;
   variant?: "dashboard" | "portfolio";
+  /** When provided, the component uses these props instead of fetching via hook. */
+  summary?: PortfolioSummaryType | null;
+  isLoading?: boolean;
+  error?: string | null;
+  onRetry?: () => void;
 }
 
-export function PortfolioSummary({ userId, variant = "portfolio" }: PortfolioSummaryProps) {
-  const { summary, isLoading, error, refetch } = usePortfolio(userId);
+export function PortfolioSummary({
+  userId,
+  variant = "portfolio",
+  summary: propsSummary,
+  isLoading: propsIsLoading,
+  error: propsError,
+  onRetry: propsOnRetry,
+}: PortfolioSummaryProps) {
+  // Always call the hook (Rules of Hooks), but skip fetch when props are provided
+  const hook = usePortfolio(propsSummary !== undefined ? "" : userId || "");
+
+  const summary = propsSummary !== undefined ? propsSummary : hook.summary;
+  const isLoading = propsIsLoading !== undefined ? propsIsLoading : hook.isLoading;
+  const error = propsError !== undefined ? propsError : hook.error;
+  const onRetry = propsOnRetry || hook.refetch;
 
   if (isLoading) {
     return (
@@ -25,7 +43,7 @@ export function PortfolioSummary({ userId, variant = "portfolio" }: PortfolioSum
   }
 
   if (error) {
-    return <ErrorMessage error={error} onRetry={refetch} />;
+    return <ErrorMessage error={error} onRetry={onRetry} />;
   }
 
   if (!summary) {

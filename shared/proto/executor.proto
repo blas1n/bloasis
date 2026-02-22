@@ -59,6 +59,13 @@ service ExecutorService {
       get: "/v1/executor/account"
     };
   }
+
+  // GetPositions retrieves all open positions from Alpaca
+  rpc GetPositions(GetPositionsRequest) returns (GetPositionsResponse) {
+    option (google.api.http) = {
+      get: "/v1/executor/positions"
+    };
+  }
 }
 
 // ExecuteOrderRequest - Request to execute an order
@@ -151,4 +158,27 @@ message GetAccountResponse {
   double portfolio_value = 3;
   // Account equity
   double equity = 4;
+}
+
+// GetPositionsRequest - Request for open positions
+message GetPositionsRequest {
+  // User identifier
+  string user_id = 1;
+}
+
+// GetPositionsResponse - Open positions from Alpaca
+message GetPositionsResponse {
+  repeated AlpacaPosition positions = 1;
+}
+
+// AlpacaPosition - Single position from Alpaca
+message AlpacaPosition {
+  string symbol = 1;
+  double qty = 2;
+  double avg_entry_price = 3;
+  double current_price = 4;
+  double market_value = 5;
+  double unrealized_pl = 6;
+  double unrealized_plpc = 7;
+  string side = 8;  // "long" or "short"
 }

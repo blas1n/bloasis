@@ -35,6 +35,9 @@ testpaths = ["tests"]
 pythonpath = ["."]
 addopts = "-v --tb=short"
 
+[tool.pyright]
+extraPaths = ["."]
+
 [tool.ruff]
 line-length = 100
 target-version = "py311"

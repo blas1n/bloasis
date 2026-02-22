@@ -48,6 +48,23 @@ class UserRecord(Base):
     )
 
 
+class BrokerConfigRecord(Base):
+    """
+    SQLAlchemy model for user_data.broker_config table.
+
+    Stores global broker configuration with Fernet-encrypted values.
+    """
+
+    __tablename__ = "broker_config"
+    __table_args__ = {"schema": "user_data"}
+
+    config_key: Mapped[str] = mapped_column(String(100), primary_key=True)
+    encrypted_value: Mapped[str] = mapped_column(String, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+
 class UserPreferencesRecord(Base):
     """
     SQLAlchemy model for user_data.user_preferences table.

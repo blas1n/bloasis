@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from src.models import AccountInfo, OrderResult, OrderStatus
+from src.models import AccountInfo, OrderResult, OrderStatus, PositionInfo
 
 
 @pytest.fixture
@@ -77,6 +77,20 @@ def mock_alpaca_client():
             equity=Decimal("150000"),
         )
     )
+    client.get_positions = AsyncMock(
+        return_value=[
+            PositionInfo(
+                symbol="AAPL",
+                qty=Decimal("10"),
+                avg_entry_price=Decimal("150.00"),
+                current_price=Decimal("175.50"),
+                market_value=Decimal("1755.00"),
+                unrealized_pl=Decimal("255.00"),
+                unrealized_plpc=Decimal("0.17"),
+                side="long",
+            ),
+        ]
+    )
     return client
 
 
@@ -86,6 +100,7 @@ def mock_event_publisher():
     publisher = AsyncMock()
     publisher.publish_order_executed = AsyncMock()
     publisher.publish_order_cancelled = AsyncMock()
+    publisher.publish_order_filled = AsyncMock()
     publisher.connect = AsyncMock()
     publisher.close = AsyncMock()
     return publisher

@@ -1152,3 +1152,345 @@ class TestMainModule:
 
             # Verify health check was set up
             mock_health_servicer.set.assert_called()
+
+
+class TestBrokerConfig:
+    """Tests for Broker Config gRPC methods."""
+
+    @pytest.fixture
+    def mock_redis(self) -> AsyncMock:
+        """Create mock Redis client."""
+        mock = AsyncMock()
+        mock.get = AsyncMock(return_value=None)
+        mock.setex = AsyncMock()
+        mock.delete = AsyncMock()
+        mock.client = MagicMock()
+        return mock
+
+    @pytest.fixture
+    def mock_postgres(self) -> MagicMock:
+        """Create mock PostgreSQL client."""
+        mock = MagicMock()
+        mock.engine = MagicMock()
+        return mock
+
+    @pytest.fixture
+    def mock_repository(self) -> AsyncMock:
+        """Create mock User Repository."""
+        return AsyncMock()
+
+    @pytest.fixture
+    def mock_broker_config_repo(self) -> AsyncMock:
+        """Create mock Broker Config Repository."""
+        mock = AsyncMock()
+        mock.get_config = AsyncMock(return_value=None)
+        mock.set_config = AsyncMock()
+        mock.get_all_broker_config = AsyncMock(return_value={})
+        mock.is_configured = AsyncMock(return_value=False)
+        return mock
+
+    @pytest.fixture
+    def mock_executor_client(self) -> AsyncMock:
+        """Create mock Executor client."""
+        mock = AsyncMock()
+        mock.get_account = AsyncMock()
+        return mock
+
+    @pytest.fixture
+    def mock_context(self) -> MagicMock:
+        """Create mock gRPC context."""
+        context = MagicMock()
+        context.set_code = MagicMock()
+        context.set_details = MagicMock()
+        return context
+
+    @pytest.mark.asyncio
+    async def test_update_broker_config_success(
+        self,
+        mock_redis: AsyncMock,
+        mock_postgres: MagicMock,
+        mock_repository: AsyncMock,
+        mock_broker_config_repo: AsyncMock,
+        mock_context: MagicMock,
+    ) -> None:
+        """Should save encrypted broker credentials."""
+        from shared.generated import user_pb2
+
+        from src.service import UserServicer
+
+        servicer = UserServicer(
+            redis_client=mock_redis,
+            postgres_client=mock_postgres,
+            repository=mock_repository,
+            broker_config_repository=mock_broker_config_repo,
+        )
+
+        request = user_pb2.UpdateBrokerConfigRequest(
+            alpaca_api_key="test-api-key",
+            alpaca_secret_key="test-secret",
+            paper=True,
+        )
+        response = await servicer.UpdateBrokerConfig(request, mock_context)
+
+        assert response.success is True
+        assert mock_broker_config_repo.set_config.call_count == 3  # api_key, secret_key, paper
+
+    @pytest.mark.asyncio
+    async def test_update_broker_config_missing_key(
+        self,
+        mock_redis: AsyncMock,
+        mock_postgres: MagicMock,
+        mock_repository: AsyncMock,
+        mock_broker_config_repo: AsyncMock,
+        mock_context: MagicMock,
+    ) -> None:
+        """Should reject empty API key."""
+        from shared.generated import user_pb2
+
+        from src.service import UserServicer
+
+        servicer = UserServicer(
+            redis_client=mock_redis,
+            postgres_client=mock_postgres,
+            repository=mock_repository,
+            broker_config_repository=mock_broker_config_repo,
+        )
+
+        request = user_pb2.UpdateBrokerConfigRequest(
+            alpaca_api_key="",
+            alpaca_secret_key="test-secret",
+        )
+        response = await servicer.UpdateBrokerConfig(request, mock_context)
+
+        assert response.success is False
+        mock_broker_config_repo.set_config.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_get_broker_config_success(
+        self,
+        mock_redis: AsyncMock,
+        mock_postgres: MagicMock,
+        mock_repository: AsyncMock,
+        mock_broker_config_repo: AsyncMock,
+        mock_context: MagicMock,
+    ) -> None:
+        """Should return decrypted broker credentials."""
+        from shared.generated import user_pb2
+
+        from src.service import UserServicer
+
+        mock_broker_config_repo.get_all_broker_config = AsyncMock(
+            return_value={
+                "alpaca_api_key": "my-key",
+                "alpaca_secret_key": "my-secret",
+                "alpaca_paper": "true",
+            }
+        )
+
+        servicer = UserServicer(
+            redis_client=mock_redis,
+            postgres_client=mock_postgres,
+            repository=mock_repository,
+            broker_config_repository=mock_broker_config_repo,
+        )
+
+        request = user_pb2.GetBrokerConfigRequest()
+        response = await servicer.GetBrokerConfig(request, mock_context)
+
+        assert response.alpaca_api_key == "my-key"
+        assert response.alpaca_secret_key == "my-secret"
+        assert response.paper is True
+        assert response.configured is True
+
+    @pytest.mark.asyncio
+    async def test_get_broker_config_not_configured(
+        self,
+        mock_redis: AsyncMock,
+        mock_postgres: MagicMock,
+        mock_repository: AsyncMock,
+        mock_broker_config_repo: AsyncMock,
+        mock_context: MagicMock,
+    ) -> None:
+        """Should return configured=False when no keys stored."""
+        from shared.generated import user_pb2
+
+        from src.service import UserServicer
+
+        mock_broker_config_repo.get_all_broker_config = AsyncMock(return_value={})
+
+        servicer = UserServicer(
+            redis_client=mock_redis,
+            postgres_client=mock_postgres,
+            repository=mock_repository,
+            broker_config_repository=mock_broker_config_repo,
+        )
+
+        request = user_pb2.GetBrokerConfigRequest()
+        response = await servicer.GetBrokerConfig(request, mock_context)
+
+        assert response.configured is False
+
+    @pytest.mark.asyncio
+    async def test_get_broker_status_connected(
+        self,
+        mock_redis: AsyncMock,
+        mock_postgres: MagicMock,
+        mock_repository: AsyncMock,
+        mock_broker_config_repo: AsyncMock,
+        mock_executor_client: AsyncMock,
+        mock_context: MagicMock,
+    ) -> None:
+        """Should return connected status with account info."""
+        from dataclasses import dataclass
+
+        from shared.generated import user_pb2
+
+        from src.service import UserServicer
+
+        @dataclass
+        class MockAccountData:
+            cash: float = 50000.0
+            buying_power: float = 100000.0
+            portfolio_value: float = 75000.0
+            equity: float = 75000.0
+
+        mock_broker_config_repo.is_configured = AsyncMock(return_value=True)
+        mock_executor_client.get_account = AsyncMock(
+            return_value=MockAccountData()
+        )
+
+        servicer = UserServicer(
+            redis_client=mock_redis,
+            postgres_client=mock_postgres,
+            repository=mock_repository,
+            broker_config_repository=mock_broker_config_repo,
+            executor_client=mock_executor_client,
+        )
+
+        request = user_pb2.GetBrokerStatusRequest()
+        response = await servicer.GetBrokerStatus(request, mock_context)
+
+        assert response.configured is True
+        assert response.connected is True
+        assert response.equity == 75000.0
+
+    @pytest.mark.asyncio
+    async def test_get_broker_status_not_configured(
+        self,
+        mock_redis: AsyncMock,
+        mock_postgres: MagicMock,
+        mock_repository: AsyncMock,
+        mock_broker_config_repo: AsyncMock,
+        mock_context: MagicMock,
+    ) -> None:
+        """Should return not configured status."""
+        from shared.generated import user_pb2
+
+        from src.service import UserServicer
+
+        mock_broker_config_repo.is_configured = AsyncMock(return_value=False)
+
+        servicer = UserServicer(
+            redis_client=mock_redis,
+            postgres_client=mock_postgres,
+            repository=mock_repository,
+            broker_config_repository=mock_broker_config_repo,
+        )
+
+        request = user_pb2.GetBrokerStatusRequest()
+        response = await servicer.GetBrokerStatus(request, mock_context)
+
+        assert response.configured is False
+        assert response.connected is False
+
+
+class TestStartTradingBrokerGuard:
+    """Tests that StartTrading requires broker config."""
+
+    @pytest.fixture
+    def mock_redis(self) -> AsyncMock:
+        mock = AsyncMock()
+        mock.delete = AsyncMock()
+        return mock
+
+    @pytest.fixture
+    def mock_postgres(self) -> MagicMock:
+        return MagicMock()
+
+    @pytest.fixture
+    def mock_repository(self) -> AsyncMock:
+        mock = AsyncMock()
+        mock.update_preferences = AsyncMock(return_value=True)
+        return mock
+
+    @pytest.fixture
+    def mock_broker_config_repo(self) -> AsyncMock:
+        mock = AsyncMock()
+        mock.is_configured = AsyncMock(return_value=False)
+        return mock
+
+    @pytest.fixture
+    def mock_context(self) -> MagicMock:
+        context = MagicMock()
+        context.set_code = MagicMock()
+        context.set_details = MagicMock()
+        return context
+
+    @pytest.mark.asyncio
+    async def test_start_trading_blocked_without_broker(
+        self,
+        mock_redis: AsyncMock,
+        mock_postgres: MagicMock,
+        mock_repository: AsyncMock,
+        mock_broker_config_repo: AsyncMock,
+        mock_context: MagicMock,
+    ) -> None:
+        """Should reject StartTrading when broker is not configured."""
+        from shared.generated import user_pb2
+
+        from src.service import UserServicer
+
+        mock_broker_config_repo.is_configured = AsyncMock(return_value=False)
+
+        servicer = UserServicer(
+            redis_client=mock_redis,
+            postgres_client=mock_postgres,
+            repository=mock_repository,
+            broker_config_repository=mock_broker_config_repo,
+        )
+
+        request = user_pb2.StartTradingRequest(user_id="test-user-id")
+        response = await servicer.StartTrading(request, mock_context)
+
+        assert response.success is False
+        assert "Alpaca" in response.message
+        mock_repository.update_preferences.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_start_trading_allowed_with_broker(
+        self,
+        mock_redis: AsyncMock,
+        mock_postgres: MagicMock,
+        mock_repository: AsyncMock,
+        mock_broker_config_repo: AsyncMock,
+        mock_context: MagicMock,
+    ) -> None:
+        """Should allow StartTrading when broker is configured."""
+        from shared.generated import user_pb2
+
+        from src.service import UserServicer
+
+        mock_broker_config_repo.is_configured = AsyncMock(return_value=True)
+
+        servicer = UserServicer(
+            redis_client=mock_redis,
+            postgres_client=mock_postgres,
+            repository=mock_repository,
+            broker_config_repository=mock_broker_config_repo,
+        )
+
+        request = user_pb2.StartTradingRequest(user_id="test-user-id")
+        response = await servicer.StartTrading(request, mock_context)
+
+        assert response.success is True
+        mock_repository.update_preferences.assert_called_once()
