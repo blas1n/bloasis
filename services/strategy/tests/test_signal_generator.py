@@ -428,3 +428,108 @@ class TestRiskMultipliers:
         """Conservative < moderate < aggressive."""
         assert _MAX_SIZE["CONSERVATIVE"] < _MAX_SIZE["MODERATE"]
         assert _MAX_SIZE["MODERATE"] < _MAX_SIZE["AGGRESSIVE"]
+
+
+class TestProfitTiers:
+    """Tests for _calculate_profit_tiers (3-tier TP + trailing stop)."""
+
+    def test_long_tiers_ascending(self, generator, market_context):
+        """Long tiers should be above entry, ascending."""
+        signal = TechnicalSignal(
+            symbol="AAPL", direction="long", strength=0.8,
+            entry_price=Decimal("150.00"), indicators={}, rationale="",
+        )
+        tiers, trailing = generator._calculate_profit_tiers(signal, market_context, atr=3.0)
+
+        assert len(tiers) == 3
+        # Tier 1 < Tier 2 (both above entry for long)
+        assert tiers[0].level > Decimal("150.00")
+        assert tiers[1].level > tiers[0].level
+        # Tier 3 is trailing stop marker (level=0)
+        assert tiers[2].level == Decimal("0")
+
+    def test_short_tiers_descending(self, generator, market_context):
+        """Short tiers should be below entry, descending."""
+        signal = TechnicalSignal(
+            symbol="AAPL", direction="short", strength=0.8,
+            entry_price=Decimal("150.00"), indicators={}, rationale="",
+        )
+        tiers, trailing = generator._calculate_profit_tiers(signal, market_context, atr=3.0)
+
+        assert tiers[0].level < Decimal("150.00")
+        assert tiers[1].level < tiers[0].level
+
+    def test_tier_sizes_sum_to_one(self, generator, market_context):
+        """Tier size_pct should sum to 1.0."""
+        signal = TechnicalSignal(
+            symbol="AAPL", direction="long", strength=0.8,
+            entry_price=Decimal("150.00"), indicators={}, rationale="",
+        )
+        tiers, _ = generator._calculate_profit_tiers(signal, market_context, atr=3.0)
+
+        total = sum(t.size_pct for t in tiers)
+        assert total == Decimal("1.00")
+
+    def test_trailing_stop_positive(self, generator, market_context):
+        """Trailing stop percentage should be positive."""
+        signal = TechnicalSignal(
+            symbol="AAPL", direction="long", strength=0.8,
+            entry_price=Decimal("150.00"), indicators={}, rationale="",
+        )
+        _, trailing = generator._calculate_profit_tiers(signal, market_context, atr=3.0)
+
+        assert trailing > Decimal("0")
+
+    def test_fallback_when_no_atr(self, generator, market_context):
+        """Without ATR, should use fixed percentage fallback."""
+        signal = TechnicalSignal(
+            symbol="AAPL", direction="long", strength=0.8,
+            entry_price=Decimal("150.00"), indicators={}, rationale="",
+        )
+        tiers, trailing = generator._calculate_profit_tiers(signal, market_context, atr=0.0)
+
+        assert len(tiers) == 3
+        assert tiers[0].level > Decimal("150.00")
+        assert trailing > Decimal("0")
+
+    def test_risk_level_affects_tier_distance(self, generator):
+        """Higher risk level should produce tighter tiers."""
+        signal = TechnicalSignal(
+            symbol="AAPL", direction="long", strength=0.8,
+            entry_price=Decimal("100.00"), indicators={}, rationale="",
+        )
+
+        ctx_low = MarketContext(
+            regime="normal_bull", confidence=0.8, risk_level="low",
+            sector_outlook={}, macro_indicators={},
+        )
+        ctx_extreme = MarketContext(
+            regime="crisis", confidence=0.8, risk_level="extreme",
+            sector_outlook={}, macro_indicators={},
+        )
+
+        tiers_low, _ = generator._calculate_profit_tiers(signal, ctx_low, atr=5.0)
+        tiers_ext, _ = generator._calculate_profit_tiers(signal, ctx_extreme, atr=5.0)
+
+        # Low risk → wider tiers, extreme → tighter
+        assert tiers_low[0].level > tiers_ext[0].level
+
+    def test_generate_includes_profit_tiers(self, generator, market_context, risk_assessment):
+        """generate() output should include profit_tiers and trailing_stop_pct."""
+        signals = [
+            TechnicalSignal(
+                symbol="AAPL", direction="long", strength=0.8,
+                entry_price=Decimal("150.00"), indicators={}, rationale="Buy",
+            ),
+        ]
+
+        result = generator.generate(
+            technical_signals=signals,
+            risk_assessment=risk_assessment,
+            market_context=market_context,
+            user_preferences={"risk_profile": "MODERATE"},
+        )
+
+        assert len(result) == 1
+        assert len(result[0].profit_tiers) == 3
+        assert result[0].trailing_stop_pct >= Decimal("0")

@@ -5,6 +5,7 @@ from decimal import Decimal
 
 import grpc
 from shared.generated import market_data_pb2, market_data_pb2_grpc
+from shared.utils.resilience import grpc_retry
 
 from ..config import config
 
@@ -46,6 +47,7 @@ class MarketDataClient:
         self.stub = market_data_pb2_grpc.MarketDataServiceStub(self.channel)
         logger.info(f"Connected to Market Data Service at {self.address}")
 
+    @grpc_retry
     async def get_current_price(self, symbol: str) -> Decimal:
         """Get current price for a symbol.
 
@@ -81,6 +83,7 @@ class MarketDataClient:
             )
             return Decimal("0")
 
+    @grpc_retry
     async def get_previous_close(self, symbol: str) -> Decimal | None:
         """Get previous day's closing price.
 

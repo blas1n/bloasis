@@ -224,6 +224,15 @@ message UpdatePreferencesResponse {
   UserPreferences preferences = 2;
 }
 
+// ProfitTier - Single profit-taking tier
+message ProfitTier {
+  // Target price level
+  double level = 1;
+
+  // Percentage of position to close at this tier (0.0-1.0)
+  double size_pct = 2;
+}
+
 // GetPreferencesRequest - Get user preferences
 message GetPreferencesRequest {
   // User ID

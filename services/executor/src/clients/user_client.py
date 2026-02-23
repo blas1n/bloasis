@@ -8,6 +8,7 @@ from dataclasses import dataclass
 
 import grpc
 from shared.generated import user_pb2, user_pb2_grpc
+from shared.utils.resilience import grpc_retry
 
 from ..config import config
 
@@ -55,6 +56,7 @@ class UserClient:
         self.stub = user_pb2_grpc.UserServiceStub(self.channel)
         logger.info(f"Connected to User Service at {self.address}")
 
+    @grpc_retry
     async def get_broker_config(self) -> BrokerConfig:
         """Get broker credentials from User Service.
 

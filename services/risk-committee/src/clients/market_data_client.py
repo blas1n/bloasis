@@ -4,6 +4,7 @@ import logging
 
 import grpc
 from shared.generated import market_data_pb2, market_data_pb2_grpc
+from shared.utils.resilience import grpc_retry
 
 from ..config import config
 
@@ -45,6 +46,7 @@ class MarketDataClient:
         self.stub = market_data_pb2_grpc.MarketDataServiceStub(self.channel)
         logger.info(f"Connected to Market Data Service at {self.address}")
 
+    @grpc_retry
     async def get_vix(self) -> float:
         """Get current VIX level.
 
@@ -78,6 +80,7 @@ class MarketDataClient:
 
             raise
 
+    @grpc_retry
     async def get_average_volume(self, symbol: str, days: int = 20) -> float:
         """Get average daily volume for a symbol.
 
@@ -118,6 +121,7 @@ class MarketDataClient:
 
             raise
 
+    @grpc_retry
     async def get_stock_info(self, symbol: str) -> market_data_pb2.GetStockInfoResponse:
         """Get stock information/metadata including sector.
 
@@ -152,6 +156,38 @@ class MarketDataClient:
                 raise TimeoutError("Market Data Service request timed out") from e
 
             raise
+
+    @grpc_retry
+    async def get_ohlcv_closes(self, symbol: str, days: int = 60) -> list[float]:
+        """Get closing prices for a symbol.
+
+        Args:
+            symbol: Stock ticker symbol.
+            days: Number of days of data.
+
+        Returns:
+            List of closing prices, or empty list on failure.
+        """
+        if not self.stub:
+            await self.connect()
+
+        assert self.stub is not None
+
+        try:
+            request = market_data_pb2.GetOHLCVRequest(
+                symbol=symbol, period=f"{days}d", interval="1d",
+            )
+            response = await self.stub.GetOHLCV(request, timeout=10.0)
+
+            if response.bars:
+                return [bar.close for bar in response.bars]
+            return []
+
+        except grpc.RpcError as e:
+            logger.warning(
+                f"Failed to get OHLCV closes for {symbol}: {e.code()}"
+            )
+            return []
 
     async def close(self) -> None:
         """Close gRPC connection."""

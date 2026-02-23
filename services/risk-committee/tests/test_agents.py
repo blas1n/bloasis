@@ -1,5 +1,7 @@
 """Tests for Risk Agents."""
 
+from unittest.mock import AsyncMock
+
 import pytest
 
 from src.agents import ConcentrationRiskAgent, MarketRiskAgent, PositionRiskAgent
@@ -178,18 +180,103 @@ class TestConcentrationRiskAgent:
         assert float(exposure) == 11550.0
 
     @pytest.mark.asyncio
-    async def test_check_correlation_same_sector(self, agent, sample_portfolio):
-        """Test correlation check for same sector."""
+    async def test_check_correlation_same_sector_fallback(self, agent, sample_portfolio):
+        """Test correlation fallback for same sector (no market data)."""
         # MSFT is in Technology, same as AAPL and GOOGL
+        # With empty closes, fallback assigns 0.6 for same-sector
         correlation = await agent._check_correlation("MSFT", sample_portfolio)
-        assert correlation >= 0.9
+        assert correlation >= 0.6
 
     @pytest.mark.asyncio
-    async def test_check_correlation_different_sector(self, agent, sample_portfolio):
-        """Test correlation check for different sector."""
+    async def test_check_correlation_different_sector_fallback(self, agent, sample_portfolio):
+        """Test correlation fallback for different sector (no market data)."""
         # XOM is in Energy, different from portfolio's Technology
         correlation = await agent._check_correlation("XOM", sample_portfolio)
-        assert correlation < 0.9
+        assert correlation == 0.0  # No data + different sector → 0.0
+
+    @pytest.mark.asyncio
+    async def test_check_correlation_with_return_data(
+        self, agent, mock_market_data_client, sample_portfolio
+    ):
+        """Test Pearson correlation with actual return data."""
+        import numpy as np
+
+        # Generate correlated price series
+        np.random.seed(42)
+        base_returns = np.random.normal(0.001, 0.02, 60)
+        # MSFT highly correlated with AAPL
+        msft_prices = 300.0 * np.cumprod(1 + base_returns)
+        aapl_prices = 175.0 * np.cumprod(1 + base_returns * 0.9 + np.random.normal(0, 0.005, 60))
+        googl_prices = 140.0 * np.cumprod(1 + base_returns * 0.8 + np.random.normal(0, 0.005, 60))
+
+        def ohlcv_side_effect(symbol, days=60):
+            price_map = {
+                "MSFT": msft_prices.tolist(),
+                "AAPL": aapl_prices.tolist(),
+                "GOOGL": googl_prices.tolist(),
+            }
+            return price_map.get(symbol, [])
+
+        mock_market_data_client.get_ohlcv_closes = AsyncMock(side_effect=ohlcv_side_effect)
+
+        correlation = await agent._check_correlation("MSFT", sample_portfolio)
+        # Highly correlated series should produce high correlation
+        assert correlation > 0.5
+
+    @pytest.mark.asyncio
+    async def test_check_correlation_empty_portfolio(self, agent, empty_portfolio):
+        """Correlation with empty portfolio should be 0."""
+        correlation = await agent._check_correlation("AAPL", empty_portfolio)
+        assert correlation == 0.0
+
+
+class TestPearsonCorrelation:
+    """Tests for ConcentrationRiskAgent._pearson_correlation static method."""
+
+    def test_perfectly_correlated(self):
+        """Perfectly correlated series → correlation ~1.0."""
+        closes_a = [100.0 + i for i in range(50)]
+        closes_b = [200.0 + i * 2 for i in range(50)]
+
+        corr = ConcentrationRiskAgent._pearson_correlation(closes_a, closes_b)
+        assert corr is not None
+        assert corr > 0.9
+
+    def test_uncorrelated(self):
+        """Series with no correlation → correlation near 0."""
+        import numpy as np
+
+        np.random.seed(123)
+        closes_a = (100 + np.cumsum(np.random.randn(50))).tolist()
+        closes_b = (200 + np.cumsum(np.random.randn(50))).tolist()
+
+        corr = ConcentrationRiskAgent._pearson_correlation(closes_a, closes_b)
+        assert corr is not None
+        assert abs(corr) < 0.5
+
+    def test_insufficient_data_returns_none(self):
+        """Too few data points → None."""
+        closes_a = [100.0, 101.0, 102.0]
+        closes_b = [200.0, 201.0, 202.0]
+
+        corr = ConcentrationRiskAgent._pearson_correlation(closes_a, closes_b)
+        assert corr is None
+
+    def test_constant_series_returns_none(self):
+        """Constant series (zero std) → None."""
+        closes_a = [100.0] * 50
+        closes_b = [200.0 + i for i in range(50)]
+
+        corr = ConcentrationRiskAgent._pearson_correlation(closes_a, closes_b)
+        assert corr is None
+
+    def test_different_lengths_aligned(self):
+        """Different length series should be aligned to shorter."""
+        closes_a = [100.0 + i * 0.5 for i in range(60)]
+        closes_b = [200.0 + i * 0.3 for i in range(50)]
+
+        corr = ConcentrationRiskAgent._pearson_correlation(closes_a, closes_b)
+        assert corr is not None
 
 
 class TestMarketRiskAgent:

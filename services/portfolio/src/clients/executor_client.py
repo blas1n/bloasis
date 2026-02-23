@@ -10,6 +10,7 @@ from decimal import Decimal
 
 import grpc
 from shared.generated import executor_pb2, executor_pb2_grpc
+from shared.utils.resilience import grpc_retry
 
 from ..config import config
 
@@ -70,6 +71,7 @@ class ExecutorClient:
         self.stub = executor_pb2_grpc.ExecutorServiceStub(self.channel)
         logger.info(f"Connected to Executor Service at {self.address}")
 
+    @grpc_retry
     async def get_positions(self, user_id: str) -> list[AlpacaPositionData]:
         """Get positions from Alpaca via Executor.
 
@@ -102,6 +104,7 @@ class ExecutorClient:
             logger.error(f"Failed to get positions: {e.code()} - {e.details()}")
             raise
 
+    @grpc_retry
     async def get_account(self, user_id: str) -> AlpacaAccountData:
         """Get account info from Alpaca via Executor.
 

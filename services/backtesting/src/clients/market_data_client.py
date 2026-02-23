@@ -8,6 +8,7 @@ import logging
 import grpc
 
 from shared.generated import market_data_pb2, market_data_pb2_grpc
+from shared.utils.resilience import grpc_retry
 
 from ..config import config
 
@@ -49,6 +50,7 @@ class MarketDataClient:
         self.stub = market_data_pb2_grpc.MarketDataServiceStub(self.channel)
         logger.info(f"Connected to Market Data Service at {self.address}")
 
+    @grpc_retry
     async def get_ohlcv(self, symbol: str, period: str = "1y", interval: str = "1d") -> list[dict]:
         """Get OHLCV data for a symbol.
 
@@ -102,6 +104,7 @@ class MarketDataClient:
             # Re-raise other errors
             raise
 
+    @grpc_retry
     async def get_batch_ohlcv(
         self, symbols: list[str], period: str = "1y", interval: str = "1d"
     ) -> dict[str, list[dict]]:

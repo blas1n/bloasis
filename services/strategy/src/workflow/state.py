@@ -8,7 +8,7 @@ This module defines the state management for the 5-Layer AI Flow:
 - Layer 5: Event Publisher
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
 from enum import StrEnum
 from typing import TypedDict
@@ -62,6 +62,14 @@ class RiskAssessment:
 
 
 @dataclass
+class ProfitTier:
+    """Single profit-taking tier."""
+
+    level: Decimal  # Target price
+    size_pct: Decimal  # Percentage of position to close (0-1)
+
+
+@dataclass
 class TradingSignal:
     """Final trading signal from Layer 4 (Signal Generator)."""
 
@@ -71,9 +79,11 @@ class TradingSignal:
     size_recommendation: Decimal
     entry_price: Decimal
     stop_loss: Decimal
-    take_profit: Decimal
+    take_profit: Decimal  # Legacy single TP (= tier 2 level)
     rationale: str
     risk_approved: bool
+    profit_tiers: list[ProfitTier] = field(default_factory=list)
+    trailing_stop_pct: Decimal = Decimal("0")
 
 
 class AnalysisState(TypedDict):
