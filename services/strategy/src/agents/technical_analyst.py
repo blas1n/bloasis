@@ -12,6 +12,10 @@ from shared.ai_clients import ClaudeClient
 
 from ..clients.market_data_client import MarketDataClient
 from ..prompts import format_technical_prompt, get_technical_model_parameters
+from ..technical_indicators import (
+    calculate_indicators,
+    format_indicators_summary,
+)
 from ..workflow.state import MarketContext, TechnicalSignal
 
 logger = logging.getLogger(__name__)
@@ -168,30 +172,31 @@ class TechnicalAnalyst:
         return stock_data
 
     def _format_ohlcv_summary(self, ohlcv_data: dict) -> str:
-        """Format OHLCV data for prompt.
+        """Format OHLCV data with TA-Lib indicators for prompt.
 
         Args:
             ohlcv_data: Dictionary of symbol -> OHLCV bars
 
         Returns:
-            Formatted string summary
+            Formatted string summary with technical indicators
         """
         lines = []
         for symbol, bars in ohlcv_data.items():
-            if bars and len(bars) > 0:
-                latest = bars[-1]
-                # Calculate 20-day average if enough data
-                if len(bars) >= 20:
-                    avg_20d = sum(b["close"] for b in bars[-20:]) / 20
-                else:
-                    avg_20d = latest["close"]
-
-                lines.append(
-                    f"{symbol}: Last={latest['close']:.2f}, "
-                    f"Vol={latest['volume']:,}, "
-                    f"20d_avg={avg_20d:.2f}"
-                )
-            else:
+            if not bars:
                 lines.append(f"{symbol}: No data available")
+                continue
+
+            latest = bars[-1]
+            line = (
+                f"{symbol}: Last={latest['close']:.2f}, "
+                f"Vol={latest['volume']:,}"
+            )
+
+            # Add TA-Lib indicators if enough data
+            indicators = calculate_indicators(symbol, bars)
+            if indicators:
+                line = format_indicators_summary(indicators)
+
+            lines.append(line)
 
         return "\n".join(lines) if lines else "No OHLCV data available"

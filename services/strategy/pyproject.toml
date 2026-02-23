@@ -17,6 +17,8 @@ dependencies = [
     "anthropic>=0.18.0",
     "httpx>=0.27.0",
     "aiokafka>=0.8.0",
+    "TA-Lib>=0.4.32",
+    "numpy>=1.24.0",
 ]
 
 [project.optional-dependencies]

@@ -364,18 +364,24 @@ class TestSignalGenerator:
 
     def test_calculate_base_size_conservative(self, generator):
         """Test position size calculation for conservative profile."""
-        size = generator._calculate_base_size(strength=0.8, risk_profile="CONSERVATIVE")
-        assert size == Decimal("0.04")  # 0.8 * 0.05
+        size = generator._calculate_base_size(
+            strength=0.8, risk_profile="CONSERVATIVE", atr=0.0, entry_price=150.0,
+        )
+        assert size == Decimal("0.0400")  # 0.8 * 0.05 (no vol adjustment)
 
     def test_calculate_base_size_aggressive(self, generator):
         """Test position size calculation for aggressive profile."""
-        size = generator._calculate_base_size(strength=0.8, risk_profile="AGGRESSIVE")
-        assert size == Decimal("0.12")  # 0.8 * 0.15
+        size = generator._calculate_base_size(
+            strength=0.8, risk_profile="AGGRESSIVE", atr=0.0, entry_price=150.0,
+        )
+        assert size == Decimal("0.1200")  # 0.8 * 0.15 (no vol adjustment)
 
     def test_calculate_levels_long(self, generator, technical_signals, market_context):
         """Test stop-loss and take-profit calculation for long position."""
         signal = technical_signals[0]
-        stop_loss, take_profit = generator._calculate_levels(signal, market_context)
+        stop_loss, take_profit = generator._calculate_levels(
+            signal, market_context, atr=0.0,
+        )
 
         assert stop_loss < signal.entry_price
         assert take_profit > signal.entry_price
@@ -391,9 +397,11 @@ class TestSignalGenerator:
         )
 
         signal = technical_signals[0]
-        stop_loss, take_profit = generator._calculate_levels(signal, high_risk_context)
+        stop_loss, take_profit = generator._calculate_levels(
+            signal, high_risk_context, atr=0.0,
+        )
 
-        # Stops should be tighter in high risk
+        # Stops should be tighter in high risk (high → SL 1%, TP 3%)
         assert stop_loss == signal.entry_price * Decimal("0.99")
 
     def test_signal_to_action(self, generator):
@@ -660,17 +668,23 @@ class TestSignalGeneratorEdgeCases:
     def test_calculate_base_size_unknown_profile(self, generator):
         """Test position size calculation with unknown risk profile."""
         # Unknown profile should default to MODERATE (0.10)
-        size = generator._calculate_base_size(strength=0.8, risk_profile="UNKNOWN")
-        assert size == Decimal("0.08")  # 0.8 * 0.10
+        size = generator._calculate_base_size(
+            strength=0.8, risk_profile="UNKNOWN", atr=0.0, entry_price=150.0,
+        )
+        assert size == Decimal("0.0800")  # 0.8 * 0.10
 
     def test_calculate_base_size_zero_strength(self, generator):
         """Test position size calculation with zero strength."""
-        size = generator._calculate_base_size(strength=0.0, risk_profile="MODERATE")
+        size = generator._calculate_base_size(
+            strength=0.0, risk_profile="MODERATE", atr=0.0, entry_price=150.0,
+        )
         assert size == Decimal("0.0000")
 
     def test_calculate_base_size_max_strength(self, generator):
         """Test position size calculation with max strength."""
-        size = generator._calculate_base_size(strength=1.0, risk_profile="AGGRESSIVE")
+        size = generator._calculate_base_size(
+            strength=1.0, risk_profile="AGGRESSIVE", atr=0.0, entry_price=150.0,
+        )
         assert size == Decimal("0.1500")  # 1.0 * 0.15
 
     def test_calculate_levels_short_normal_risk(self, generator):
@@ -691,9 +705,11 @@ class TestSignalGeneratorEdgeCases:
             macro_indicators={},
         )
 
-        stop_loss, take_profit = generator._calculate_levels(signal, market_context)
+        stop_loss, take_profit = generator._calculate_levels(
+            signal, market_context, atr=0.0,
+        )
 
-        # For short: stop_loss > entry, take_profit < entry
+        # For short: stop_loss > entry, take_profit < entry (fallback %)
         assert stop_loss > signal.entry_price
         assert take_profit < signal.entry_price
         assert stop_loss == signal.entry_price * Decimal("1.02")  # +2%
@@ -717,9 +733,11 @@ class TestSignalGeneratorEdgeCases:
             macro_indicators={},
         )
 
-        stop_loss, take_profit = generator._calculate_levels(signal, market_context)
+        stop_loss, take_profit = generator._calculate_levels(
+            signal, market_context, atr=0.0,
+        )
 
-        # For short in high risk: tighter stops
+        # For short in high risk: tighter stops (fallback %)
         assert stop_loss == signal.entry_price * Decimal("1.01")  # +1%
         assert take_profit == signal.entry_price * Decimal("0.97")  # -3%
 
@@ -741,9 +759,11 @@ class TestSignalGeneratorEdgeCases:
             macro_indicators={},
         )
 
-        stop_loss, take_profit = generator._calculate_levels(signal, market_context)
+        stop_loss, take_profit = generator._calculate_levels(
+            signal, market_context, atr=0.0,
+        )
 
-        # For long in extreme risk: very tight stops
+        # For long in extreme risk: very tight stops (fallback %)
         assert stop_loss == signal.entry_price * Decimal("0.995")  # -0.5%
         assert take_profit == signal.entry_price * Decimal("1.02")  # +2%
 
@@ -765,9 +785,11 @@ class TestSignalGeneratorEdgeCases:
             macro_indicators={},
         )
 
-        stop_loss, take_profit = generator._calculate_levels(signal, market_context)
+        stop_loss, take_profit = generator._calculate_levels(
+            signal, market_context, atr=0.0,
+        )
 
-        # For short in extreme risk: very tight stops
+        # For short in extreme risk: very tight stops (fallback %)
         assert stop_loss == signal.entry_price * Decimal("1.005")  # +0.5%
         assert take_profit == signal.entry_price * Decimal("0.98")  # -2%
 
@@ -789,9 +811,11 @@ class TestSignalGeneratorEdgeCases:
             macro_indicators={},
         )
 
-        stop_loss, take_profit = generator._calculate_levels(signal, market_context)
+        stop_loss, take_profit = generator._calculate_levels(
+            signal, market_context, atr=0.0,
+        )
 
-        # For long in low risk: normal stops
+        # For long in low risk: normal stops (fallback %)
         assert stop_loss == signal.entry_price * Decimal("0.98")  # -2%
         assert take_profit == signal.entry_price * Decimal("1.05")  # +5%
 
