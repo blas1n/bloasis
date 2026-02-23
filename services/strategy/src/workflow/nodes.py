@@ -184,10 +184,22 @@ async def technical_analysis_node(state: AnalysisState) -> dict:
             market_context=state["market_context"],
         )
 
+        # Cache OHLCV data for signal generation (ATR-based SL/TP)
+        ohlcv_data = {}
+        market_data = MarketDataClient()
+        for pick in state["stock_picks"]:
+            symbol = pick["symbol"]
+            try:
+                bars = await market_data.get_ohlcv(symbol, period="60d")
+                ohlcv_data[symbol] = bars
+            except Exception:
+                ohlcv_data[symbol] = []
+
         logger.info(f"[{analysis_id}] Technical analysis complete: {len(signals)} signals")
 
         return {
             "technical_signals": signals,
+            "ohlcv_data": ohlcv_data,
             "phase": WorkflowPhase.RISK_ASSESSMENT,
         }
 
@@ -283,6 +295,7 @@ async def signal_generation_node(state: AnalysisState) -> dict:
             risk_assessment=state["risk_assessment"],
             market_context=state["market_context"],
             user_preferences=state["preferences"],
+            ohlcv_data=state.get("ohlcv_data", {}),
         )
 
         logger.info(f"[{analysis_id}] Signal generation complete: {len(trading_signals)} signals")

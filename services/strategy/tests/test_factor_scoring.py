@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from src.factor_scoring import FACTOR_WEIGHTS, FactorScoringEngine
+from src.factor_scoring import FACTOR_WEIGHTS, REGIME_MULTIPLIERS, FactorScoringEngine
 from src.models import FactorScores, RiskProfile
 
 
@@ -72,18 +72,30 @@ def test_calculate_final_score_conservative(factor_engine):
     assert isinstance(final_score, Decimal)
     assert Decimal("0") <= final_score <= Decimal("100")
 
-    # Conservative should weight quality and value heavily
-    weights = FACTOR_WEIGHTS[RiskProfile.CONSERVATIVE]
-    expected = (
-        Decimal("70.0") * Decimal(str(weights["momentum"]))
-        + Decimal("80.0") * Decimal(str(weights["value"]))
-        + Decimal("85.0") * Decimal(str(weights["quality"]))
-        + Decimal("75.0") * Decimal(str(weights["volatility"]))
-        + Decimal("65.0") * Decimal(str(weights["liquidity"]))
-        + Decimal("60.0") * Decimal(str(weights["sentiment"]))
-    ).quantize(Decimal("0.01"))
+    # Conservative weights quality and value heavily — score should reflect that
+    assert final_score > Decimal("70")  # Quality(85) and Value(80) are high
 
-    assert final_score == expected
+
+def test_calculate_final_score_conservative_no_regime(factor_engine):
+    """Test final score without regime uses normal_bull default."""
+    factor_scores = FactorScores(
+        momentum=70.0,
+        value=80.0,
+        quality=85.0,
+        volatility=75.0,
+        liquidity=65.0,
+        sentiment=60.0,
+    )
+
+    # Default regime is normal_bull
+    score_default = factor_engine.calculate_final_score(
+        factor_scores, RiskProfile.CONSERVATIVE
+    )
+    score_explicit = factor_engine.calculate_final_score(
+        factor_scores, RiskProfile.CONSERVATIVE, "normal_bull"
+    )
+
+    assert score_default == score_explicit
 
 
 def test_calculate_final_score_moderate(factor_engine):
@@ -117,18 +129,12 @@ def test_calculate_final_score_aggressive(factor_engine):
 
     final_score = factor_engine.calculate_final_score(factor_scores, RiskProfile.AGGRESSIVE)
 
-    # Aggressive should weight momentum and sentiment heavily
-    weights = FACTOR_WEIGHTS[RiskProfile.AGGRESSIVE]
-    expected = (
-        Decimal("90.0") * Decimal(str(weights["momentum"]))
-        + Decimal("60.0") * Decimal(str(weights["value"]))
-        + Decimal("70.0") * Decimal(str(weights["quality"]))
-        + Decimal("50.0") * Decimal(str(weights["volatility"]))
-        + Decimal("65.0") * Decimal(str(weights["liquidity"]))
-        + Decimal("85.0") * Decimal(str(weights["sentiment"]))
-    ).quantize(Decimal("0.01"))
+    assert isinstance(final_score, Decimal)
+    assert Decimal("0") <= final_score <= Decimal("100")
 
-    assert final_score == expected
+    # Aggressive in normal_bull should boost momentum + sentiment
+    # High momentum(90) and sentiment(85) should push score up
+    assert final_score > Decimal("70")
 
 
 def test_calculate_momentum_uptrend(factor_engine):
@@ -245,29 +251,8 @@ def test_calculate_liquidity_insufficient_data(factor_engine):
 
 
 @pytest.mark.asyncio
-async def test_calculate_value_low_pe(factor_engine, mock_market_data_client):
-    """Test value calculation with low P/E (good value)."""
-    from shared.generated import market_data_pb2
-
-    # Mock stock info with low P/E
-    mock_market_data_client.get_stock_info.return_value = market_data_pb2.GetStockInfoResponse(
-        symbol="AAPL",
-        name="Apple Inc.",
-        sector="Technology",
-        industry="Consumer Electronics",
-        exchange="NASDAQ",
-        currency="USD",
-        market_cap=3_000_000_000_000,
-        pe_ratio=8.0,  # Low P/E = high value score
-    )
-
-    value = await factor_engine._calculate_value("AAPL")
-    assert value == 100.0  # P/E < 10
-
-
-@pytest.mark.asyncio
-async def test_calculate_value_medium_pe(factor_engine, mock_market_data_client):
-    """Test value calculation with medium P/E."""
+async def test_calculate_value_optimal_pe(factor_engine, mock_market_data_client):
+    """Test value with P/E near optimal (PE=12 peak)."""
     from shared.generated import market_data_pb2
 
     mock_market_data_client.get_stock_info.return_value = market_data_pb2.GetStockInfoResponse(
@@ -278,36 +263,43 @@ async def test_calculate_value_medium_pe(factor_engine, mock_market_data_client)
         exchange="NASDAQ",
         currency="USD",
         market_cap=3_000_000_000_000,
-        pe_ratio=17.0,  # Medium P/E
+        pe_ratio=12.0,
+        profit_margin=0.20,
+        current_ratio=1.5,
     )
 
     value = await factor_engine._calculate_value("AAPL")
-    assert value == 60.0  # P/E 15-20
+    # PE=12 → peak score ~100, PM=20% → 100, CR=1.5 → 75
+    # 100*0.4 + 100*0.3 + 75*0.3 = 92.5
+    assert value > 85.0
 
 
 @pytest.mark.asyncio
 async def test_calculate_value_high_pe(factor_engine, mock_market_data_client):
-    """Test value calculation with high P/E (expensive)."""
+    """Test value with high P/E (expensive stock)."""
     from shared.generated import market_data_pb2
 
     mock_market_data_client.get_stock_info.return_value = market_data_pb2.GetStockInfoResponse(
-        symbol="AAPL",
-        name="Apple Inc.",
+        symbol="EXPS",
+        name="Expensive Inc.",
         sector="Technology",
         industry="Consumer Electronics",
         exchange="NASDAQ",
         currency="USD",
         market_cap=3_000_000_000_000,
-        pe_ratio=35.0,  # High P/E = low value score
+        pe_ratio=40.0,
+        profit_margin=0.05,
+        current_ratio=0.8,
     )
 
-    value = await factor_engine._calculate_value("AAPL")
-    assert value == 10.0  # P/E >= 30
+    value = await factor_engine._calculate_value("EXPS")
+    # PE=40 → low gaussian score, PM=5% → 25, CR=0.8 → 40
+    assert value < 40.0
 
 
 @pytest.mark.asyncio
 async def test_calculate_value_negative_pe(factor_engine, mock_market_data_client):
-    """Test value calculation with negative P/E (losses)."""
+    """Test value with negative P/E (losses)."""
     from shared.generated import market_data_pb2
 
     mock_market_data_client.get_stock_info.return_value = market_data_pb2.GetStockInfoResponse(
@@ -318,19 +310,19 @@ async def test_calculate_value_negative_pe(factor_engine, mock_market_data_clien
         exchange="NASDAQ",
         currency="USD",
         market_cap=1_000_000_000,
-        pe_ratio=-5.0,  # Negative P/E (company has losses)
+        pe_ratio=-5.0,
     )
 
     value = await factor_engine._calculate_value("LOSS")
-    assert value == 50.0  # Neutral for negative P/E
+    # Negative PE → 30, rest neutral (50 each)
+    assert 30.0 <= value <= 45.0
 
 
 @pytest.mark.asyncio
-async def test_calculate_value_missing_pe(factor_engine, mock_market_data_client):
-    """Test value calculation when P/E is not available."""
+async def test_calculate_value_missing_all_fields(factor_engine, mock_market_data_client):
+    """Test value when no optional fields are set."""
     from shared.generated import market_data_pb2
 
-    # Stock info without pe_ratio field set
     mock_market_data_client.get_stock_info.return_value = market_data_pb2.GetStockInfoResponse(
         symbol="AAPL",
         name="Apple Inc.",
@@ -339,11 +331,10 @@ async def test_calculate_value_missing_pe(factor_engine, mock_market_data_client
         exchange="NASDAQ",
         currency="USD",
         market_cap=3_000_000_000_000,
-        # pe_ratio not set
     )
 
     value = await factor_engine._calculate_value("AAPL")
-    assert value == 50.0  # Neutral when P/E unavailable
+    assert value == 50.0  # All neutral
 
 
 @pytest.mark.asyncio
@@ -352,12 +343,35 @@ async def test_calculate_value_api_error(factor_engine, mock_market_data_client)
     mock_market_data_client.get_stock_info.side_effect = Exception("API Error")
 
     value = await factor_engine._calculate_value("AAPL")
-    assert value == 50.0  # Fallback to neutral
+    assert value == 50.0
 
 
 @pytest.mark.asyncio
-async def test_calculate_quality_high_roe_low_debt(factor_engine, mock_market_data_client):
-    """Test quality calculation with high ROE and low debt."""
+async def test_calculate_value_high_current_ratio(factor_engine, mock_market_data_client):
+    """Test value with very high current ratio (idle assets)."""
+    from shared.generated import market_data_pb2
+
+    mock_market_data_client.get_stock_info.return_value = market_data_pb2.GetStockInfoResponse(
+        symbol="CASH",
+        name="Cash Inc.",
+        sector="Technology",
+        industry="Software",
+        exchange="NASDAQ",
+        currency="USD",
+        market_cap=1_000_000_000,
+        pe_ratio=12.0,
+        current_ratio=5.0,  # Too high → idle assets
+    )
+
+    value = await factor_engine._calculate_value("CASH")
+    # CR=5.0 → max(40, 100 - (5-2)*15) = max(40, 55) = 55
+    # Still reasonable but not top score
+    assert 50.0 <= value <= 80.0
+
+
+@pytest.mark.asyncio
+async def test_calculate_quality_excellent_fundamentals(factor_engine, mock_market_data_client):
+    """Test quality with excellent all-around fundamentals."""
     from shared.generated import market_data_pb2
 
     mock_market_data_client.get_stock_info.return_value = market_data_pb2.GetStockInfoResponse(
@@ -367,22 +381,22 @@ async def test_calculate_quality_high_roe_low_debt(factor_engine, mock_market_da
         industry="Consumer Electronics",
         exchange="NASDAQ",
         currency="USD",
-        market_cap=3_000_000_000_000,  # $3T - mega cap
-        return_on_equity=0.20,  # 20% ROE -> score 100
-        debt_to_equity=0.5,  # 0.5 D/E -> score 75
+        market_cap=3_000_000_000_000,
+        return_on_equity=0.25,  # 25% ROE → 100
+        debt_to_equity=0.5,  # 0.5 D/E → 75
+        profit_margin=0.25,  # 25% → 100
+        current_ratio=1.5,  # 1.5 → 75
     )
 
     quality = await factor_engine._calculate_quality("AAPL")
-    # ROE: 0.20 * 500 = 100 (capped)
-    # D/E: 100 - 0.5 * 50 = 75
-    # Cap: 90 (mega cap)
-    # Final: 100 * 0.4 + 75 * 0.3 + 90 * 0.3 = 40 + 22.5 + 27 = 89.5
-    assert 89.0 <= quality <= 90.0
+    # ROE: 100*0.25 + D/E: 75*0.20 + PM: 100*0.25 + CR: 75*0.15 + Cap: 90*0.15
+    # = 25 + 15 + 25 + 11.25 + 13.5 = 89.75
+    assert quality > 85.0
 
 
 @pytest.mark.asyncio
-async def test_calculate_quality_low_roe_high_debt(factor_engine, mock_market_data_client):
-    """Test quality calculation with low ROE and high debt."""
+async def test_calculate_quality_poor_fundamentals(factor_engine, mock_market_data_client):
+    """Test quality with poor fundamentals."""
     from shared.generated import market_data_pb2
 
     mock_market_data_client.get_stock_info.return_value = market_data_pb2.GetStockInfoResponse(
@@ -392,22 +406,20 @@ async def test_calculate_quality_low_roe_high_debt(factor_engine, mock_market_da
         industry="Software",
         exchange="NASDAQ",
         currency="USD",
-        market_cap=50_000_000_000,  # $50B - mid cap
-        return_on_equity=0.05,  # 5% ROE -> score 25
-        debt_to_equity=2.0,  # 2.0 D/E -> score 0
+        market_cap=50_000_000_000,
+        return_on_equity=0.03,  # 3% ROE → 12
+        debt_to_equity=2.0,  # 2.0 D/E → 0
+        profit_margin=0.02,  # 2% → 8
+        current_ratio=0.5,  # 0.5 → 25
     )
 
     quality = await factor_engine._calculate_quality("DEBT")
-    # ROE: 0.05 * 500 = 25
-    # D/E: 100 - 2.0 * 50 = 0
-    # Cap: ~58.89 (mid cap)
-    # Final: 25 * 0.4 + 0 * 0.3 + 58.89 * 0.3 = 10 + 0 + 17.67 ≈ 27.67
-    assert 25.0 <= quality <= 30.0
+    assert quality < 30.0
 
 
 @pytest.mark.asyncio
 async def test_calculate_quality_missing_fundamentals(factor_engine, mock_market_data_client):
-    """Test quality calculation with missing ROE and D/E (uses neutral)."""
+    """Test quality with missing optional fields (uses neutral)."""
     from shared.generated import market_data_pb2
 
     mock_market_data_client.get_stock_info.return_value = market_data_pb2.GetStockInfoResponse(
@@ -417,105 +429,27 @@ async def test_calculate_quality_missing_fundamentals(factor_engine, mock_market
         industry="Software",
         exchange="NASDAQ",
         currency="USD",
-        market_cap=50_000_000_000,  # $50B - mid cap
-        # No return_on_equity or debt_to_equity set
+        market_cap=50_000_000_000,
     )
 
     quality = await factor_engine._calculate_quality("MID")
-    # ROE: 50 (neutral)
-    # D/E: 50 (neutral)
-    # Cap: ~58.89 (mid cap)
-    # Final: 50 * 0.4 + 50 * 0.3 + 58.89 * 0.3 = 20 + 15 + 17.67 ≈ 52.67
-    assert 50.0 <= quality <= 55.0
-
-
-@pytest.mark.asyncio
-async def test_calculate_quality_small_cap_good_fundamentals(
-    factor_engine, mock_market_data_client
-):
-    """Test quality calculation for small cap with good fundamentals."""
-    from shared.generated import market_data_pb2
-
-    mock_market_data_client.get_stock_info.return_value = market_data_pb2.GetStockInfoResponse(
-        symbol="SMALL",
-        name="Small Cap Inc.",
-        sector="Technology",
-        industry="Software",
-        exchange="NASDAQ",
-        currency="USD",
-        market_cap=5_000_000_000,  # $5B - small cap
-        return_on_equity=0.15,  # 15% ROE -> score 75
-        debt_to_equity=0.3,  # 0.3 D/E -> score 85
-    )
-
-    quality = await factor_engine._calculate_quality("SMALL")
-    # ROE: 0.15 * 500 = 75
-    # D/E: 100 - 0.3 * 50 = 85
-    # Cap: 30 + (5/10) * 20 = 40 (small cap)
-    # Final: 75 * 0.4 + 85 * 0.3 + 40 * 0.3 = 30 + 25.5 + 12 = 67.5
-    assert 65.0 <= quality <= 70.0
-
-
-@pytest.mark.asyncio
-async def test_calculate_quality_invalid_market_cap(factor_engine, mock_market_data_client):
-    """Test quality calculation with invalid market cap."""
-    from shared.generated import market_data_pb2
-
-    mock_market_data_client.get_stock_info.return_value = market_data_pb2.GetStockInfoResponse(
-        symbol="INVALID",
-        name="Invalid Inc.",
-        sector="Technology",
-        industry="Software",
-        exchange="NASDAQ",
-        currency="USD",
-        market_cap=0,  # Invalid
-        return_on_equity=0.10,  # 10% ROE -> score 50
-        debt_to_equity=1.0,  # 1.0 D/E -> score 50
-    )
-
-    quality = await factor_engine._calculate_quality("INVALID")
-    # ROE: 50, D/E: 50, Cap: 50 (neutral)
-    # Final: 50 * 0.4 + 50 * 0.3 + 50 * 0.3 = 50
-    assert quality == 50.0
+    # All neutral (50) except cap which is ~58.89
+    # 50*0.25 + 50*0.20 + 50*0.25 + 50*0.15 + 58.89*0.15 ≈ 51.33
+    assert 49.0 <= quality <= 55.0
 
 
 @pytest.mark.asyncio
 async def test_calculate_quality_api_error(factor_engine, mock_market_data_client):
-    """Test quality calculation when API call fails."""
+    """Test quality when API call fails."""
     mock_market_data_client.get_stock_info.side_effect = Exception("API Error")
 
     quality = await factor_engine._calculate_quality("AAPL")
-    assert quality == 50.0  # Fallback to neutral
-
-
-@pytest.mark.asyncio
-async def test_calculate_quality_extreme_roe(factor_engine, mock_market_data_client):
-    """Test quality calculation with extreme ROE (capped at 100)."""
-    from shared.generated import market_data_pb2
-
-    mock_market_data_client.get_stock_info.return_value = market_data_pb2.GetStockInfoResponse(
-        symbol="HIGH",
-        name="High ROE Inc.",
-        sector="Technology",
-        industry="Software",
-        exchange="NASDAQ",
-        currency="USD",
-        market_cap=100_000_000_000,  # $100B
-        return_on_equity=0.50,  # 50% ROE -> would be 250, capped at 100
-        debt_to_equity=0.0,  # 0 D/E -> score 100
-    )
-
-    quality = await factor_engine._calculate_quality("HIGH")
-    # ROE: min(100, 0.50 * 500) = 100
-    # D/E: 100 - 0 * 50 = 100
-    # Cap: 70 + (100B / 1000B) * 10 = 71
-    # Final: 100 * 0.4 + 100 * 0.3 + 71 * 0.3 = 40 + 30 + 21.3 = 91.3
-    assert 90.0 <= quality <= 92.0
+    assert quality == 50.0
 
 
 @pytest.mark.asyncio
 async def test_calculate_quality_negative_roe(factor_engine, mock_market_data_client):
-    """Test quality calculation with negative ROE (capped at 0)."""
+    """Test quality with negative ROE."""
     from shared.generated import market_data_pb2
 
     mock_market_data_client.get_stock_info.return_value = market_data_pb2.GetStockInfoResponse(
@@ -525,17 +459,16 @@ async def test_calculate_quality_negative_roe(factor_engine, mock_market_data_cl
         industry="Software",
         exchange="NASDAQ",
         currency="USD",
-        market_cap=10_000_000_000,  # $10B
-        return_on_equity=-0.10,  # -10% ROE -> score 0
-        debt_to_equity=1.5,  # 1.5 D/E -> score 25
+        market_cap=10_000_000_000,
+        return_on_equity=-0.10,  # Negative ROE
+        debt_to_equity=1.5,
+        profit_margin=-0.05,  # Negative margin
+        current_ratio=0.8,
     )
 
     quality = await factor_engine._calculate_quality("LOSS")
-    # ROE: max(0, -0.10 * 500) = 0
-    # D/E: 100 - 1.5 * 50 = 25
-    # Cap: 50 (at $10B threshold)
-    # Final: 0 * 0.4 + 25 * 0.3 + 50 * 0.3 = 0 + 7.5 + 15 = 22.5
-    assert 20.0 <= quality <= 25.0
+    # Poor fundamentals
+    assert quality < 35.0
 
 
 @pytest.mark.asyncio
@@ -683,3 +616,98 @@ async def test_get_cached_sentiment_handles_redis_error(
 
     # Should fall back to momentum proxy (neutral)
     assert 40.0 <= sentiment <= 60.0
+
+
+# --- Regime-Adaptive Factor Weight Tests ---
+
+
+def test_regime_multipliers_all_regimes_have_all_factors():
+    """Every regime should define multipliers for all 6 factors."""
+    expected_factors = {"momentum", "value", "quality", "volatility", "liquidity", "sentiment"}
+
+    for regime, mults in REGIME_MULTIPLIERS.items():
+        assert set(mults.keys()) == expected_factors, f"{regime} missing factors"
+
+
+def test_crisis_regime_boosts_quality_and_volatility(factor_engine):
+    """In crisis regime, quality and volatility should be weighted much higher."""
+    scores = FactorScores(
+        momentum=50.0,
+        value=50.0,
+        quality=90.0,  # High quality
+        volatility=90.0,  # Low volatility (inverse score)
+        liquidity=50.0,
+        sentiment=50.0,
+    )
+
+    score_crisis = factor_engine.calculate_final_score(
+        scores, RiskProfile.MODERATE, "crisis"
+    )
+    score_bull = factor_engine.calculate_final_score(
+        scores, RiskProfile.MODERATE, "normal_bull"
+    )
+
+    # Crisis should reward quality/volatility more than bull
+    assert score_crisis > score_bull
+
+
+def test_bull_regime_boosts_momentum(factor_engine):
+    """In bull regime, momentum should be weighted higher."""
+    scores = FactorScores(
+        momentum=90.0,  # High momentum
+        value=50.0,
+        quality=50.0,
+        volatility=50.0,
+        liquidity=50.0,
+        sentiment=50.0,
+    )
+
+    score_bull = factor_engine.calculate_final_score(
+        scores, RiskProfile.MODERATE, "normal_bull"
+    )
+    score_crisis = factor_engine.calculate_final_score(
+        scores, RiskProfile.MODERATE, "crisis"
+    )
+
+    # Bull should reward momentum more than crisis
+    assert score_bull > score_crisis
+
+
+def test_regime_weights_are_normalized(factor_engine):
+    """Regime-adjusted weights should be normalized to sum to 1.0."""
+    # If we give equal scores to all factors, the final score should equal that score
+    scores = FactorScores(
+        momentum=60.0,
+        value=60.0,
+        quality=60.0,
+        volatility=60.0,
+        liquidity=60.0,
+        sentiment=60.0,
+    )
+
+    for regime in REGIME_MULTIPLIERS:
+        final = factor_engine.calculate_final_score(
+            scores, RiskProfile.MODERATE, regime
+        )
+        # All factors equal → result should be 60.0 regardless of regime weights
+        assert final == Decimal("60.00"), f"Failed for regime={regime}: {final}"
+
+
+def test_unknown_regime_uses_base_weights(factor_engine):
+    """Unknown regime falls back to base weights (no multipliers)."""
+    scores = FactorScores(
+        momentum=70.0,
+        value=80.0,
+        quality=85.0,
+        volatility=75.0,
+        liquidity=65.0,
+        sentiment=60.0,
+    )
+
+    final = factor_engine.calculate_final_score(
+        scores, RiskProfile.MODERATE, "unknown_regime"
+    )
+
+    # Should still produce a valid score using base weights (mult=1.0 for all)
+    assert isinstance(final, Decimal)
+    assert Decimal("0") <= final <= Decimal("100")

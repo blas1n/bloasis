@@ -99,9 +99,9 @@ class StrategyServicer(strategy_pb2_grpc.StrategyServiceServicer):
                     candidate.symbol, regime
                 )
 
-                # Calculate final weighted score based on risk profile
+                # Calculate final weighted score based on risk profile + regime
                 final_score = self.factor_engine.calculate_final_score(
-                    factor_scores, preferences.risk_profile
+                    factor_scores, preferences.risk_profile, regime
                 )
 
                 # Generate rationale

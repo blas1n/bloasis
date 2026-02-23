@@ -10,6 +10,7 @@ Implements 6-factor scoring system with risk profile-based weighting:
 """
 
 import logging
+import math
 import statistics
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
@@ -49,6 +50,68 @@ FACTOR_WEIGHTS: dict[RiskProfile, dict[str, float]] = {
         "volatility": 0.05,  # Higher volatility acceptable
         "liquidity": 0.10,
         "sentiment": 0.30,
+    },
+}
+
+
+# Regime-adaptive factor multipliers
+# Adjusts base weights per market regime to emphasize appropriate factors
+REGIME_MULTIPLIERS: dict[str, dict[str, float]] = {
+    "crisis": {
+        "momentum": 0.3,
+        "value": 1.5,
+        "quality": 1.8,
+        "volatility": 2.0,
+        "liquidity": 1.0,
+        "sentiment": 0.2,
+    },
+    "severe_bear": {
+        "momentum": 0.5,
+        "value": 1.3,
+        "quality": 1.5,
+        "volatility": 1.5,
+        "liquidity": 1.0,
+        "sentiment": 0.5,
+    },
+    "mild_bear": {
+        "momentum": 0.7,
+        "value": 1.2,
+        "quality": 1.2,
+        "volatility": 1.2,
+        "liquidity": 1.0,
+        "sentiment": 0.7,
+    },
+    "sideways": {
+        "momentum": 0.8,
+        "value": 1.2,
+        "quality": 1.0,
+        "volatility": 1.0,
+        "liquidity": 1.0,
+        "sentiment": 0.8,
+    },
+    "recovery": {
+        "momentum": 1.5,
+        "value": 1.2,
+        "quality": 0.8,
+        "volatility": 0.7,
+        "liquidity": 1.0,
+        "sentiment": 1.3,
+    },
+    "normal_bull": {
+        "momentum": 1.2,
+        "value": 0.8,
+        "quality": 0.9,
+        "volatility": 0.7,
+        "liquidity": 1.0,
+        "sentiment": 1.2,
+    },
+    "strong_bull": {
+        "momentum": 1.3,
+        "value": 0.7,
+        "quality": 0.8,
+        "volatility": 0.6,
+        "liquidity": 1.0,
+        "sentiment": 1.3,
     },
 }
 
@@ -103,27 +166,51 @@ class FactorScoringEngine:
         )
 
     def calculate_final_score(
-        self, factor_scores: FactorScores, risk_profile: RiskProfile
+        self,
+        factor_scores: FactorScores,
+        risk_profile: RiskProfile,
+        regime: str = "normal_bull",
     ) -> Decimal:
-        """Calculate weighted final score based on risk profile.
+        """Calculate weighted final score based on risk profile and market regime.
+
+        Applies regime-adaptive multipliers to base weights, then normalizes
+        so weights sum to 1.0.
 
         Args:
             factor_scores: Individual factor scores
-            risk_profile: User's risk profile (determines weights)
+            risk_profile: User's risk profile (determines base weights)
+            regime: Current market regime (adjusts weight emphasis)
 
         Returns:
             Final weighted score (0-100) as Decimal
         """
-        weights = FACTOR_WEIGHTS[risk_profile]
+        base_weights = FACTOR_WEIGHTS[risk_profile]
+        regime_mults = REGIME_MULTIPLIERS.get(regime, {})
+
+        # Apply regime multipliers to base weights
+        adjusted: dict[str, float] = {}
+        for factor, base_w in base_weights.items():
+            mult = regime_mults.get(factor, 1.0)
+            adjusted[factor] = base_w * mult
+
+        # Normalize so weights sum to 1.0
+        total = sum(adjusted.values())
+        if total > 0:
+            weights = {k: v / total for k, v in adjusted.items()}
+        else:
+            weights = base_weights
 
         # Calculate weighted sum using Decimal for precision
         score = (
             Decimal(str(factor_scores.momentum)) * Decimal(str(weights["momentum"]))
             + Decimal(str(factor_scores.value)) * Decimal(str(weights["value"]))
             + Decimal(str(factor_scores.quality)) * Decimal(str(weights["quality"]))
-            + Decimal(str(factor_scores.volatility)) * Decimal(str(weights["volatility"]))
-            + Decimal(str(factor_scores.liquidity)) * Decimal(str(weights["liquidity"]))
-            + Decimal(str(factor_scores.sentiment)) * Decimal(str(weights["sentiment"]))
+            + Decimal(str(factor_scores.volatility))
+            * Decimal(str(weights["volatility"]))
+            + Decimal(str(factor_scores.liquidity))
+            * Decimal(str(weights["liquidity"]))
+            + Decimal(str(factor_scores.sentiment))
+            * Decimal(str(weights["sentiment"]))
         )
 
         # Round to 2 decimal places
@@ -214,9 +301,12 @@ class FactorScoringEngine:
         return score
 
     async def _calculate_value(self, symbol: str) -> float:
-        """Calculate value score (0-100) based on P/E ratio.
+        """Calculate value score (0-100) using 3-indicator continuous scoring.
 
-        Lower P/E = higher score (value investing principle).
+        Scoring breakdown:
+        - P/E ratio (40%): Continuous bell-curve peaking at PE=12
+        - Profit Margin (30%): Higher margin = better value
+        - Current Ratio (30%): Healthy balance sheet (peak at 1.5-2.0)
 
         Args:
             symbol: Stock ticker symbol
@@ -227,44 +317,63 @@ class FactorScoringEngine:
         try:
             stock_info = await self.market_data.get_stock_info(symbol)
 
-            # Check if pe_ratio is available
+            # P/E score (40%) — continuous bell curve, peak at PE=12
             if stock_info.HasField("pe_ratio"):
                 pe = stock_info.pe_ratio
-
-                # Value scoring: Lower P/E = better value
                 if pe <= 0:
-                    # Negative P/E means losses, return neutral
-                    logger.debug(f"Negative P/E for {symbol}: {pe}, using neutral score")
-                    return 50.0
-                elif pe < 10:
-                    return 100.0
-                elif pe < 15:
-                    return 80.0
-                elif pe < 20:
-                    return 60.0
-                elif pe < 25:
-                    return 40.0
-                elif pe < 30:
-                    return 20.0
+                    pe_score = 30.0  # Negative earnings → below neutral
                 else:
-                    return 10.0
+                    # Gaussian-like: score = 100 * exp(-((pe - 12) / 10)^2)
+                    pe_score = 100.0 * math.exp(-((pe - 12) / 10) ** 2)
+            else:
+                pe_score = 50.0
 
-            logger.debug(f"P/E ratio not available for {symbol}, using neutral score")
-            return 50.0
+            # Profit Margin score (30%) — 0% → 0, 20%+ → 100
+            if stock_info.HasField("profit_margin"):
+                pm = stock_info.profit_margin
+                if pm < 0:
+                    pm_score = max(0.0, 20.0 + pm * 100)  # Slightly penalize losses
+                else:
+                    pm_score = min(100.0, pm * 500)  # 20% margin = 100
+            else:
+                pm_score = 50.0
+
+            # Current Ratio score (30%) — peak at 1.5-2.0
+            if stock_info.HasField("current_ratio"):
+                cr = stock_info.current_ratio
+                if cr <= 0:
+                    cr_score = 0.0
+                elif cr < 1.0:
+                    cr_score = cr * 50.0  # Below 1.0 is weak
+                elif cr <= 2.0:
+                    cr_score = 50.0 + (cr - 1.0) * 50.0  # 1.0-2.0 → 50-100
+                else:
+                    # >2.0 starts declining (idle assets)
+                    cr_score = max(40.0, 100.0 - (cr - 2.0) * 15.0)
+            else:
+                cr_score = 50.0
+
+            final_score = pe_score * 0.4 + pm_score * 0.3 + cr_score * 0.3
+
+            logger.debug(
+                f"Value score for {symbol}: {final_score:.2f} "
+                f"(PE: {pe_score:.2f}, PM: {pm_score:.2f}, CR: {cr_score:.2f})"
+            )
+            return final_score
 
         except Exception as e:
             logger.warning(f"Failed to get value score for {symbol}: {e}")
             return 50.0
 
     async def _calculate_quality(self, symbol: str) -> float:
-        """Calculate quality score (0-100) using fundamental metrics.
-
-        Phase 2: Uses ROE, debt/equity, and market cap for quality scoring.
+        """Calculate quality score (0-100) using 5 fundamental metrics.
 
         Scoring breakdown:
-        - ROE weight: 40% (higher = better)
-        - Debt/Equity weight: 30% (lower = better, inverse)
-        - Market Cap weight: 30% (larger = better, stability)
+        - ROE (25%): Higher = better profitability
+        - D/E (20%): Lower = better financial health (inverse)
+        - Profit Margin (25%): Higher = better operational efficiency
+        - Current Ratio (15%): Healthy liquidity (peak at 1.5-2.0)
+        - Market Cap (15%): Larger = more stability
 
         Args:
             symbol: Stock ticker symbol
@@ -275,26 +384,56 @@ class FactorScoringEngine:
         try:
             stock_info = await self.market_data.get_stock_info(symbol)
 
-            # ROE score: 0-20% ROE maps to 0-100 (higher is better)
+            # ROE score (25%): 0-25% ROE maps to 0-100
             if stock_info.HasField("return_on_equity"):
                 roe = stock_info.return_on_equity
-                roe_score = min(100.0, max(0.0, roe * 500))  # 20% ROE = 100
+                if roe < 0:
+                    roe_score = max(0.0, 20.0 + roe * 100)
+                else:
+                    roe_score = min(100.0, roe * 400)  # 25% ROE = 100
             else:
-                roe_score = 50.0  # Neutral
+                roe_score = 50.0
 
-            # D/E score: 0-2 D/E maps to 100-0 (lower is better)
+            # D/E score (20%): 0-2 D/E maps to 100-0 (lower is better)
             if stock_info.HasField("debt_to_equity"):
                 de = stock_info.debt_to_equity
                 de_score = max(0.0, 100.0 - de * 50)  # 2.0 D/E = 0
             else:
-                de_score = 50.0  # Neutral
+                de_score = 50.0
 
-            # Market cap score (existing logic)
+            # Profit Margin score (25%): 0-25% maps to 0-100
+            if stock_info.HasField("profit_margin"):
+                pm = stock_info.profit_margin
+                if pm < 0:
+                    pm_score = max(0.0, 20.0 + pm * 100)
+                else:
+                    pm_score = min(100.0, pm * 400)  # 25% margin = 100
+            else:
+                pm_score = 50.0
+
+            # Current Ratio score (15%): peak at 1.5-2.0
+            if stock_info.HasField("current_ratio"):
+                cr = stock_info.current_ratio
+                if cr <= 0:
+                    cr_score = 0.0
+                elif cr < 1.0:
+                    cr_score = cr * 50.0
+                elif cr <= 2.0:
+                    cr_score = 50.0 + (cr - 1.0) * 50.0
+                else:
+                    cr_score = max(40.0, 100.0 - (cr - 2.0) * 15.0)
+            else:
+                cr_score = 50.0
+
+            # Market Cap score (15%): logarithmic scale
             market_cap = stock_info.market_cap
             if market_cap <= 0:
-                cap_score = 50.0  # Neutral for invalid
+                cap_score = 50.0
             elif market_cap >= 100_000_000_000:  # $100B+
-                cap_score = min(90.0, 70.0 + (market_cap / 1_000_000_000_000) * 10)
+                cap_score = min(
+                    90.0,
+                    70.0 + (market_cap / 1_000_000_000_000) * 10,
+                )
             elif market_cap >= 10_000_000_000:  # $10B-$100B
                 ratio = (market_cap - 10_000_000_000) / 90_000_000_000
                 cap_score = 50.0 + ratio * 20
@@ -302,12 +441,19 @@ class FactorScoringEngine:
                 ratio = market_cap / 10_000_000_000
                 cap_score = 30.0 + ratio * 20
 
-            # Weighted average
-            final_score = roe_score * 0.4 + de_score * 0.3 + cap_score * 0.3
+            final_score = (
+                roe_score * 0.25
+                + de_score * 0.20
+                + pm_score * 0.25
+                + cr_score * 0.15
+                + cap_score * 0.15
+            )
 
             logger.debug(
                 f"Quality score for {symbol}: {final_score:.2f} "
-                f"(ROE: {roe_score:.2f}, D/E: {de_score:.2f}, Cap: {cap_score:.2f})"
+                f"(ROE: {roe_score:.2f}, D/E: {de_score:.2f}, "
+                f"PM: {pm_score:.2f}, CR: {cr_score:.2f}, "
+                f"Cap: {cap_score:.2f})"
             )
             return final_score
 

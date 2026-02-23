@@ -97,6 +97,9 @@ class AnalysisState(TypedDict):
     risk_assessment: RiskAssessment | None
     trading_signals: list[TradingSignal]
 
+    # OHLCV data cached from technical analysis for signal generation
+    ohlcv_data: dict  # symbol -> list[dict]
+
     # Metadata
     analysis_id: str
     started_at: str
