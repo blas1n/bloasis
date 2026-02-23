@@ -70,7 +70,7 @@ class MarketRegimeClient:
 
         try:
             request = market_regime_pb2.GetCurrentRegimeRequest(force_refresh=force_refresh)
-            response = await self.stub.GetCurrentRegime(request, timeout=30.0)
+            response = await self.stub.GetCurrentRegime(request, timeout=10.0)
 
             logger.info(
                 f"Retrieved market regime: {response.regime} (confidence: {response.confidence:.2f})"

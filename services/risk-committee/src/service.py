@@ -103,7 +103,17 @@ class RiskCommitteeServicer(risk_committee_pb2_grpc.RiskCommitteeServiceServicer
         # Collect votes from all agents
         votes = []
         for agent in self.agents:
-            vote = await agent.evaluate(order, portfolio)
+            try:
+                vote = await agent.evaluate(order, portfolio)
+            except Exception as e:
+                logger.error(f"Agent {agent.__class__.__name__} failed: {e}", exc_info=True)
+                vote = RiskVote(
+                    agent=agent.__class__.__name__,
+                    decision=RiskDecision.ADJUST,
+                    risk_score=0.6,
+                    reasoning=f"Agent evaluation failed: {e}",
+                    adjustments=[{"type": "reduce_size", "factor": 0.5}],
+                )
             votes.append(vote)
 
         # Determine consensus
@@ -161,7 +171,17 @@ class RiskCommitteeServicer(risk_committee_pb2_grpc.RiskCommitteeServiceServicer
 
             votes = []
             for agent in self.agents:
-                vote = await agent.evaluate(order, portfolio)
+                try:
+                    vote = await agent.evaluate(order, portfolio)
+                except Exception as e:
+                    logger.error(f"Agent {agent.__class__.__name__} failed: {e}", exc_info=True)
+                    vote = RiskVote(
+                        agent=agent.__class__.__name__,
+                        decision=RiskDecision.ADJUST,
+                        risk_score=0.6,
+                        reasoning=f"Agent evaluation failed: {e}",
+                        adjustments=[{"type": "reduce_size", "factor": 0.5}],
+                    )
                 votes.append(vote)
 
             decision = self._determine_consensus(votes)

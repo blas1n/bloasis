@@ -483,11 +483,11 @@ class TestWorkflowGraph:
 
 
 class TestWorkflowNodesErrorHandling:
-    """Tests for workflow nodes error handling paths."""
+    """Tests for workflow nodes error handling with fallbacks."""
 
     @pytest.mark.asyncio
-    async def test_macro_analysis_node_error(self):
-        """Test macro analysis node error handling."""
+    async def test_macro_analysis_node_fallback(self):
+        """Test macro analysis node uses fallback on error."""
         state: AnalysisState = {
             "user_id": "test_user",
             "stock_picks": [{"symbol": "AAPL", "sector": "Technology"}],
@@ -509,13 +509,16 @@ class TestWorkflowNodesErrorHandling:
 
             result = await macro_analysis_node(state)
 
-            assert result["phase"] == WorkflowPhase.ERROR
+            # Fallback continues to next phase instead of ERROR
+            assert result["phase"] == WorkflowPhase.TECHNICAL_ANALYSIS
+            assert result["market_context"] is not None
+            assert result["market_context"].confidence == 0.6  # Fallback confidence
             assert len(result["errors"]) == 1
-            assert "Macro analysis error" in result["errors"][0]
+            assert "fallback" in result["errors"][0].lower()
 
     @pytest.mark.asyncio
-    async def test_technical_analysis_node_error(self):
-        """Test technical analysis node error handling."""
+    async def test_technical_analysis_node_fallback(self):
+        """Test technical analysis node uses fallback on error."""
         state: AnalysisState = {
             "user_id": "test_user",
             "stock_picks": [{"symbol": "AAPL", "sector": "Technology"}],
@@ -536,20 +539,23 @@ class TestWorkflowNodesErrorHandling:
             "errors": [],
         }
 
-        with patch("src.workflow.nodes.get_technical_analyst") as mock_get:
+        with patch("src.workflow.nodes.get_technical_analyst") as mock_get, \
+             patch("src.workflow.nodes.MarketDataClient"):
             mock_analyst = AsyncMock()
             mock_analyst.analyze = AsyncMock(side_effect=Exception("Claude API error"))
             mock_get.return_value = mock_analyst
 
             result = await technical_analysis_node(state)
 
-            assert result["phase"] == WorkflowPhase.ERROR
+            # Fallback continues to next phase instead of ERROR
+            assert result["phase"] == WorkflowPhase.RISK_ASSESSMENT
+            assert "technical_signals" in result
             assert len(result["errors"]) == 1
-            assert "Technical analysis error" in result["errors"][0]
+            assert "fallback" in result["errors"][0].lower()
 
     @pytest.mark.asyncio
-    async def test_technical_analysis_node_preserves_existing_errors(self):
-        """Test technical analysis node preserves existing errors."""
+    async def test_technical_analysis_node_fallback_preserves_errors(self):
+        """Test technical analysis fallback preserves existing errors."""
         state: AnalysisState = {
             "user_id": "test_user",
             "stock_picks": [{"symbol": "AAPL", "sector": "Technology"}],
@@ -570,21 +576,21 @@ class TestWorkflowNodesErrorHandling:
             "errors": ["Previous error"],
         }
 
-        with patch("src.workflow.nodes.get_technical_analyst") as mock_get:
+        with patch("src.workflow.nodes.get_technical_analyst") as mock_get, \
+             patch("src.workflow.nodes.MarketDataClient"):
             mock_analyst = AsyncMock()
             mock_analyst.analyze = AsyncMock(side_effect=Exception("Claude API error"))
             mock_get.return_value = mock_analyst
 
             result = await technical_analysis_node(state)
 
-            assert result["phase"] == WorkflowPhase.ERROR
+            assert result["phase"] == WorkflowPhase.RISK_ASSESSMENT
             assert len(result["errors"]) == 2
             assert "Previous error" in result["errors"]
-            assert "Technical analysis error" in result["errors"][1]
 
     @pytest.mark.asyncio
-    async def test_risk_assessment_node_error(self):
-        """Test risk assessment node error handling."""
+    async def test_risk_assessment_node_fallback(self):
+        """Test risk assessment node uses fallback on error."""
         state: AnalysisState = {
             "user_id": "test_user",
             "stock_picks": [],
@@ -621,9 +627,12 @@ class TestWorkflowNodesErrorHandling:
 
             result = await risk_assessment_node(state)
 
-            assert result["phase"] == WorkflowPhase.ERROR
+            # Fallback continues to next phase instead of ERROR
+            assert result["phase"] == WorkflowPhase.SIGNAL_GENERATION
+            assert result["risk_assessment"] is not None
+            assert result["risk_assessment"].approved is True  # medium risk → approved
             assert len(result["errors"]) == 1
-            assert "Risk assessment error" in result["errors"][0]
+            assert "fallback" in result["errors"][0].lower()
 
     @pytest.mark.asyncio
     async def test_signal_generation_node_error(self):

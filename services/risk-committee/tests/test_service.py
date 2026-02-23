@@ -202,6 +202,115 @@ class TestRiskCommitteeServicer:
         mock_grpc_context.abort.assert_called()
 
 
+class TestAgentExceptionHandling:
+    """Tests for agent exception handling in evaluation."""
+
+    @pytest.mark.asyncio
+    async def test_evaluate_order_agent_failure_returns_adjust(
+        self, mock_portfolio_client, mock_market_data_client, mock_event_publisher, mock_grpc_context
+    ):
+        """Agent failure → conservative ADJUST vote instead of crash."""
+        failing_agent = AsyncMock()
+        failing_agent.__class__.__name__ = "FailingAgent"
+        failing_agent.evaluate = AsyncMock(side_effect=Exception("Agent crashed"))
+
+        good_agent = AsyncMock()
+        good_agent.evaluate = AsyncMock(
+            return_value=RiskVote(
+                agent="GoodAgent",
+                decision=RiskDecision.APPROVE,
+                risk_score=0.2,
+                reasoning="OK",
+            )
+        )
+
+        servicer = RiskCommitteeServicer(
+            portfolio_client=mock_portfolio_client,
+            market_data_client=mock_market_data_client,
+            event_publisher=mock_event_publisher,
+            agents=[failing_agent, good_agent],
+        )
+
+        request = risk_committee_pb2.EvaluateOrderRequest(
+            user_id="test-user",
+            symbol="AAPL",
+            action="buy",
+            size=10,
+            price=175.0,
+            order_type="market",
+        )
+
+        response = await servicer.EvaluateOrder(request, mock_grpc_context)
+
+        # Should not crash — should have 2 votes (one fallback ADJUST)
+        assert len(response.votes) == 2
+        assert response.decision == "adjust"  # ADJUST from fallback vote
+
+    @pytest.mark.asyncio
+    async def test_evaluate_order_all_agents_fail(
+        self, mock_portfolio_client, mock_market_data_client, mock_event_publisher, mock_grpc_context
+    ):
+        """All agents fail → all ADJUST votes, still returns response."""
+        agent1 = AsyncMock()
+        agent1.__class__.__name__ = "Agent1"
+        agent1.evaluate = AsyncMock(side_effect=Exception("crash"))
+
+        agent2 = AsyncMock()
+        agent2.__class__.__name__ = "Agent2"
+        agent2.evaluate = AsyncMock(side_effect=RuntimeError("error"))
+
+        servicer = RiskCommitteeServicer(
+            portfolio_client=mock_portfolio_client,
+            market_data_client=mock_market_data_client,
+            event_publisher=mock_event_publisher,
+            agents=[agent1, agent2],
+        )
+
+        request = risk_committee_pb2.EvaluateOrderRequest(
+            user_id="test-user",
+            symbol="AAPL",
+            action="buy",
+            size=10,
+            price=175.0,
+            order_type="market",
+        )
+
+        response = await servicer.EvaluateOrder(request, mock_grpc_context)
+
+        assert len(response.votes) == 2
+        assert response.decision == "adjust"
+
+    @pytest.mark.asyncio
+    async def test_evaluate_batch_agent_failure_handled(
+        self, mock_portfolio_client, mock_market_data_client, mock_event_publisher, mock_grpc_context
+    ):
+        """Agent failure in batch evaluation is handled gracefully."""
+        failing_agent = AsyncMock()
+        failing_agent.__class__.__name__ = "FailingAgent"
+        failing_agent.evaluate = AsyncMock(side_effect=Exception("Agent crashed"))
+
+        servicer = RiskCommitteeServicer(
+            portfolio_client=mock_portfolio_client,
+            market_data_client=mock_market_data_client,
+            event_publisher=mock_event_publisher,
+            agents=[failing_agent],
+        )
+
+        request = risk_committee_pb2.EvaluateBatchRequest(
+            user_id="test-user",
+            orders=[
+                risk_committee_pb2.OrderToEvaluate(
+                    symbol="AAPL", action="buy", size=10, price=175.0
+                ),
+            ],
+        )
+
+        response = await servicer.EvaluateBatch(request, mock_grpc_context)
+
+        # Should not crash — should return decisions
+        assert len(response.decisions) == 1
+
+
 class TestConsensusLogic:
     """Tests for consensus determination logic."""
 
