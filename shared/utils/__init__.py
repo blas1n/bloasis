@@ -31,6 +31,7 @@ from .logging import JSONFormatter, setup_logger
 from .postgres_client import PostgresClient
 from .redis_client import RedisClient
 from .redpanda_client import RedpandaClient
+from .resilience import grpc_retry, is_retryable_grpc_error, with_timeout
 
 __all__ = [
     "CACHE_CONFIGS",
@@ -47,5 +48,8 @@ __all__ = [
     "RedpandaClient",
     "create_cache_manager",
     "get_local_ip",
+    "grpc_retry",
+    "is_retryable_grpc_error",
     "setup_logger",
+    "with_timeout",
 ]

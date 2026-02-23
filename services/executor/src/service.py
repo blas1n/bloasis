@@ -388,8 +388,11 @@ class ExecutorServicer(executor_pb2_grpc.ExecutorServiceServicer):
                 logger.warning(f"Risk approval not found: {approval_id}")
             return exists
         except Exception as e:
-            logger.error(f"Failed to verify risk approval: {e}")
-            return False
+            logger.error(
+                f"Redis unavailable for risk approval check: {e}. "
+                f"Allowing execution for approval_id={approval_id} (degraded mode)"
+            )
+            return True
 
     async def _store_order_mapping(self, user_id: str, result) -> None:
         """Store order mapping for tracking.

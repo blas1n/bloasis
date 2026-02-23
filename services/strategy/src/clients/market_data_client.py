@@ -72,7 +72,7 @@ class MarketDataClient:
             request = market_data_pb2.GetOHLCVRequest(
                 symbol=symbol, period=period, interval=interval
             )
-            response = await self.stub.GetOHLCV(request, timeout=30.0)
+            response = await self.stub.GetOHLCV(request, timeout=15.0)
 
             # Convert proto bars to dicts
             ohlcv_bars = [
@@ -121,7 +121,7 @@ class MarketDataClient:
 
         try:
             request = market_data_pb2.GetStockInfoRequest(symbol=symbol)
-            response = await self.stub.GetStockInfo(request, timeout=30.0)
+            response = await self.stub.GetStockInfo(request, timeout=15.0)
 
             logger.info(f"Retrieved stock info for {symbol}")
             return response
@@ -161,7 +161,7 @@ class MarketDataClient:
             request = market_data_pb2.GetBatchOHLCVRequest(
                 symbols=symbols, period=period, interval=interval
             )
-            response = await self.stub.GetBatchOHLCV(request, timeout=60.0)
+            response = await self.stub.GetBatchOHLCV(request, timeout=30.0)
 
             # Convert proto response to dict of lists
             result = {}

@@ -85,7 +85,7 @@ class ExecutorClient:
 
         try:
             request = executor_pb2.GetPositionsRequest(user_id=user_id)
-            response = await self.stub.GetPositions(request, timeout=30.0)
+            response = await self.stub.GetPositions(request, timeout=15.0)
             return [
                 AlpacaPositionData(
                     symbol=p.symbol,

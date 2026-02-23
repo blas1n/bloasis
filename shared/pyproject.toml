@@ -37,6 +37,9 @@ dependencies = [
 
     # AI - Anthropic Claude API
     "anthropic>=0.18.0",
+
+    # Resilience - Retry with exponential backoff
+    "tenacity>=9.0.0",
 ]
 
 [project.optional-dependencies]

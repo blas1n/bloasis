@@ -16,6 +16,11 @@ from shared.ai_clients import ClaudeClient
 from shared.utils.event_publisher import EventPriority, EventPublisher
 from shared.utils.redpanda_client import RedpandaClient
 
+from ..agents.fallbacks import (
+    RuleBasedMacroStrategist,
+    RuleBasedRiskManager,
+    RuleBasedTechnicalAnalyst,
+)
 from ..agents.macro_strategist import MacroStrategist
 from ..agents.risk_manager import RiskManager
 from ..agents.signal_generator import SignalGenerator
@@ -143,10 +148,19 @@ async def macro_analysis_node(state: AnalysisState) -> dict:
         }
 
     except Exception as e:
-        logger.error(f"[{analysis_id}] Macro analysis failed: {e}", exc_info=True)
+        logger.warning(f"[{analysis_id}] Macro analysis failed, using fallback: {e}", exc_info=True)
+
+        fallback = RuleBasedMacroStrategist()
+        market_context = fallback.analyze(
+            stock_picks=state["stock_picks"],
+            regime=state.get("preferences", {}).get("regime", "normal_bull"),
+            user_preferences=state["preferences"],
+        )
+
         return {
-            "errors": [f"Macro analysis error: {str(e)}"],
-            "phase": WorkflowPhase.ERROR,
+            "market_context": market_context,
+            "phase": WorkflowPhase.TECHNICAL_ANALYSIS,
+            "errors": [f"Macro analysis fallback used: {str(e)}"],
         }
 
 
@@ -178,11 +192,22 @@ async def technical_analysis_node(state: AnalysisState) -> dict:
         }
 
     except Exception as e:
-        logger.error(f"[{analysis_id}] Technical analysis failed: {e}", exc_info=True)
+        logger.warning(
+            f"[{analysis_id}] Technical analysis failed, using fallback: {e}",
+            exc_info=True,
+        )
+
+        fallback = RuleBasedTechnicalAnalyst(market_data_client=MarketDataClient())
+        signals = await fallback.analyze(
+            stock_picks=state["stock_picks"],
+            market_context=state["market_context"],
+        )
+
         errors = state.get("errors", [])
         return {
-            "errors": errors + [f"Technical analysis error: {str(e)}"],
-            "phase": WorkflowPhase.ERROR,
+            "technical_signals": signals,
+            "phase": WorkflowPhase.RISK_ASSESSMENT,
+            "errors": errors + [f"Technical analysis fallback used: {str(e)}"],
         }
 
 
@@ -218,11 +243,23 @@ async def risk_assessment_node(state: AnalysisState) -> dict:
         }
 
     except Exception as e:
-        logger.error(f"[{analysis_id}] Risk assessment failed: {e}", exc_info=True)
+        logger.warning(
+            f"[{analysis_id}] Risk assessment failed, using fallback: {e}",
+            exc_info=True,
+        )
+
+        fallback = RuleBasedRiskManager()
+        assessment = fallback.assess(
+            signals=state["technical_signals"],
+            market_context=state["market_context"],
+            user_preferences=state["preferences"],
+        )
+
         errors = state.get("errors", [])
         return {
-            "errors": errors + [f"Risk assessment error: {str(e)}"],
-            "phase": WorkflowPhase.ERROR,
+            "risk_assessment": assessment,
+            "phase": WorkflowPhase.SIGNAL_GENERATION,
+            "errors": errors + [f"Risk assessment fallback used: {str(e)}"],
         }
 
 
