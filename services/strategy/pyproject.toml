@@ -19,6 +19,8 @@ dependencies = [
     "aiokafka>=0.8.0",
     "TA-Lib>=0.4.32",
     "numpy>=1.24.0",
+    "riskfolio-lib>=7.0.0",
+    "pandas>=2.0.0",
 ]
 
 [project.optional-dependencies]

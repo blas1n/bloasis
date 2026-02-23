@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 import grpc
 from shared.generated import portfolio_pb2, portfolio_pb2_grpc
+from shared.utils.resilience import grpc_retry
 
 from ..config import config
 from ..models import Portfolio, PortfolioPosition
@@ -66,6 +67,7 @@ class PortfolioClient:
         self.stub = portfolio_pb2_grpc.PortfolioServiceStub(self.channel)
         logger.info(f"Connected to Portfolio Service at {self.address}")
 
+    @grpc_retry
     async def get_positions(self, user_id: str) -> Portfolio:
         """Get user's portfolio positions.
 

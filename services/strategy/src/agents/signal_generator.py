@@ -10,7 +10,13 @@ import math
 from decimal import Decimal
 
 from ..technical_indicators import calculate_indicators
-from ..workflow.state import MarketContext, RiskAssessment, TechnicalSignal, TradingSignal
+from ..workflow.state import (
+    MarketContext,
+    ProfitTier,
+    RiskAssessment,
+    TechnicalSignal,
+    TradingSignal,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +103,11 @@ class SignalGenerator:
                 tech_signal, market_context, atr,
             )
 
+            # Calculate multi-tier profit levels + trailing stop
+            profit_tiers, trailing_stop_pct = self._calculate_profit_tiers(
+                tech_signal, market_context, atr,
+            )
+
             trading_signal = TradingSignal(
                 symbol=tech_signal.symbol,
                 action=self._signal_to_action(tech_signal.direction),
@@ -107,6 +118,8 @@ class SignalGenerator:
                 take_profit=take_profit,
                 rationale=tech_signal.rationale,
                 risk_approved=risk_assessment.approved,
+                profit_tiers=profit_tiers,
+                trailing_stop_pct=trailing_stop_pct,
             )
 
             trading_signals.append(trading_signal)
@@ -227,6 +240,72 @@ class SignalGenerator:
             take_profit = entry * tp_pct
 
         return stop_loss, take_profit
+
+    def _calculate_profit_tiers(
+        self,
+        signal: TechnicalSignal,
+        market_context: MarketContext,
+        atr: float,
+    ) -> tuple[list[ProfitTier], Decimal]:
+        """Calculate 3-tier profit-taking levels and trailing stop percentage.
+
+        Tier 1 (33%): 1.5 × ATR — early profit lock-in
+        Tier 2 (33%): 3.0 × ATR — main target
+        Tier 3 (34%): trailing stop — let winners run
+
+        Args:
+            signal: Technical signal.
+            market_context: Market context.
+            atr: ATR value.
+
+        Returns:
+            Tuple of (profit_tiers, trailing_stop_pct).
+        """
+        entry = signal.entry_price
+        risk_mult = _RISK_MULT.get(
+            market_context.risk_level, Decimal("1.0"),
+        )
+
+        if atr > 0:
+            atr_d = Decimal(str(atr))
+            t1_dist = Decimal("1.5") * atr_d * risk_mult
+            t2_dist = Decimal("3.0") * atr_d * risk_mult
+
+            if signal.direction == "long":
+                t1_level = entry + t1_dist
+                t2_level = entry + t2_dist
+            else:
+                t1_level = entry - t1_dist
+                t2_level = entry - t2_dist
+
+            # Trailing stop: 2 × ATR as percentage of entry
+            trailing_pct = (Decimal("2") * atr_d * risk_mult / entry * 100)
+            trailing_pct = trailing_pct.quantize(Decimal("0.01"))
+        else:
+            # Fallback: fixed percentages
+            if market_context.risk_level == "extreme":
+                t1_pct, t2_pct, trail = Decimal("0.01"), Decimal("0.02"), Decimal("1.0")
+            elif market_context.risk_level == "high":
+                t1_pct, t2_pct, trail = Decimal("0.015"), Decimal("0.03"), Decimal("1.5")
+            else:
+                t1_pct, t2_pct, trail = Decimal("0.025"), Decimal("0.05"), Decimal("2.0")
+
+            if signal.direction == "long":
+                t1_level = entry * (Decimal("1") + t1_pct)
+                t2_level = entry * (Decimal("1") + t2_pct)
+            else:
+                t1_level = entry * (Decimal("1") - t1_pct)
+                t2_level = entry * (Decimal("1") - t2_pct)
+
+            trailing_pct = trail
+
+        tiers = [
+            ProfitTier(level=t1_level, size_pct=Decimal("0.33")),
+            ProfitTier(level=t2_level, size_pct=Decimal("0.33")),
+            ProfitTier(level=Decimal("0"), size_pct=Decimal("0.34")),  # Trailing stop tier
+        ]
+
+        return tiers, trailing_pct
 
     def _fallback_pct(
         self, direction: str, risk_level: str,

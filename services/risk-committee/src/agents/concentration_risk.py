@@ -4,6 +4,8 @@ import logging
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
+import numpy as np
+
 from ..config import config
 from ..models import OrderRequest, Portfolio, RiskDecision, RiskVote
 
@@ -18,22 +20,20 @@ logger = logging.getLogger(__name__)
 # Cache TTL for sector data (24 hours)
 SECTOR_CACHE_TTL = 86400
 
+# Minimum data points for reliable correlation
+_MIN_CORRELATION_BARS = 30
+
+# Correlation threshold for position reduction
+_HIGH_CORRELATION_THRESHOLD = 0.7
+
 
 class ConcentrationRiskAgent:
     """Evaluates portfolio concentration risk.
 
     Checks:
     - Sector concentration
-    - Correlated assets
-    - Industry overlap
+    - Return-based correlation between assets
     """
-
-    # Correlation between sectors (simplified)
-    SECTOR_CORRELATIONS = {
-        ("Technology", "Consumer Discretionary"): 0.7,
-        ("Financials", "Energy"): 0.5,
-        ("Healthcare", "Consumer Staples"): 0.4,
-    }
 
     def __init__(
         self,
@@ -110,7 +110,7 @@ class ConcentrationRiskAgent:
 
         # Check correlation with existing positions
         correlation_risk = await self._check_correlation(order.symbol, portfolio)
-        if correlation_risk > 0.8:
+        if correlation_risk > _HIGH_CORRELATION_THRESHOLD:
             return RiskVote(
                 agent="ConcentrationRiskAgent",
                 decision=RiskDecision.ADJUST,
@@ -199,32 +199,89 @@ class ConcentrationRiskAgent:
         return total
 
     async def _check_correlation(self, symbol: str, portfolio: Portfolio) -> float:
-        """Check correlation of symbol with existing positions.
+        """Check return-based correlation of symbol with existing positions.
+
+        Uses 60-day daily returns and Pearson correlation.
+        Falls back to sector-based heuristic when market data is unavailable.
 
         Args:
             symbol: Symbol to check
             portfolio: Current portfolio
 
         Returns:
-            Maximum correlation score (0.0 - 1.0)
+            Maximum absolute correlation (0.0 - 1.0)
         """
-        new_sector = await self._get_sector(symbol)
+        if not portfolio.positions:
+            return 0.0
+
+        # Fetch closes for the new symbol
+        new_closes = await self._get_closes(symbol)
         max_correlation = 0.0
 
         for position in portfolio.positions:
-            position_sector = await self._get_sector(position.symbol)
-            # Fallback to position's sector if MarketDataService returns Unknown
-            if position_sector == "Unknown" and position.sector:
-                position_sector = position.sector
+            if position.symbol == symbol:
+                continue
 
-            # Same sector = high correlation
-            if position_sector == new_sector:
-                max_correlation = max(max_correlation, 0.9)
+            pos_closes = await self._get_closes(position.symbol)
+
+            # Compute Pearson correlation on daily returns
+            corr = self._pearson_correlation(new_closes, pos_closes)
+            if corr is not None:
+                max_correlation = max(max_correlation, abs(corr))
             else:
-                # Check cross-sector correlation
-                pair1 = (new_sector, position_sector)
-                pair2 = (position_sector, new_sector)
-                corr = self.SECTOR_CORRELATIONS.get(pair1, self.SECTOR_CORRELATIONS.get(pair2, 0.0))
-                max_correlation = max(max_correlation, corr)
+                # Fallback: same sector → assume 0.6 correlation
+                new_sector = await self._get_sector(symbol)
+                pos_sector = await self._get_sector(position.symbol)
+                if pos_sector == "Unknown" and position.sector:
+                    pos_sector = position.sector
+                if new_sector == pos_sector and new_sector != "Unknown":
+                    max_correlation = max(max_correlation, 0.6)
 
         return max_correlation
+
+    async def _get_closes(self, symbol: str) -> list[float]:
+        """Fetch closing prices via MarketDataClient.
+
+        Args:
+            symbol: Stock ticker symbol
+
+        Returns:
+            List of closing prices, or empty list on failure.
+        """
+        if not self.market_data:
+            return []
+        try:
+            return await self.market_data.get_ohlcv_closes(symbol, days=60)
+        except Exception as e:
+            logger.warning(f"Failed to get closes for {symbol}: {e}")
+            return []
+
+    @staticmethod
+    def _pearson_correlation(closes_a: list[float], closes_b: list[float]) -> float | None:
+        """Compute Pearson correlation on daily returns.
+
+        Args:
+            closes_a: Closing prices for asset A
+            closes_b: Closing prices for asset B
+
+        Returns:
+            Correlation coefficient, or None if insufficient data.
+        """
+        # Align lengths (use shorter series)
+        min_len = min(len(closes_a), len(closes_b))
+        if min_len < _MIN_CORRELATION_BARS + 1:
+            return None
+
+        a = np.array(closes_a[-min_len:])
+        b = np.array(closes_b[-min_len:])
+
+        # Daily returns
+        ret_a = np.diff(a) / a[:-1]
+        ret_b = np.diff(b) / b[:-1]
+
+        # Guard against constant series
+        if np.std(ret_a) == 0 or np.std(ret_b) == 0:
+            return None
+
+        corr_matrix = np.corrcoef(ret_a, ret_b)
+        return float(corr_matrix[0, 1])

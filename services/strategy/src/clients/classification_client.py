@@ -8,6 +8,7 @@ import logging
 import grpc
 
 from shared.generated import classification_pb2, classification_pb2_grpc
+from shared.utils.resilience import grpc_retry
 
 from ..config import config
 from ..models import CandidateSymbol
@@ -50,6 +51,7 @@ class ClassificationClient:
         self.stub = classification_pb2_grpc.ClassificationServiceStub(self.channel)
         logger.info(f"Connected to Classification Service at {self.address}")
 
+    @grpc_retry
     async def get_candidate_symbols(
         self, regime: str, max_candidates: int = 50, force_refresh: bool = False
     ) -> tuple[list[CandidateSymbol], list[str], list[str]]:
@@ -107,6 +109,7 @@ class ClassificationClient:
             # Re-raise other errors
             raise
 
+    @grpc_retry
     async def get_sector_analysis(
         self, regime: str, force_refresh: bool = False
     ) -> classification_pb2.GetSectorAnalysisResponse:
@@ -148,6 +151,7 @@ class ClassificationClient:
 
             raise
 
+    @grpc_retry
     async def get_thematic_analysis(
         self, sectors: list[str], regime: str, force_refresh: bool = False
     ) -> classification_pb2.GetThematicAnalysisResponse:

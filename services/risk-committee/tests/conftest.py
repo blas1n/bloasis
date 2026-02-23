@@ -68,6 +68,9 @@ def mock_market_data_client():
         return mock_response
 
     client.get_stock_info = AsyncMock(side_effect=get_stock_info_side_effect)
+
+    # Default: return empty closes (no correlation data → falls back to sector heuristic)
+    client.get_ohlcv_closes = AsyncMock(return_value=[])
     return client
 
 

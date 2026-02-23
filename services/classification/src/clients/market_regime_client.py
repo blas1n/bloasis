@@ -8,6 +8,7 @@ from typing import Optional
 
 import grpc
 from shared.generated import market_regime_pb2, market_regime_pb2_grpc
+from shared.utils.resilience import grpc_retry
 
 from ..config import config
 
@@ -49,6 +50,7 @@ class MarketRegimeClient:
         self.stub = market_regime_pb2_grpc.MarketRegimeServiceStub(self.channel)
         logger.info(f"Connected to Market Regime Service at {self.address}")
 
+    @grpc_retry
     async def get_current_regime(
         self, force_refresh: bool = False
     ) -> market_regime_pb2.GetCurrentRegimeResponse:
