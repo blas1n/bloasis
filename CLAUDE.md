@@ -1,79 +1,76 @@
-# Claude Development Guide for BLOASIS
+# BLOASIS
 
-## Project Overview
+AI-powered multi-asset trading platform combining LLMs and Reinforcement Learning.
 
-BLOASIS is an AI-powered multi-asset trading platform combining LLMs and Reinforcement Learning.
+## Tech Stack
 
-**Core Technologies**:
-- Backend: Python 3.11+ (FastAPI), gRPC internal communication
-- AI/ML: Claude (financial analysis and reasoning), LangGraph (multi-agent)
-- Backtesting: VectorBT, FinRL
-- Infrastructure: Envoy Gateway (gRPC-to-REST), Redpanda (messaging), PostgreSQL/TimescaleDB
-- Frontend: TypeScript (React/Next.js)
+- **Backend**: Python 3.11+ (gRPC-only services, no FastAPI/HTTP)
+- **AI/ML**: Claude (claude-haiku-4-5-20251001), LangGraph (multi-agent orchestration)
+- **Backtesting**: VectorBT, FinRL
+- **Infra**: Envoy Gateway (gRPC→REST), Redpanda (messaging), PostgreSQL/TimescaleDB
+- **Frontend**: TypeScript (React/Next.js)
+- **Tooling**: uv (package manager), buf (proto), ruff (lint/format)
 
-## Architecture Principles
+## Project Structure
 
-### 1. MSA Communication
-- **Internal**: gRPC only (10x faster than HTTP)
-- **External**: Envoy Gateway transcodes gRPC → REST
-- **.proto files**: Include HTTP annotations for Envoy Gateway
-
-### 2. Event Messaging
-- **Redpanda** (not RabbitMQ or Redis Pub/Sub)
-- Backend services publish events
-- Notification Service consumes and broadcasts via WebSocket
-
-### 3. AI Architecture
-- **Claude**: All AI-powered analysis (market regime, sector analysis, technical synthesis, risk assessment)
-  - Uses claude-haiku-4-5-20251001 for cost-effective classification tasks
-  - Falls back to rule-based analysis when no API key is configured
-- **LangGraph**: Multi-agent orchestration with conditional branching
-
-### 4. Cost Optimization
-- **Hybrid 3-Tier**: Shared analysis (Tier 1-2) + User customization (Tier 3)
-- Reduces API costs by 93%
-
-## Key Implementation Patterns
-
-### gRPC Service with HTTP Annotations
-```protobuf
-service MarketRegimeService {
-  rpc GetCurrentRegime(RegimeRequest) returns (RegimeResponse) {
-    option (google.api.http) = {
-      get: "/v1/market-regime/current"
-    };
-  }
-}
+```
+services/           # Microservices (gRPC-only, Python)
+  auth/             # Authentication
+  backtesting/      # Strategy backtesting
+  classification/   # Asset classification
+  executor/         # Trade execution
+  market-data/      # Market data ingestion
+  market-regime/    # Market regime detection
+  portfolio/        # Portfolio management
+  risk-committee/   # Risk assessment
+  strategy/         # Strategy generation
+  user/             # User management
+shared/             # Cross-service code
+  proto/            # .proto definitions (buf managed)
+  generated/        # Auto-generated proto files (gitignored)
+  ai_clients/       # Claude API wrappers
+  models/           # Shared data models
+  prompts/          # LLM prompt templates
+  utils/            # Shared utilities
+tests/              # Integration & E2E tests
+frontend/           # Next.js frontend
+infra/              # Infrastructure configs
+deploy/             # Deployment configs
 ```
 
-### Redpanda Event Publishing
-```python
-from aiokafka import AIOKafkaProducer
+## Quick Commands
 
-producer = AIOKafkaProducer(bootstrap_servers='redpanda:9092')
-await producer.send('regime-change', event_data)
+```bash
+make proto-generate  # Generate proto files + Envoy descriptor
+make lint            # ruff check shared/ services/
+make test            # pytest with 80% coverage gate
+make check           # lint + proto-lint + test
 ```
 
-### LangGraph Multi-Agent
-```python
-from langgraph.graph import StateGraph
+## Architecture Rules (Quick Reference)
 
-workflow = StateGraph(AnalysisState)
-workflow.add_node("macro", macro_strategist)  # Claude
-workflow.add_node("technical", technical_analyst)  # Claude
-workflow.add_conditional_edges("risk", should_adjust, {
-    "approve": END,
-    "adjust": "technical"
-})
-```
+Full rules in `.claude/rules/` — these are the non-negotiable ones:
 
-## Critical Design Decisions
+- **gRPC only** between services (no HTTP/REST internally)
+- **Redpanda** for messaging (not Redis Pub/Sub or RabbitMQ)
+- **Envoy Gateway** handles external REST via gRPC-to-REST transcoding
+- **All .proto files** must have HTTP annotations for Envoy
+- **Decimal** for all financial calculations (never float)
+- **Type hints** on all public functions
+- **No sys.path.insert()** — use PYTHONPATH
+- **No service-level Dockerfiles** or requirements.txt — use pyproject.toml + uv
+- **No hardcoded secrets** — use .env files (gitignored)
+- **Tests mandatory** — 80% minimum coverage, mock all external APIs
+- **ruff check** must pass before commit
 
-1. **gRPC Internal Communication**: 10x performance vs HTTP (10-50ms vs 100-500ms)
-2. **Redpanda from Phase 1**: Avoids migration cost, message durability
-3. **Notification Service Pattern**: Backend doesn't handle WebSocket, only publishes to Redpanda
-4. **Claude with Rule-Based Fallback**: Cost optimization via Haiku + fallback when no API key
+## Git Conventions
 
----
+- No `Co-Authored-By` in commit messages
+- Format: `type(scope): short description`
+- Types: feat, fix, refactor, test, docs, chore
 
-**Note**: Detailed folder structure, testing guidelines, and development standards are defined in Claude skills.
+## Cost Optimization
+
+- **Hybrid 3-Tier**: Shared analysis (Tier 1-2) cached across users + per-user customization (Tier 3)
+- Claude Haiku for classification, rule-based fallback when no API key
+- Reduces API costs by ~93%
