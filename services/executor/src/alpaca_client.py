@@ -172,6 +172,9 @@ class AlpacaClient:
         """Submit a bracket order with stop-loss and take-profit.
 
         This is the recommended order type for risk-managed trades.
+        If the first attempt fails due to stale bracket prices (entry_price
+        vs current market price gap), adjusts SL/TP using the base_price
+        from Alpaca's error response and retries once.
 
         Args:
             symbol: Stock ticker symbol
@@ -197,31 +200,54 @@ class AlpacaClient:
         rounded_sl = float(stop_loss.quantize(Decimal("0.01")))
         rounded_tp = float(take_profit.quantize(Decimal("0.01")))
 
-        request = MarketOrderRequest(
-            symbol=symbol,
-            qty=float(qty),
-            side=order_side,
-            time_in_force=TimeInForce.DAY,
-            client_order_id=client_order_id,
-            order_class="bracket",
-            stop_loss=StopLossRequest(stop_price=rounded_sl),
-            take_profit=TakeProfitRequest(limit_price=rounded_tp),
-        )
+        def _build_bracket_request(sl_price: float, tp_price: float) -> MarketOrderRequest:
+            return MarketOrderRequest(
+                symbol=symbol,
+                qty=float(qty),
+                side=order_side,
+                time_in_force=TimeInForce.DAY,
+                client_order_id=client_order_id,
+                order_class="bracket",
+                stop_loss=StopLossRequest(stop_price=sl_price),
+                take_profit=TakeProfitRequest(limit_price=tp_price),
+            )
 
         try:
             client = self._get_client()
-            order = client.submit_order(request)
+            order = client.submit_order(_build_bracket_request(rounded_sl, rounded_tp))
             logger.info(
-                f"Bracket order submitted: {symbol} {side} {qty} (SL={stop_loss}, TP={take_profit})"
+                f"Bracket order submitted: {symbol} {side} {qty} (SL={rounded_sl}, TP={rounded_tp})"
             )
             result = self._to_order_result(order)
             result.order_type = "bracket"
             return result
         except Exception as e:
-            logger.warning(
-                f"BRACKET_DOWNGRADE: Bracket order failed for {symbol} {side}, "
-                f"falling back to market order without SL/TP protection: {e}"
+            # Try to extract base_price from Alpaca error and retry with adjusted prices
+            adjusted = self._adjust_bracket_prices(
+                str(e), side.lower(), rounded_sl, rounded_tp,
             )
+            if adjusted:
+                adj_sl, adj_tp = adjusted
+                try:
+                    order = client.submit_order(_build_bracket_request(adj_sl, adj_tp))
+                    logger.info(
+                        f"BRACKET_RETRY: Adjusted bracket order submitted: "
+                        f"{symbol} {side} {qty} (SL={adj_sl}, TP={adj_tp})"
+                    )
+                    result = self._to_order_result(order)
+                    result.order_type = "bracket"
+                    return result
+                except Exception as retry_err:
+                    logger.warning(
+                        f"BRACKET_DOWNGRADE: Retry also failed for {symbol} {side}, "
+                        f"falling back to market order: {retry_err}"
+                    )
+            else:
+                logger.warning(
+                    f"BRACKET_DOWNGRADE: Bracket order failed for {symbol} {side}, "
+                    f"falling back to market order without SL/TP protection: {e}"
+                )
+
             result = await self.submit_market_order(
                 symbol=symbol,
                 qty=qty,
@@ -230,6 +256,60 @@ class AlpacaClient:
             )
             result.order_type = "market"
             return result
+
+    @staticmethod
+    def _adjust_bracket_prices(
+        error_msg: str,
+        side: str,
+        sl: float,
+        tp: float,
+    ) -> tuple[float, float] | None:
+        """Try to adjust bracket prices using base_price from Alpaca error.
+
+        Alpaca errors include the current base_price when bracket prices are
+        invalid. We use it to recalculate valid SL/TP with a 3% buffer.
+
+        Args:
+            error_msg: Alpaca error message (JSON string).
+            side: "buy" or "sell".
+            sl: Original stop loss price.
+            tp: Original take profit price.
+
+        Returns:
+            Tuple of (adjusted_sl, adjusted_tp) or None if not adjustable.
+        """
+        import json as _json
+        import re
+
+        # Extract base_price from error like {"base_price":"69.47","code":42210000,...}
+        match = re.search(r'"base_price"\s*:\s*"([0-9.]+)"', error_msg)
+        if not match:
+            return None
+
+        try:
+            base_price = float(match.group(1))
+        except ValueError:
+            return None
+
+        buffer = Decimal("0.03")  # 3% buffer from market price
+        base = Decimal(str(base_price))
+
+        if side == "sell":
+            # Sell bracket: SL must be above base_price
+            new_sl = float((base * (1 + buffer)).quantize(Decimal("0.01")))
+            # TP must be below base_price
+            new_tp = float((base * (1 - buffer)).quantize(Decimal("0.01")))
+            if new_tp <= 0:
+                return None
+            return new_sl, new_tp
+        else:
+            # Buy bracket: SL must be below base_price
+            new_sl = float((base * (1 - buffer)).quantize(Decimal("0.01")))
+            # TP must be above base_price
+            new_tp = float((base * (1 + buffer)).quantize(Decimal("0.01")))
+            if new_sl <= 0:
+                return None
+            return new_sl, new_tp
 
     async def get_order_status(self, order_id: str) -> OrderResult:
         """Get current status of an order.

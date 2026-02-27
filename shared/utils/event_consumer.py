@@ -127,6 +127,9 @@ class EventConsumer:
                 auto_offset_reset=self.auto_offset_reset,
                 value_deserializer=lambda m: json.loads(m.decode("utf-8")),
                 enable_auto_commit=True,
+                session_timeout_ms=30000,
+                heartbeat_interval_ms=10000,
+                max_poll_interval_ms=600000,
             )
             await self._consumer.start()
             self._running = True
