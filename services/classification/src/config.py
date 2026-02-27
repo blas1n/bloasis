@@ -6,7 +6,6 @@ All environment variables are validated at startup.
 
 from pathlib import Path
 
-from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _WORKSPACE_ENV = Path(__file__).resolve().parent.parent.parent.parent / ".env"
@@ -37,9 +36,10 @@ class ServiceConfig(BaseSettings):
     market_regime_host: str = "market-regime"
     market_regime_port: int = 50051
 
-    # Claude API key and model (required — server will not start without this)
-    anthropic_api_key: str = Field(default="", min_length=1)
-    claude_model: str = "claude-haiku-4-5-20251001"
+    # LLM configuration (litellm format)
+    llm_model: str = "anthropic/claude-haiku-4-5-20251001"
+    llm_api_key: str = ""
+    llm_api_base: str = ""
 
 
 # Global config instance - validated at import time

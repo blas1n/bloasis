@@ -10,7 +10,7 @@ from typing import Optional
 
 import grpc
 from grpc_health.v1 import health, health_pb2, health_pb2_grpc
-from shared.ai_clients import ClaudeClient
+from shared.ai_clients import LLMClient
 from shared.generated import classification_pb2_grpc
 from shared.utils import setup_logger
 
@@ -24,7 +24,7 @@ logger = setup_logger(__name__)
 # Global clients for shutdown
 cache_manager: Optional[CacheManager] = None
 regime_client: Optional[MarketRegimeClient] = None
-analyst: Optional[ClaudeClient] = None
+analyst: Optional[LLMClient] = None
 
 
 async def serve() -> None:
@@ -43,14 +43,17 @@ async def serve() -> None:
     await regime_client.connect()
     logger.info("Market Regime client connected")
 
-    # Initialize Claude analyst
-    analyst = ClaudeClient(api_key=config.anthropic_api_key)
-    logger.info(f"Claude analyst initialized (model: {config.claude_model})")
+    # Initialize LLM analyst
+    analyst = LLMClient(
+        model=config.llm_model,
+        api_key=config.llm_api_key or None,
+        api_base=config.llm_api_base or None,
+    )
+    logger.info(f"LLM analyst initialized (model: {config.llm_model})")
 
     # Initialize classification service
     classification_service = ClassificationService(
         analyst=analyst,
-        claude_model=config.claude_model,
         regime_client=regime_client,
         cache_manager=cache_manager,
     )

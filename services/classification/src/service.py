@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from typing import List, Optional
 
 import grpc
-from shared.ai_clients import ClaudeClient
+from shared.ai_clients.llm_client import LLMClient
 from shared.generated import classification_pb2, classification_pb2_grpc
 
 from .clients.market_regime_client import MarketRegimeClient
@@ -36,21 +36,18 @@ class ClassificationService:
 
     def __init__(
         self,
-        analyst: ClaudeClient,
+        analyst: LLMClient,
         regime_client: MarketRegimeClient,
         cache_manager: CacheManager,
-        claude_model: str = "claude-haiku-4-5-20251001",
     ):
         """Initialize Classification Service.
 
         Args:
-            analyst: Claude client for AI analysis
+            analyst: LLM client for AI analysis
             regime_client: Market Regime Service gRPC client
             cache_manager: Redis cache manager
-            claude_model: Claude model ID to use for analysis.
         """
         self.analyst = analyst
-        self.claude_model = claude_model
         self.regime_client = regime_client
         self.cache = cache_manager
 
@@ -88,7 +85,7 @@ class ClassificationService:
         params = get_sector_model_parameters()
         data = await self.analyst.analyze(
             prompt=prompt,
-            model=self.claude_model,
+            model=params.get("model"),
             response_format="json",
             max_tokens=params.get("max_tokens", 1000),
         )
@@ -145,7 +142,7 @@ class ClassificationService:
         params = get_theme_model_parameters()
         data = await self.analyst.analyze(
             prompt=prompt,
-            model=self.claude_model,
+            model=params.get("model"),
             response_format="json",
             max_tokens=params.get("max_tokens", 1500),
         )
