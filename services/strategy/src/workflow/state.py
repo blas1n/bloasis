@@ -114,3 +114,4 @@ class AnalysisState(TypedDict):
     analysis_id: str
     started_at: str
     errors: list[str]
+    warnings: list[str]  # Non-fatal messages (e.g. fallback used)

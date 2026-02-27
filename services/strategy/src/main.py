@@ -9,13 +9,13 @@ Envoy Gateway handles HTTP-to-gRPC transcoding.
 """
 
 import asyncio
-import logging
 import sys
 
 import grpc
 from grpc_health.v1 import health, health_pb2, health_pb2_grpc
 
 from shared.generated import strategy_pb2_grpc
+from shared.utils import setup_logger
 
 from .clients.classification_client import ClassificationClient
 from .clients.market_data_client import MarketDataClient
@@ -24,13 +24,7 @@ from .config import config
 from .service import StrategyServicer
 from .utils.cache import UserCacheManager
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    handlers=[logging.StreamHandler(sys.stdout)],
-)
-logger = logging.getLogger(__name__)
+logger = setup_logger(__name__)
 
 # Global clients for shutdown
 classification_client: ClassificationClient | None = None

@@ -500,6 +500,7 @@ class TestWorkflowNodesErrorHandling:
             "analysis_id": "test_id",
             "started_at": "2024-01-01",
             "errors": [],
+            "warnings": [],
         }
 
         with patch("src.workflow.nodes.get_macro_strategist") as mock_get:
@@ -513,8 +514,8 @@ class TestWorkflowNodesErrorHandling:
             assert result["phase"] == WorkflowPhase.TECHNICAL_ANALYSIS
             assert result["market_context"] is not None
             assert result["market_context"].confidence == 0.6  # Fallback confidence
-            assert len(result["errors"]) == 1
-            assert "fallback" in result["errors"][0].lower()
+            assert len(result["warnings"]) == 1
+            assert "fallback" in result["warnings"][0].lower()
 
     @pytest.mark.asyncio
     async def test_technical_analysis_node_fallback(self):
@@ -537,6 +538,7 @@ class TestWorkflowNodesErrorHandling:
             "analysis_id": "test_id",
             "started_at": "2024-01-01",
             "errors": [],
+            "warnings": [],
         }
 
         with patch("src.workflow.nodes.get_technical_analyst") as mock_get, \
@@ -550,12 +552,12 @@ class TestWorkflowNodesErrorHandling:
             # Fallback continues to next phase instead of ERROR
             assert result["phase"] == WorkflowPhase.RISK_ASSESSMENT
             assert "technical_signals" in result
-            assert len(result["errors"]) == 1
-            assert "fallback" in result["errors"][0].lower()
+            assert len(result["warnings"]) == 1
+            assert "fallback" in result["warnings"][0].lower()
 
     @pytest.mark.asyncio
-    async def test_technical_analysis_node_fallback_preserves_errors(self):
-        """Test technical analysis fallback preserves existing errors."""
+    async def test_technical_analysis_node_fallback_preserves_warnings(self):
+        """Test technical analysis fallback preserves existing warnings."""
         state: AnalysisState = {
             "user_id": "test_user",
             "stock_picks": [{"symbol": "AAPL", "sector": "Technology"}],
@@ -573,7 +575,8 @@ class TestWorkflowNodesErrorHandling:
             "trading_signals": [],
             "analysis_id": "test_id",
             "started_at": "2024-01-01",
-            "errors": ["Previous error"],
+            "errors": [],
+            "warnings": ["Previous warning"],
         }
 
         with patch("src.workflow.nodes.get_technical_analyst") as mock_get, \
@@ -585,8 +588,8 @@ class TestWorkflowNodesErrorHandling:
             result = await technical_analysis_node(state)
 
             assert result["phase"] == WorkflowPhase.RISK_ASSESSMENT
-            assert len(result["errors"]) == 2
-            assert "Previous error" in result["errors"]
+            assert len(result["warnings"]) == 2
+            assert "Previous warning" in result["warnings"]
 
     @pytest.mark.asyncio
     async def test_risk_assessment_node_fallback(self):
@@ -618,6 +621,7 @@ class TestWorkflowNodesErrorHandling:
             "analysis_id": "test_id",
             "started_at": "2024-01-01",
             "errors": [],
+            "warnings": [],
         }
 
         with patch("src.workflow.nodes.get_risk_manager") as mock_get:
@@ -631,8 +635,8 @@ class TestWorkflowNodesErrorHandling:
             assert result["phase"] == WorkflowPhase.SIGNAL_GENERATION
             assert result["risk_assessment"] is not None
             assert result["risk_assessment"].approved is True  # medium risk → approved
-            assert len(result["errors"]) == 1
-            assert "fallback" in result["errors"][0].lower()
+            assert len(result["warnings"]) == 1
+            assert "fallback" in result["warnings"][0].lower()
 
     @pytest.mark.asyncio
     async def test_signal_generation_node_error(self):
@@ -881,23 +885,26 @@ class TestSingletonGetters:
         # Reset for other tests
         nodes._signal_generator = None
 
-    def test_get_event_publisher_singleton(self):
+    @pytest.mark.asyncio
+    async def test_get_event_publisher_singleton(self):
         """Test that get_event_publisher creates singleton."""
         from src.workflow import nodes
 
         # Reset the singleton
         nodes._event_publisher = None
 
-        with patch("src.workflow.nodes.RedpandaClient"), \
+        with patch("src.workflow.nodes.RedpandaClient") as mock_redpanda_class, \
              patch("src.workflow.nodes.EventPublisher") as mock_class:
+            mock_redpanda = AsyncMock()
+            mock_redpanda_class.return_value = mock_redpanda
             mock_instance = AsyncMock()
             mock_class.return_value = mock_instance
 
             # First call should create instance
-            result1 = nodes.get_event_publisher()
+            result1 = await nodes.get_event_publisher()
 
             # Second call should return same instance
-            result2 = nodes.get_event_publisher()
+            result2 = await nodes.get_event_publisher()
 
             assert result1 is result2
             mock_class.assert_called_once()

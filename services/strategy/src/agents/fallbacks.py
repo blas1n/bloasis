@@ -103,7 +103,7 @@ class RuleBasedTechnicalAnalyst:
         if not self.market_data:
             return None
 
-        bars = await self.market_data.get_ohlcv(symbol, period="60d", interval="1d")
+        bars = await self.market_data.get_ohlcv(symbol, period="3mo", interval="1d")
         if len(bars) < 20:
             return None
 

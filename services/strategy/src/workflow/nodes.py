@@ -96,11 +96,12 @@ def get_portfolio_optimizer() -> PortfolioOptimizer:
     return _portfolio_optimizer
 
 
-def get_event_publisher() -> EventPublisher:
+async def get_event_publisher() -> EventPublisher:
     """Get or create EventPublisher instance."""
     global _event_publisher
     if _event_publisher is None:
-        redpanda = RedpandaClient(bootstrap_servers=config.redpanda_brokers)
+        redpanda = RedpandaClient(brokers=config.redpanda_brokers)
+        await redpanda.start()
         _event_publisher = EventPublisher(redpanda)
     return _event_publisher
 
@@ -149,8 +150,7 @@ async def macro_analysis_node(state: AnalysisState) -> dict:
         )
 
         logger.info(
-            f"[{analysis_id}] Macro analysis complete: "
-            f"risk_level={market_context.risk_level}"
+            f"[{analysis_id}] Macro analysis complete: risk_level={market_context.risk_level}"
         )
 
         return {
@@ -168,10 +168,11 @@ async def macro_analysis_node(state: AnalysisState) -> dict:
             user_preferences=state["preferences"],
         )
 
+        warnings = state.get("warnings", [])
         return {
             "market_context": market_context,
             "phase": WorkflowPhase.TECHNICAL_ANALYSIS,
-            "errors": [f"Macro analysis fallback used: {str(e)}"],
+            "warnings": warnings + [f"Macro analysis fallback used: {str(e)}"],
         }
 
 
@@ -201,7 +202,7 @@ async def technical_analysis_node(state: AnalysisState) -> dict:
         for pick in state["stock_picks"]:
             symbol = pick["symbol"]
             try:
-                bars = await market_data.get_ohlcv(symbol, period="60d")
+                bars = await market_data.get_ohlcv(symbol, period="3mo")
                 ohlcv_data[symbol] = bars
             except Exception:
                 ohlcv_data[symbol] = []
@@ -226,11 +227,11 @@ async def technical_analysis_node(state: AnalysisState) -> dict:
             market_context=state["market_context"],
         )
 
-        errors = state.get("errors", [])
+        warnings = state.get("warnings", [])
         return {
             "technical_signals": signals,
             "phase": WorkflowPhase.RISK_ASSESSMENT,
-            "errors": errors + [f"Technical analysis fallback used: {str(e)}"],
+            "warnings": warnings + [f"Technical analysis fallback used: {str(e)}"],
         }
 
 
@@ -278,11 +279,11 @@ async def risk_assessment_node(state: AnalysisState) -> dict:
             user_preferences=state["preferences"],
         )
 
-        errors = state.get("errors", [])
+        warnings = state.get("warnings", [])
         return {
             "risk_assessment": assessment,
             "phase": WorkflowPhase.SIGNAL_GENERATION,
-            "errors": errors + [f"Risk assessment fallback used: {str(e)}"],
+            "warnings": warnings + [f"Risk assessment fallback used: {str(e)}"],
         }
 
 
@@ -322,22 +323,16 @@ async def signal_generation_node(state: AnalysisState) -> dict:
                     if signal.symbol in opt_weights:
                         opt_w = opt_weights[signal.symbol]
                         # Blend: 50% signal-based + 50% optimizer-based
-                        blended = (
-                            signal.size_recommendation * Decimal("0.5")
-                            + opt_w * Decimal("0.5")
+                        blended = signal.size_recommendation * Decimal("0.5") + opt_w * Decimal(
+                            "0.5"
                         )
                         signal.size_recommendation = blended.quantize(
                             Decimal("0.0001"),
                         )
             except Exception as e:
-                logger.warning(
-                    f"[{analysis_id}] Portfolio optimization skipped: {e}"
-                )
+                logger.warning(f"[{analysis_id}] Portfolio optimization skipped: {e}")
 
-        logger.info(
-            f"[{analysis_id}] Signal generation complete: "
-            f"{len(trading_signals)} signals"
-        )
+        logger.info(f"[{analysis_id}] Signal generation complete: {len(trading_signals)} signals")
 
         return {
             "trading_signals": trading_signals,
@@ -370,7 +365,7 @@ async def event_publishing_node(state: AnalysisState) -> dict:
     logger.info(f"[{analysis_id}] Publishing events")
 
     try:
-        publisher = get_event_publisher()
+        publisher = await get_event_publisher()
 
         # Publish each trading signal
         for signal in state["trading_signals"]:
@@ -382,6 +377,7 @@ async def event_publishing_node(state: AnalysisState) -> dict:
                 confidence=signal.confidence,
                 priority=EventPriority.HIGH,
                 parameters={
+                    "user_id": user_id,
                     "entry_price": str(signal.entry_price),
                     "stop_loss": str(signal.stop_loss),
                     "take_profit": str(signal.take_profit),

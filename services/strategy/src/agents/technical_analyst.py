@@ -139,7 +139,7 @@ class TechnicalAnalyst:
             symbol = pick["symbol"]
             try:
                 # Fetch 60 days of OHLCV data
-                bars = await self.market_data.get_ohlcv(symbol, period="60d")
+                bars = await self.market_data.get_ohlcv(symbol, period="3mo")
                 ohlcv_data[symbol] = bars
             except Exception as e:
                 logger.warning(f"Failed to fetch OHLCV data for {symbol}: {e}")
