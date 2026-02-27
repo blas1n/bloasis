@@ -19,4 +19,4 @@ def setup_test_env() -> None:
         "DATABASE_URL",
         "postgresql+asyncpg://postgres:postgres@localhost:5432/bloasis_test"
     )
-    os.environ.setdefault("ANTHROPIC_API_KEY", "test_anthropic_key_for_unit_tests")
+    os.environ.setdefault("LLM_MODEL", "anthropic/claude-haiku-4-5-20251001")

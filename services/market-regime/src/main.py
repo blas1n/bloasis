@@ -2,7 +2,7 @@
 Market Regime Service - gRPC only.
 
 Envoy Gateway handles HTTP-to-gRPC transcoding.
-Uses Claude AI for market regime classification (ANTHROPIC_API_KEY required).
+Uses LLM for market regime classification (supports Anthropic, Ollama, OpenAI via litellm).
 """
 
 import asyncio
@@ -11,7 +11,7 @@ from typing import Optional
 
 import grpc
 from grpc_health.v1 import health, health_pb2, health_pb2_grpc
-from shared.ai_clients import ClaudeClient
+from shared.ai_clients import LLMClient
 from shared.generated import market_regime_pb2_grpc
 from shared.utils import (
     ConsulClient,
@@ -81,19 +81,22 @@ async def serve() -> None:
                 "Consul service registration failed - service will continue without Consul"
             )
 
-    # Initialize Claude analyst (required)
-    analyst = ClaudeClient(api_key=config.anthropic_api_key)
-    logger.info(f"Claude analyst initialized (model: {config.claude_model})")
+    # Initialize LLM analyst
+    analyst = LLMClient(
+        model=config.llm_model,
+        api_key=config.llm_api_key or None,
+        api_base=config.llm_api_base or None,
+    )
+    logger.info(f"LLM analyst initialized (model: {config.llm_model})")
 
     # Initialize macro data fetcher
     macro_fetcher = MacroDataFetcher(fred_api_key=config.fred_api_key or None)
     logger.info("Macro data fetcher initialized")
 
-    # Initialize regime classifier with Claude integration
+    # Initialize regime classifier
     classifier = RegimeClassifier(
         analyst=analyst,
         macro_fetcher=macro_fetcher,
-        claude_model=config.claude_model,
     )
 
     # Create gRPC server

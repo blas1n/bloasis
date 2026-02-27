@@ -18,7 +18,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from .prompts import format_classification_prompt, get_model_parameters, get_system_prompt
 
 if TYPE_CHECKING:
-    from shared.ai_clients import ClaudeClient
+    from shared.ai_clients.llm_client import LLMClient
 
     from .macro_data import MacroDataFetcher
 
@@ -94,21 +94,18 @@ class RegimeClassifier:
 
     def __init__(
         self,
-        analyst: "ClaudeClient",
+        analyst: "LLMClient",
         macro_fetcher: Optional["MacroDataFetcher"] = None,
-        claude_model: str = "claude-haiku-4-5-20251001",
     ) -> None:
         """
         Initialize the RegimeClassifier.
 
         Args:
-            analyst: Claude client for AI analysis (required).
+            analyst: LLM client for AI analysis (required).
             macro_fetcher: Macro data fetcher for economic indicators.
-            claude_model: Claude model ID to use for analysis.
         """
         self.analyst = analyst
         self.macro_fetcher = macro_fetcher
-        self.claude_model = claude_model
 
     async def classify(
         self,
@@ -151,7 +148,7 @@ class RegimeClassifier:
 
         raw_result = await self.analyst.analyze(
             prompt=prompt,
-            model=self.claude_model,
+            model=params.get("model"),
             system_prompt=system_prompt,
             response_format="json",
             max_tokens=params.get("max_tokens", 1024),
