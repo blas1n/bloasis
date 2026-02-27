@@ -22,11 +22,11 @@ class Settings(BaseSettings):
 
     # Portfolio Service connection
     portfolio_host: str = "portfolio"
-    portfolio_port: int = 50060
+    portfolio_port: int = 50057
 
     # Market Data Service connection
     market_data_host: str = "market-data"
-    market_data_port: int = 50052
+    market_data_port: int = 50053
 
     # Consul Service Discovery
     consul_host: str = "consul"
