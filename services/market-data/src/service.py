@@ -108,7 +108,8 @@ class MarketDataServicer(market_data_pb2_grpc.MarketDataServiceServicer):
         cached = await self._get_cached(cache_key)
         if cached:
             logger.debug(f"Cache hit for {symbol} OHLCV")
-            data = json.loads(cached)
+            # cached is already a dict (RedisClient auto-deserializes JSON)
+            data = cached if isinstance(cached, dict) else json.loads(cached)
             return market_data_pb2.GetOHLCVResponse(
                 symbol=symbol,
                 interval=interval,
@@ -177,7 +178,8 @@ class MarketDataServicer(market_data_pb2_grpc.MarketDataServiceServicer):
         cached = await self._get_cached(cache_key)
         if cached:
             logger.debug(f"Cache hit for {symbol} info")
-            data = json.loads(cached)
+            # cached is already a dict (RedisClient auto-deserializes JSON)
+            data = cached if isinstance(cached, dict) else json.loads(cached)
             response = market_data_pb2.GetStockInfoResponse(
                 symbol=data["symbol"],
                 name=data["name"],
