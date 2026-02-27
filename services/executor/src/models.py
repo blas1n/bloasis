@@ -47,6 +47,7 @@ class OrderResult:
     submitted_at: str
     filled_at: str | None
     error_message: str | None = None
+    order_type: str | None = None
 
 
 @dataclass

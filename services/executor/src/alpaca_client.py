@@ -193,6 +193,10 @@ class AlpacaClient:
 
         order_side = OrderSide.BUY if side.lower() == "buy" else OrderSide.SELL
 
+        # Round prices to cents — Alpaca rejects sub-penny values
+        rounded_sl = float(stop_loss.quantize(Decimal("0.01")))
+        rounded_tp = float(take_profit.quantize(Decimal("0.01")))
+
         request = MarketOrderRequest(
             symbol=symbol,
             qty=float(qty),
@@ -200,8 +204,8 @@ class AlpacaClient:
             time_in_force=TimeInForce.DAY,
             client_order_id=client_order_id,
             order_class="bracket",
-            stop_loss=StopLossRequest(stop_price=float(stop_loss)),
-            take_profit=TakeProfitRequest(limit_price=float(take_profit)),
+            stop_loss=StopLossRequest(stop_price=rounded_sl),
+            take_profit=TakeProfitRequest(limit_price=rounded_tp),
         )
 
         try:
@@ -210,16 +214,22 @@ class AlpacaClient:
             logger.info(
                 f"Bracket order submitted: {symbol} {side} {qty} (SL={stop_loss}, TP={take_profit})"
             )
-            return self._to_order_result(order)
+            result = self._to_order_result(order)
+            result.order_type = "bracket"
+            return result
         except Exception as e:
-            logger.error(f"Bracket order submission failed: {e}")
-            return self._create_rejected_result(
-                symbol=symbol,
-                side=side,
-                qty=qty,
-                client_order_id=client_order_id or "",
-                error_message=str(e),
+            logger.warning(
+                f"BRACKET_DOWNGRADE: Bracket order failed for {symbol} {side}, "
+                f"falling back to market order without SL/TP protection: {e}"
             )
+            result = await self.submit_market_order(
+                symbol=symbol,
+                qty=qty,
+                side=side,
+                client_order_id=client_order_id,
+            )
+            result.order_type = "market"
+            return result
 
     async def get_order_status(self, order_id: str) -> OrderResult:
         """Get current status of an order.
