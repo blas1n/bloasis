@@ -126,9 +126,20 @@ class MarketRegimeServicer(market_regime_pb2_grpc.MarketRegimeServiceServicer):
 
             # Cache miss or force_refresh - classify regime
             logger.info("Classifying market regime...")
-            if self.classifier is None:
-                raise RuntimeError("RegimeClassifier is not configured — ANTHROPIC_API_KEY required")
-            regime_data: RegimeData = await self.classifier.classify()
+            regime_data: RegimeData | None = None
+
+            if self.classifier is not None:
+                try:
+                    regime_data = await self.classifier.classify()
+                except Exception as classify_err:
+                    logger.warning(f"Claude classification failed, trying DB fallback: {classify_err}")
+
+            if regime_data is None:
+                regime_data = await self._fallback_regime()
+                if regime_data is None:
+                    raise RuntimeError(
+                        "Regime classification failed: Claude unavailable and no DB history"
+                    )
 
             # Build indicators message
             indicators = None
@@ -252,6 +263,42 @@ class MarketRegimeServicer(market_regime_pb2_grpc.MarketRegimeServiceServicer):
             context.set_code(grpc.StatusCode.INTERNAL)
             context.set_details(f"Failed to retrieve regime history: {str(e)}")
             return market_regime_pb2.GetRegimeHistoryResponse()
+
+    async def _fallback_regime(self) -> RegimeData | None:
+        """Return last known regime from DB, or a safe default.
+
+        Returns:
+            RegimeData from the latest DB record, or a static default
+            if no history exists. None is never returned in practice
+            because the static default always succeeds.
+        """
+        # Try database first
+        try:
+            record = await self.repository.get_latest()
+            if record:
+                logger.info(f"Using DB fallback regime: {record.regime}")
+                return RegimeData(
+                    regime=record.regime,
+                    confidence=record.confidence * 0.8,  # reduce confidence
+                    timestamp=record.timestamp.isoformat() if record.timestamp else "",
+                    trigger="fallback_db",
+                    reasoning="Fallback: last known regime from database (Claude unavailable)",
+                    risk_level="medium",
+                )
+        except Exception as db_err:
+            logger.warning(f"DB fallback also failed: {db_err}")
+
+        # Static default as last resort
+        logger.info("Using static default regime: sideways")
+        now = datetime.now(timezone.utc).isoformat()
+        return RegimeData(
+            regime="sideways",
+            confidence=0.3,
+            timestamp=now,
+            trigger="fallback_default",
+            reasoning="Fallback: default regime (Claude and DB both unavailable)",
+            risk_level="medium",
+        )
 
     async def _persist_regime(self, regime_data: RegimeData) -> None:
         """
