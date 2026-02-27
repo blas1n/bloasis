@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import uuid4
 
-from shared.ai_clients import ClaudeClient
+from shared.ai_clients import LLMClient
 from shared.utils.event_publisher import EventPriority, EventPublisher
 from shared.utils.redpanda_client import RedpandaClient
 
@@ -33,8 +33,8 @@ from .state import AnalysisState, WorkflowPhase
 
 logger = logging.getLogger(__name__)
 
-# Shared Claude client — one connection pool for the entire workflow
-_claude_client: ClaudeClient | None = None
+# Shared LLM client — one connection pool for the entire workflow
+_llm_client: LLMClient | None = None
 
 # Agent instances (singleton pattern for workflow)
 _macro_strategist: MacroStrategist | None = None
@@ -45,19 +45,23 @@ _portfolio_optimizer: PortfolioOptimizer | None = None
 _event_publisher: EventPublisher | None = None
 
 
-def get_claude_client() -> ClaudeClient:
-    """Get or create the shared ClaudeClient instance."""
-    global _claude_client
-    if _claude_client is None:
-        _claude_client = ClaudeClient(api_key=config.anthropic_api_key)
-    return _claude_client
+def get_llm_client() -> LLMClient:
+    """Get or create the shared LLM client instance."""
+    global _llm_client
+    if _llm_client is None:
+        _llm_client = LLMClient(
+            model=config.llm_model,
+            api_key=config.llm_api_key or None,
+            api_base=config.llm_api_base or None,
+        )
+    return _llm_client
 
 
 def get_macro_strategist() -> MacroStrategist:
     """Get or create MacroStrategist instance."""
     global _macro_strategist
     if _macro_strategist is None:
-        _macro_strategist = MacroStrategist(analyst=get_claude_client())
+        _macro_strategist = MacroStrategist(analyst=get_llm_client())
     return _macro_strategist
 
 
@@ -66,7 +70,7 @@ def get_technical_analyst() -> TechnicalAnalyst:
     global _technical_analyst
     if _technical_analyst is None:
         _technical_analyst = TechnicalAnalyst(
-            claude_client=get_claude_client(),
+            claude_client=get_llm_client(),
             market_data_client=MarketDataClient(),
         )
     return _technical_analyst
@@ -76,7 +80,7 @@ def get_risk_manager() -> RiskManager:
     """Get or create RiskManager instance."""
     global _risk_manager
     if _risk_manager is None:
-        _risk_manager = RiskManager(claude_client=get_claude_client())
+        _risk_manager = RiskManager(claude_client=get_llm_client())
     return _risk_manager
 
 

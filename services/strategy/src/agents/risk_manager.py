@@ -6,7 +6,7 @@ sophisticated judgment to assess portfolio risk and approve/reject signals.
 
 import logging
 
-from shared.ai_clients import ClaudeClient
+from shared.ai_clients.llm_client import LLMClient
 
 from ..prompts import format_risk_prompt, get_risk_model_parameters
 from ..workflow.state import MarketContext, RiskAssessment, TechnicalSignal
@@ -21,7 +21,7 @@ class RiskManager:
     using Claude's nuanced judgment capabilities.
     """
 
-    def __init__(self, claude_client: ClaudeClient):
+    def __init__(self, claude_client: LLMClient):
         """Initialize Risk Manager.
 
         Args:
@@ -96,15 +96,8 @@ class RiskManager:
         except Exception as e:
             logger.error(f"Risk assessment failed: {e}", exc_info=True)
 
-            # Fail-safe: Reject on error
-            logger.warning("Rejecting signals due to risk assessment failure (fail-safe)")
-            return RiskAssessment(
-                approved=False,
-                risk_score=1.0,
-                position_adjustments={},
-                warnings=[f"Risk assessment error: {str(e)}"],
-                concentration_risk=1.0,
-            )
+            # Re-raise so the workflow node can use RuleBasedRiskManager fallback
+            raise
 
     def _prepare_signals_data(self, signals: list[TechnicalSignal]) -> list[dict]:
         """Prepare signals data for Claude analysis.

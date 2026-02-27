@@ -16,7 +16,7 @@ from ..prompts import (
 from ..workflow.state import MarketContext
 
 if TYPE_CHECKING:
-    from shared.ai_clients import ClaudeClient
+    from shared.ai_clients.llm_client import LLMClient
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +27,7 @@ class MacroStrategist:
     Analyzes macro environment and provides risk context for trading decisions.
     """
 
-    def __init__(self, analyst: "ClaudeClient") -> None:
+    def __init__(self, analyst: "LLMClient") -> None:
         """Initialize Macro Strategist.
 
         Args:

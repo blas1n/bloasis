@@ -8,7 +8,7 @@ import logging
 from decimal import Decimal
 from typing import Any
 
-from shared.ai_clients import ClaudeClient
+from shared.ai_clients.llm_client import LLMClient
 
 from ..clients.market_data_client import MarketDataClient
 from ..prompts import format_technical_prompt, get_technical_model_parameters
@@ -30,7 +30,7 @@ class TechnicalAnalyst:
 
     def __init__(
         self,
-        claude_client: ClaudeClient,
+        claude_client: LLMClient,
         market_data_client: MarketDataClient,
     ):
         """Initialize Technical Analyst.
@@ -122,7 +122,8 @@ class TechnicalAnalyst:
 
         except Exception as e:
             logger.error(f"Technical analysis failed: {e}", exc_info=True)
-            return []
+            # Re-raise so the workflow node can use RuleBasedTechnicalAnalyst fallback
+            raise
 
     async def _fetch_ohlcv_data(self, stock_picks: list[dict]) -> dict:
         """Fetch OHLCV data for all stocks.
