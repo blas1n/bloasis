@@ -111,7 +111,9 @@ class UserServicer(user_pb2_grpc.UserServiceServicer):
         self.redis = redis_client
         self.postgres = postgres_client
         self.repository = repository or UserRepository(postgres_client)
-        self.broker_config_repo = broker_config_repository or BrokerConfigRepository(postgres_client)
+        self.broker_config_repo = broker_config_repository or BrokerConfigRepository(
+            postgres_client
+        )
         self.executor_client = executor_client
         self.redpanda = redpanda_client
 
@@ -304,9 +306,7 @@ class UserServicer(user_pb2_grpc.UserServiceServicer):
                 await self.redis.setex(cache_key, CACHE_TTL, cache_data)
                 logger.info(f"Cached preferences for user {user_id} with TTL {CACHE_TTL}s")
 
-            return user_pb2.GetPreferencesResponse(
-                preferences=_preferences_to_proto(preferences)
-            )
+            return user_pb2.GetPreferencesResponse(preferences=_preferences_to_proto(preferences))
 
         except Exception as e:
             logger.error(f"Failed to get preferences: {e}")
@@ -392,9 +392,7 @@ class UserServicer(user_pb2_grpc.UserServiceServicer):
             await self._invalidate_cache(user_id)
 
             logger.info(f"Updated preferences for user {user_id}")
-            return user_pb2.UpdatePreferencesResponse(
-                preferences=_preferences_to_proto(updated)
-            )
+            return user_pb2.UpdatePreferencesResponse(preferences=_preferences_to_proto(updated))
 
         except ValueError as e:
             logger.warning(f"Invalid preferences update: {e}")
@@ -480,6 +478,7 @@ class UserServicer(user_pb2_grpc.UserServiceServicer):
             if self.redpanda:
                 event = {
                     "event_id": str(uuid4()),
+                    "event_type": "trading_control",
                     "timestamp": datetime.utcnow().isoformat(),
                     "user_id": user_id,
                     "action": "started",
@@ -572,6 +571,7 @@ class UserServicer(user_pb2_grpc.UserServiceServicer):
             if self.redpanda:
                 event = {
                     "event_id": str(uuid4()),
+                    "event_type": "trading_control",
                     "timestamp": datetime.utcnow().isoformat(),
                     "user_id": user_id,
                     "action": "stopped",
@@ -712,7 +712,9 @@ class UserServicer(user_pb2_grpc.UserServiceServicer):
             await self.broker_config_repo.set_config("alpaca_secret_key", request.alpaca_secret_key)
             await self.broker_config_repo.set_config("alpaca_paper", str(request.paper).lower())
 
-            logger.info("Broker configuration updated (key length: %d)", len(request.alpaca_api_key))
+            logger.info(
+                "Broker configuration updated (key length: %d)", len(request.alpaca_api_key)
+            )
             return user_pb2.UpdateBrokerConfigResponse(
                 success=True,
                 message="Broker configuration saved successfully",

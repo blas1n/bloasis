@@ -19,6 +19,7 @@ from shared.utils import (
     get_local_ip,
     setup_logger,
 )
+from shared.utils.redpanda_client import RedpandaClient
 
 from .clients.executor_client import ExecutorClient
 from .config import config
@@ -75,6 +76,15 @@ async def serve() -> None:
     repository = UserRepository(postgres_client)
     broker_config_repo = BrokerConfigRepository(postgres_client)
 
+    # Initialize Redpanda client for event publishing
+    redpanda_client = RedpandaClient(brokers=config.redpanda_brokers)
+    try:
+        await redpanda_client.start()
+        logger.info("Redpanda client connected")
+    except Exception as e:
+        logger.warning(f"Redpanda client connection failed (non-fatal): {e}")
+        redpanda_client = None
+
     # Initialize Executor client (for broker status checks)
     executor_client = ExecutorClient()
     try:
@@ -94,16 +104,14 @@ async def serve() -> None:
         repository=repository,
         broker_config_repository=broker_config_repo,
         executor_client=executor_client,
+        redpanda_client=redpanda_client,
     )
     user_pb2_grpc.add_UserServiceServicer_to_server(servicer, server)
 
     # Add health check service
     health_servicer = health.HealthServicer()
     health_servicer.set("", health_pb2.HealthCheckResponse.SERVING)
-    health_servicer.set(
-        "bloasis.user.UserService",
-        health_pb2.HealthCheckResponse.SERVING
-    )
+    health_servicer.set("bloasis.user.UserService", health_pb2.HealthCheckResponse.SERVING)
     health_pb2_grpc.add_HealthServicer_to_server(health_servicer, server)
 
     # Start server
@@ -126,6 +134,9 @@ async def serve() -> None:
         if executor_client:
             await executor_client.close()
             logger.info("Executor client disconnected")
+        if redpanda_client:
+            await redpanda_client.stop()
+            logger.info("Redpanda client disconnected")
         if redis_client:
             await redis_client.close()
             logger.info("Redis client disconnected")
