@@ -1,5 +1,6 @@
 """Executor Service - Order execution management."""
 
+import asyncio
 import logging
 from decimal import Decimal
 from typing import TYPE_CHECKING
@@ -8,10 +9,13 @@ from uuid import uuid4
 import grpc
 from shared.generated import executor_pb2, executor_pb2_grpc
 
+from .config import config
 from .models import OrderStatus, OrderType
 
 if TYPE_CHECKING:
     from .alpaca_client import AlpacaClient
+    from .clients.risk_committee_client import RiskCommitteeClient
+    from .clients.strategy_client import StrategyClient
     from .clients.user_client import UserClient
     from .utils.event_publisher import EventPublisher
     from .utils.redis_client import RedisClient
@@ -32,6 +36,8 @@ class ExecutorServicer(executor_pb2_grpc.ExecutorServiceServicer):
         event_publisher: "EventPublisher",
         redis_client: "RedisClient",
         user_client: "UserClient | None" = None,
+        risk_committee_client: "RiskCommitteeClient | None" = None,
+        strategy_client: "StrategyClient | None" = None,
     ) -> None:
         """Initialize Executor servicer.
 
@@ -40,13 +46,19 @@ class ExecutorServicer(executor_pb2_grpc.ExecutorServiceServicer):
             event_publisher: Publisher for execution events
             redis_client: Redis client for order tracking
             user_client: User Service gRPC client for dynamic broker config
+            risk_committee_client: Risk Committee gRPC client for order approval
+            strategy_client: Strategy Service gRPC client for AI analysis trigger
         """
         self.alpaca = alpaca_client
         self.publisher = event_publisher
         self.redis = redis_client
         self.user_client = user_client
+        self.risk_committee = risk_committee_client
+        self.strategy = strategy_client
         self.user_trading_status: dict[str, dict] = {}  # {user_id: {enabled, stop_mode, timestamp}}
         self.trading_control_consumer = None
+        self.strategy_signal_consumer = None
+        self._analysis_timers: dict[str, asyncio.Task] = {}  # {user_id: periodic_task}
 
     async def _ensure_alpaca_client(self) -> "AlpacaClient":
         """Ensure Alpaca client is configured with valid credentials.
@@ -457,17 +469,49 @@ class ExecutorServicer(executor_pb2_grpc.ExecutorServiceServicer):
             topics=["trading-control-events"],
         )
         self.trading_control_consumer.register_handler(
-            "trading_control",
-            self._handle_trading_control_event
+            "trading_control", self._handle_trading_control_event
         )
         await self.trading_control_consumer.start()
         logger.info("Trading control consumer started")
 
-    async def stop_trading_control_consumer(self) -> None:
-        """Stop trading control event consumer."""
+    async def start_strategy_signal_consumer(self, brokers: str) -> None:
+        """Start strategy signal event consumer.
+
+        Subscribes to strategy-events topic and processes trading signals
+        through Risk Committee → Executor pipeline.
+
+        Args:
+            brokers: Redpanda broker addresses
+        """
+        from shared.utils.event_consumer import EventConsumer
+
+        self.strategy_signal_consumer = EventConsumer(
+            brokers=brokers,
+            group_id="executor-signal-consumer",
+            topics=["strategy-events"],
+        )
+        self.strategy_signal_consumer.register_handler(
+            "strategy_signal",
+            self._handle_strategy_signal,
+        )
+        await self.strategy_signal_consumer.start()
+        logger.info("Strategy signal consumer started")
+
+    async def stop_consumers(self) -> None:
+        """Stop all event consumers and scheduled tasks."""
         if self.trading_control_consumer:
             await self.trading_control_consumer.stop()
             logger.info("Trading control consumer stopped")
+
+        if self.strategy_signal_consumer:
+            await self.strategy_signal_consumer.stop()
+            logger.info("Strategy signal consumer stopped")
+
+        # Cancel all periodic analysis timers
+        for user_id, task in self._analysis_timers.items():
+            task.cancel()
+            logger.info(f"Cancelled analysis timer for user {user_id}")
+        self._analysis_timers.clear()
 
     async def _handle_trading_control_event(self, event: dict) -> None:
         """Handle trading control event.
@@ -486,8 +530,14 @@ class ExecutorServicer(executor_pb2_grpc.ExecutorServiceServicer):
             self.user_trading_status[user_id] = {
                 "enabled": False,
                 "stop_mode": stop_mode,
-                "stopped_at": event.get("timestamp")
+                "stopped_at": event.get("timestamp"),
             }
+
+            # Cancel periodic analysis for this user
+            if user_id in self._analysis_timers:
+                self._analysis_timers[user_id].cancel()
+                del self._analysis_timers[user_id]
+                logger.info(f"Cancelled analysis timer for user {user_id}")
 
             # Hard Stop: Cancel all pending orders immediately
             if stop_mode == "hard":
@@ -500,9 +550,235 @@ class ExecutorServicer(executor_pb2_grpc.ExecutorServiceServicer):
             self.user_trading_status[user_id] = {
                 "enabled": True,
                 "stop_mode": "",
-                "started_at": event.get("timestamp")
+                "started_at": event.get("timestamp"),
             }
             logger.info(f"Trading started for user {user_id}")
+
+            # Trigger initial AI analysis and start periodic scheduler
+            await self._start_periodic_analysis(user_id)
+
+    async def _handle_strategy_signal(self, event: dict) -> None:
+        """Handle strategy signal event from Redpanda.
+
+        Processes trading signals: Risk Committee approval → Order execution.
+
+        Args:
+            event: Strategy signal event from Redpanda
+        """
+        symbol = event.get("symbol", "")
+        action = event.get("action", "")
+        params = event.get("parameters", {})
+        event_id = event.get("event_id", "unknown")
+
+        # Deduplicate: skip if this event was already processed
+        if event_id != "unknown":
+            dedup_key = f"signal:processed:{event_id}"
+            try:
+                is_new = await self.redis.set_nx(dedup_key, "1", ex=86400)
+                if not is_new:
+                    logger.info(f"Duplicate signal {event_id} for {symbol}, skipping")
+                    return
+            except Exception as e:
+                logger.warning(f"Dedup check failed for {event_id}, proceeding: {e}")
+
+        # Skip non-actionable signals
+        if action not in ("buy", "sell"):
+            logger.debug(f"Skipping non-actionable signal: {symbol} {action}")
+            return
+
+        # Extract user_id from parameters (published by event_publishing_node)
+        user_id = params.get("user_id", "")
+        if not user_id:
+            logger.warning(f"Signal {event_id} missing user_id, skipping")
+            return
+
+        # Check if trading is enabled for this user
+        if not self._is_trading_enabled(user_id):
+            logger.info(f"Trading disabled for user {user_id}, skipping signal {event_id}")
+            return
+
+        logger.info(f"Processing strategy signal: {symbol} {action} for user {user_id}")
+
+        # Extract signal parameters
+        entry_price = float(params.get("entry_price", 0))
+        stop_loss = float(params.get("stop_loss", 0))
+        take_profit = float(params.get("take_profit", 0))
+        size_pct = float(params.get("size_recommendation", 0))
+
+        if entry_price <= 0 or size_pct <= 0:
+            logger.warning(
+                f"Invalid signal parameters for {symbol}: price={entry_price}, size={size_pct}"
+            )
+            return
+
+        # Calculate order quantity from position size percentage
+        qty = await self._calculate_order_qty(user_id, symbol, entry_price, size_pct)
+        if qty <= 0:
+            logger.info(f"Calculated qty=0 for {symbol}, skipping")
+            return
+
+        # Request Risk Committee approval
+        if not self.risk_committee:
+            logger.error("Risk Committee client not available, cannot execute signal")
+            return
+
+        try:
+            approval = await self.risk_committee.evaluate_order(
+                user_id=user_id,
+                symbol=symbol,
+                action=action,
+                size=float(qty),
+                price=entry_price,
+                order_type="bracket" if stop_loss > 0 and take_profit > 0 else "market",
+            )
+        except Exception as e:
+            logger.error(f"Risk Committee evaluation failed for {symbol}: {e}")
+            return
+
+        if not approval.approved:
+            logger.info(
+                f"Risk Committee rejected {symbol} {action}: "
+                f"decision={approval.decision}, score={approval.risk_score:.2f}"
+            )
+            return
+
+        # Store risk approval in Redis
+        approval_id = str(uuid4())
+        try:
+            key = f"risk:approval:{approval_id}"
+            await self.redis.set(key, "approved", ex=3600)  # 1-hour TTL
+        except Exception as e:
+            logger.warning(f"Failed to store risk approval: {e}")
+
+        # Build and execute order via gRPC self-call
+        side = "buy" if action == "buy" else "sell"
+
+        # Validate bracket order prices make sense:
+        # Buy: stop_loss < entry_price < take_profit
+        # Sell: take_profit < entry_price < stop_loss
+        use_bracket = stop_loss > 0 and take_profit > 0
+        if use_bracket:
+            if side == "buy" and not (stop_loss < entry_price < take_profit):
+                logger.warning(
+                    f"BRACKET_DOWNGRADE: Invalid bracket prices for buy {symbol}: "
+                    f"SL={stop_loss} entry={entry_price} TP={take_profit}. "
+                    f"Downgrading to market order without SL/TP protection."
+                )
+                use_bracket = False
+            elif side == "sell" and not (take_profit < entry_price < stop_loss):
+                logger.warning(
+                    f"BRACKET_DOWNGRADE: Invalid bracket prices for sell {symbol}: "
+                    f"TP={take_profit} entry={entry_price} SL={stop_loss}. "
+                    f"Downgrading to market order without SL/TP protection."
+                )
+                use_bracket = False
+
+        order_type = "bracket" if use_bracket else "market"
+
+        request = executor_pb2.ExecuteOrderRequest(
+            user_id=user_id,
+            symbol=symbol,
+            side=side,
+            qty=int(qty),
+            order_type=order_type,
+            risk_approval_id=approval_id,
+            stop_loss=stop_loss if use_bracket else 0.0,
+            take_profit=take_profit if use_bracket else 0.0,
+        )
+
+        # Execute order directly (reuse existing logic)
+        response = await self.ExecuteOrder(request, None)
+
+        if response.success:
+            logger.info(
+                f"Auto-trade executed: {symbol} {side} qty={qty} order_id={response.order_id}"
+            )
+        else:
+            logger.warning(f"Auto-trade failed: {symbol} {side} - {response.error_message}")
+            # Clean up unused risk approval
+            try:
+                await self.redis.delete(f"risk:approval:{approval_id}")
+            except Exception as e:
+                logger.debug(f"Failed to clean approval {approval_id}: {e}")
+
+    async def _calculate_order_qty(
+        self, user_id: str, symbol: str, price: float, size_pct: float
+    ) -> int:
+        """Calculate order quantity from position size percentage.
+
+        Args:
+            user_id: User identifier.
+            symbol: Stock symbol.
+            price: Current price per share.
+            size_pct: Target position size as fraction of portfolio (0.0-1.0).
+
+        Returns:
+            Number of shares to order (integer).
+        """
+        try:
+            alpaca = await self._ensure_alpaca_client()
+            account = await alpaca.get_account()
+            portfolio_value = float(account.portfolio_value)
+        except Exception as e:
+            logger.warning(f"Failed to get account value for qty calc: {e}")
+            return 0
+
+        if portfolio_value <= 0 or price <= 0:
+            return 0
+
+        target_value = portfolio_value * size_pct
+        qty = int(target_value / price)
+        return max(0, qty)
+
+    async def _start_periodic_analysis(self, user_id: str) -> None:
+        """Start periodic AI analysis for a user.
+
+        Triggers an immediate AI analysis, then schedules periodic runs.
+
+        Args:
+            user_id: User identifier.
+        """
+        # Cancel existing timer if any
+        if user_id in self._analysis_timers:
+            self._analysis_timers[user_id].cancel()
+
+        async def _periodic_loop() -> None:
+            """Run AI analysis periodically until cancelled."""
+            while True:
+                try:
+                    await self._trigger_ai_analysis(user_id)
+                except Exception as e:
+                    logger.error(f"Periodic AI analysis failed for {user_id}: {e}")
+                await asyncio.sleep(config.ai_analysis_interval)
+
+        self._analysis_timers[user_id] = asyncio.create_task(_periodic_loop())
+        logger.info(
+            f"Started periodic AI analysis for user {user_id} "
+            f"(interval: {config.ai_analysis_interval}s)"
+        )
+
+    async def _trigger_ai_analysis(self, user_id: str) -> None:
+        """Trigger AI analysis via Strategy Service.
+
+        Args:
+            user_id: User identifier.
+        """
+        if not self.strategy:
+            logger.warning("Strategy client not available, cannot trigger AI analysis")
+            return
+
+        if not self._is_trading_enabled(user_id):
+            logger.info(f"Trading disabled for {user_id}, skipping AI analysis trigger")
+            return
+
+        try:
+            response = await self.strategy.run_ai_analysis(user_id)
+            logger.info(
+                f"AI analysis triggered for user {user_id}: "
+                f"phase={response.phase}, signals={response.signals_published}"
+            )
+        except Exception as e:
+            logger.error(f"Failed to trigger AI analysis for {user_id}: {e}")
 
     async def _cancel_all_user_orders(self, user_id: str) -> int:
         """Cancel all pending orders for a user (hard stop).
@@ -534,8 +810,10 @@ class ExecutorServicer(executor_pb2_grpc.ExecutorServiceServicer):
                 try:
                     key = raw_key.decode("utf-8") if isinstance(raw_key, bytes) else raw_key
                     order_data = await self.redis.hgetall(key)
-                    if (order_data.get("user_id") == user_id and
-                        order_data.get("status") in ["new", "partially_filled"]):
+                    if order_data.get("user_id") == user_id and order_data.get("status") in [
+                        "new",
+                        "partially_filled",
+                    ]:
                         order_id = key.split(":")[-1]
 
                         # Cancel via Alpaca

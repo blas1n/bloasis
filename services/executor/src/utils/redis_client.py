@@ -95,6 +95,23 @@ class RedisClient:
         await self._client.set(key, value, ex=ex)
         return True
 
+    async def set_nx(self, key: str, value: str, ex: int | None = None) -> bool:
+        """Set a value only if the key does not exist (SET NX).
+
+        Args:
+            key: Redis key
+            value: Value to set
+            ex: Optional expiration in seconds
+
+        Returns:
+            True if key was set (did not exist), False if key already existed
+        """
+        if self._client is None:
+            raise RuntimeError("Redis client not connected")
+
+        result = await self._client.set(key, value, nx=True, ex=ex)
+        return result is not None
+
     async def hset(self, key: str, mapping: dict[str, Any]) -> int:
         """Set multiple fields in a hash.
 
