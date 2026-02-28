@@ -77,7 +77,7 @@ class ClassificationClient:
             request = classification_pb2.GetCandidateSymbolsRequest(
                 regime=regime, max_candidates=max_candidates, force_refresh=force_refresh
             )
-            response = await self.stub.GetCandidateSymbols(request, timeout=60.0)
+            response = await self.stub.GetCandidateSymbols(request, timeout=300.0)
 
             # Convert proto to internal models
             candidates = [
@@ -134,7 +134,7 @@ class ClassificationClient:
             request = classification_pb2.GetSectorAnalysisRequest(
                 regime=regime, force_refresh=force_refresh
             )
-            response = await self.stub.GetSectorAnalysis(request, timeout=60.0)
+            response = await self.stub.GetSectorAnalysis(request, timeout=300.0)
 
             logger.info(f"Retrieved sector analysis for regime: {regime}")
             return response
@@ -177,7 +177,7 @@ class ClassificationClient:
             request = classification_pb2.GetThematicAnalysisRequest(
                 sectors=sectors, regime=regime, force_refresh=force_refresh
             )
-            response = await self.stub.GetThematicAnalysis(request, timeout=60.0)
+            response = await self.stub.GetThematicAnalysis(request, timeout=300.0)
 
             logger.info(f"Retrieved thematic analysis for {len(sectors)} sectors")
             return response

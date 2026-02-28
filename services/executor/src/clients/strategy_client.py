@@ -38,8 +38,8 @@ class StrategyClient:
         self.channel = grpc.aio.insecure_channel(
             self.address,
             options=[
-                ("grpc.keepalive_time_ms", 10000),
-                ("grpc.keepalive_timeout_ms", 5000),
+                ("grpc.keepalive_time_ms", 300000),
+                ("grpc.keepalive_timeout_ms", 20000),
             ],
         )
         self.stub = strategy_pb2_grpc.StrategyServiceStub(self.channel)
@@ -64,7 +64,7 @@ class StrategyClient:
 
         try:
             request = strategy_pb2.RunAIAnalysisRequest(user_id=user_id)
-            response = await self.stub.RunAIAnalysis(request, timeout=120.0)
+            response = await self.stub.RunAIAnalysis(request, timeout=600.0)
             return response
         except grpc.RpcError as e:
             logger.error(f"AI analysis trigger failed: {e.code()} - {e.details()}")
