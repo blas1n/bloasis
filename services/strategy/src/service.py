@@ -7,6 +7,7 @@ Implements Stock Selection Pipeline Stage 3:
 - AI Flow Integration (5-Layer LangGraph workflow)
 """
 
+import json
 import logging
 from datetime import datetime
 
@@ -238,6 +239,9 @@ class StrategyServicer(strategy_pb2_grpc.StrategyServiceServicer):
 
         if cached:
             logger.debug(f"Preferences cache HIT for user {user_id}")
+            # Normalize risk_profile to uppercase (User Service stores lowercase)
+            if "risk_profile" in cached and isinstance(cached["risk_profile"], str):
+                cached["risk_profile"] = cached["risk_profile"].upper()
             return UserPreferences(**cached)
 
         # Return default preferences
@@ -556,6 +560,30 @@ class StrategyServicer(strategy_pb2_grpc.StrategyServiceServicer):
                 max_single_position=result["preferences"]["max_single_position"],
             )
 
+            # Retrieve cached AI signals (from latest RunAIAnalysis)
+            signal_protos = []
+            try:
+                cached_signals = await self.cache.get(f"signals:latest:{user_id}")
+                if cached_signals:
+                    signal_list = json.loads(cached_signals)
+                    signal_protos = [
+                        strategy_pb2.TradingSignal(
+                            symbol=s["symbol"],
+                            action=s["action"],
+                            confidence=s.get("confidence", 0.0),
+                            size_recommendation=s.get("size_recommendation", 0.0),
+                            entry_price=s.get("entry_price", 0.0),
+                            stop_loss=s.get("stop_loss", 0.0),
+                            take_profit=s.get("take_profit", 0.0),
+                            rationale=s.get("rationale", ""),
+                            risk_approved=s.get("risk_approved", False),
+                            trailing_stop_pct=s.get("trailing_stop_pct", 0.0),
+                        )
+                        for s in signal_list
+                    ]
+            except Exception as e:
+                logger.debug(f"No cached signals for {user_id}: {e}")
+
             return strategy_pb2.StrategyResponse(
                 user_id=result["user_id"],
                 regime=result["regime"],
@@ -565,6 +593,7 @@ class StrategyServicer(strategy_pb2_grpc.StrategyServiceServicer):
                 preferences=preferences_proto,
                 cached_at=result["cached_at"],
                 from_cache=from_cache,
+                signals=signal_protos,
             )
 
         except ConnectionError as e:
@@ -735,6 +764,32 @@ class StrategyServicer(strategy_pb2_grpc.StrategyServiceServicer):
                         trailing_stop_pct=float(sig.trailing_stop_pct),
                     )
                 )
+
+            # Cache signals in Redis for GetPersonalizedStrategy retrieval
+            if trading_signals:
+                signal_dicts = [
+                    {
+                        "symbol": s.symbol,
+                        "action": s.action,
+                        "confidence": s.confidence,
+                        "size_recommendation": float(s.size_recommendation),
+                        "entry_price": float(s.entry_price),
+                        "stop_loss": float(s.stop_loss),
+                        "take_profit": float(s.take_profit),
+                        "rationale": s.rationale,
+                        "risk_approved": s.risk_approved,
+                        "trailing_stop_pct": float(s.trailing_stop_pct),
+                    }
+                    for s in trading_signals
+                ]
+                try:
+                    await self.cache.set(
+                        f"signals:latest:{user_id}",
+                        json.dumps(signal_dicts),
+                        ttl=config.cache_ttl,
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to cache signals: {e}")
 
             return strategy_pb2.RunAIAnalysisResponse(
                 analysis_id=final_state.get("analysis_id", ""),

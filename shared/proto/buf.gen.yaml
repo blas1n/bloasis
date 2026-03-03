@@ -9,12 +9,12 @@ managed:
 
 # Code generation plugins
 plugins:
-  # Python protobuf
-  - plugin: buf.build/protocolbuffers/python
+  # Python protobuf (pinned to v31 for protobuf 6.x runtime compatibility)
+  - plugin: buf.build/protocolbuffers/python:v31.1
     out: ../generated
 
-  # Python gRPC
-  - plugin: buf.build/grpc/python
+  # Python gRPC (pinned to match protobuf version)
+  - plugin: buf.build/grpc/python:v1.76.0
     out: ../generated
 
   # Python type stubs (.pyi) for IDE support

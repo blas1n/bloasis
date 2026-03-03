@@ -170,6 +170,9 @@ message StrategyResponse {
 
   // Whether result came from cache
   bool from_cache = 8;
+
+  // Latest AI trading signals (cached from RunAIAnalysis)
+  repeated TradingSignal signals = 9;
 }
 
 // UserPreferences - User investment preferences
