@@ -51,8 +51,8 @@ class RiskCommitteeClient:
         self.channel = grpc.aio.insecure_channel(
             self.address,
             options=[
-                ("grpc.keepalive_time_ms", 10000),
-                ("grpc.keepalive_timeout_ms", 5000),
+                ("grpc.keepalive_time_ms", 300000),
+                ("grpc.keepalive_timeout_ms", 20000),
             ],
         )
         self.stub = risk_committee_pb2_grpc.RiskCommitteeServiceStub(self.channel)

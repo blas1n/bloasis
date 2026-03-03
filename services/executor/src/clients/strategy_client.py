@@ -64,7 +64,7 @@ class StrategyClient:
 
         try:
             request = strategy_pb2.RunAIAnalysisRequest(user_id=user_id)
-            response = await self.stub.RunAIAnalysis(request, timeout=600.0)
+            response = await self.stub.RunAIAnalysis(request, timeout=900.0)
             return response
         except grpc.RpcError as e:
             logger.error(f"AI analysis trigger failed: {e.code()} - {e.details()}")

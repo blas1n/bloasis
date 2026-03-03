@@ -7,6 +7,7 @@ Manages JWT authentication, token validation, and refresh.
 
 import asyncio
 import socket
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -80,27 +81,6 @@ async def serve() -> None:
     await user_client.connect()
     logger.info("User Service client connected")
 
-    # Initialize Consul client if enabled
-    if config.consul_enabled:
-        consul_client = ConsulClient(
-            host=config.consul_host,
-            port=config.consul_port,
-        )
-        service_host = get_local_ip(config.consul_host, config.consul_port)
-        registered = await consul_client.register_grpc_service(
-            service_name=config.service_name,
-            service_id=f"{config.service_name}-{socket.gethostname()}",
-            host=service_host,
-            port=config.grpc_port,
-            tags=["grpc", "auth"],
-        )
-        if registered:
-            logger.info("Consul service registration successful")
-        else:
-            logger.warning(
-                "Consul service registration failed - service will continue without Consul"
-            )
-
     # Initialize JWT handler
     jwt_handler = create_jwt_handler()
     logger.info("JWT handler initialized with RS256 algorithm")
@@ -110,7 +90,14 @@ async def serve() -> None:
         logger.info("RS256 public key available for Envoy Gateway configuration")
 
     # Create gRPC server
-    server = grpc.aio.server()
+    server = grpc.aio.server(
+        options=[
+            ("grpc.max_send_message_length", 50 * 1024 * 1024),
+            ("grpc.max_receive_message_length", 50 * 1024 * 1024),
+            ("grpc.keepalive_time_ms", 300000),
+            ("grpc.keepalive_timeout_ms", 20000),
+        ]
+    )
 
     # Add Auth service
     servicer = AuthServicer(
@@ -131,9 +118,35 @@ async def serve() -> None:
 
     # Start server
     listen_addr = f"[::]:{config.grpc_port}"
-    server.add_insecure_port(listen_addr)
+    bound_port = server.add_insecure_port(listen_addr)
+    if bound_port == 0:
+        raise RuntimeError(
+            f"Failed to bind gRPC port {listen_addr} "
+            f"(port may be in use by another process)"
+        )
     await server.start()
     logger.info(f"gRPC server started on {listen_addr}")
+
+    # Register with Consul AFTER server is ready to accept connections
+    if config.consul_enabled:
+        consul_client = ConsulClient(
+            host=config.consul_host,
+            port=config.consul_port,
+        )
+        service_host = get_local_ip(config.consul_host, config.consul_port)
+        registered = await consul_client.register_grpc_service(
+            service_name=config.service_name,
+            service_id=f"{config.service_name}-{socket.gethostname()}",
+            host=service_host,
+            port=config.grpc_port,
+            tags=["grpc", "auth"],
+        )
+        if registered:
+            logger.info("Consul service registration successful")
+        else:
+            logger.warning(
+                "Consul service registration failed - service will continue without Consul"
+            )
 
     # Handle shutdown
     async def shutdown() -> None:
@@ -160,7 +173,13 @@ async def serve() -> None:
 
 def main() -> None:
     """Main entry point."""
-    asyncio.run(serve())
+    try:
+        asyncio.run(serve())
+    except KeyboardInterrupt:
+        logger.info("Received keyboard interrupt, exiting...")
+    except Exception as e:
+        logger.error(f"Fatal error: {e}", exc_info=True)
+        sys.exit(1)
 
 
 if __name__ == "__main__":
