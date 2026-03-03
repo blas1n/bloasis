@@ -30,6 +30,20 @@ class MarketRegimeRepository:
             )
             session.add(record)
 
+    async def get_latest(self) -> Optional[MarketRegimeRecord]:
+        """Get the most recent regime classification from the database."""
+        if not self.postgres:
+            return None
+
+        async with self.postgres.get_session() as session:
+            stmt = (
+                select(MarketRegimeRecord)
+                .order_by(MarketRegimeRecord.timestamp.desc())
+                .limit(1)
+            )
+            result = await session.execute(stmt)
+            return result.scalars().first()
+
     async def get_history(
         self, start_time: datetime, end_time: datetime
     ) -> list[MarketRegimeRecord]:

@@ -16,7 +16,7 @@ from ..prompts import (
 from ..workflow.state import MarketContext
 
 if TYPE_CHECKING:
-    from shared.ai_clients import ClaudeClient
+    from shared.ai_clients.llm_client import LLMClient
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +27,7 @@ class MacroStrategist:
     Analyzes macro environment and provides risk context for trading decisions.
     """
 
-    def __init__(self, analyst: "ClaudeClient") -> None:
+    def __init__(self, analyst: "LLMClient") -> None:
         """Initialize Macro Strategist.
 
         Args:
@@ -69,7 +69,7 @@ class MacroStrategist:
 
         response = await self.analyst.analyze(
             prompt=prompt,
-            model=model_params.get("model", "claude-haiku-4-5-20251001"),
+            model=model_params.get("model"),
             response_format="json",
             max_tokens=model_params.get("max_tokens", model_params.get("max_new_tokens", 500)),
         )
@@ -113,7 +113,7 @@ class MacroStrategist:
 
         return await self.analyst.analyze(
             prompt=prompt,
-            model=model_params.get("model", "claude-haiku-4-5-20251001"),
+            model=model_params.get("model"),
             response_format="json",
             max_tokens=model_params.get("max_tokens", model_params.get("max_new_tokens", 500)),
         )

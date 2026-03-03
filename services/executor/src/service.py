@@ -1,5 +1,6 @@
 """Executor Service - Order execution management."""
 
+import asyncio
 import logging
 from decimal import Decimal
 from typing import TYPE_CHECKING
@@ -8,11 +9,15 @@ from uuid import uuid4
 import grpc
 from shared.generated import executor_pb2, executor_pb2_grpc
 
+from .config import config
 from .models import OrderStatus, OrderType
 
 if TYPE_CHECKING:
     from .alpaca_client import AlpacaClient
+    from .clients.risk_committee_client import RiskCommitteeClient
+    from .clients.strategy_client import StrategyClient
     from .clients.user_client import UserClient
+    from .models import OrderResult
     from .utils.event_publisher import EventPublisher
     from .utils.redis_client import RedisClient
 
@@ -32,6 +37,8 @@ class ExecutorServicer(executor_pb2_grpc.ExecutorServiceServicer):
         event_publisher: "EventPublisher",
         redis_client: "RedisClient",
         user_client: "UserClient | None" = None,
+        risk_committee_client: "RiskCommitteeClient | None" = None,
+        strategy_client: "StrategyClient | None" = None,
     ) -> None:
         """Initialize Executor servicer.
 
@@ -40,13 +47,21 @@ class ExecutorServicer(executor_pb2_grpc.ExecutorServiceServicer):
             event_publisher: Publisher for execution events
             redis_client: Redis client for order tracking
             user_client: User Service gRPC client for dynamic broker config
+            risk_committee_client: Risk Committee gRPC client for order approval
+            strategy_client: Strategy Service gRPC client for AI analysis trigger
         """
         self.alpaca = alpaca_client
         self.publisher = event_publisher
         self.redis = redis_client
         self.user_client = user_client
+        self.risk_committee = risk_committee_client
+        self.strategy = strategy_client
         self.user_trading_status: dict[str, dict] = {}  # {user_id: {enabled, stop_mode, timestamp}}
         self.trading_control_consumer = None
+        self.strategy_signal_consumer = None
+        self._analysis_timers: dict[str, asyncio.Task] = {}  # {user_id: periodic_task}
+        self._fill_check_tasks: set[asyncio.Task] = set()
+        self._pending_order_monitor: asyncio.Task | None = None
 
     async def _ensure_alpaca_client(self) -> "AlpacaClient":
         """Ensure Alpaca client is configured with valid credentials.
@@ -204,6 +219,20 @@ class ExecutorServicer(executor_pb2_grpc.ExecutorServiceServicer):
 
         # Publish execution event
         await self._publish_execution_event(request.user_id, result)
+
+        # Check for order fill → publish to order-filled topic for Portfolio
+        if result.order_id and result.status != OrderStatus.REJECTED:
+            filled = await self._check_and_publish_fill(
+                request.user_id, result.order_id, result,
+            )
+            if not filled:
+                # Market orders in paper trading fill almost instantly;
+                # poll in background for slightly delayed fills.
+                task = asyncio.create_task(
+                    self._wait_for_order_fill(request.user_id, result.order_id)
+                )
+                self._fill_check_tasks.add(task)
+                task.add_done_callback(self._fill_check_tasks.discard)
 
         success = result.status != OrderStatus.REJECTED
 
@@ -441,6 +470,167 @@ class ExecutorServicer(executor_pb2_grpc.ExecutorServiceServicer):
         except Exception as e:
             logger.warning(f"Failed to publish execution event: {e}")
 
+    async def _check_and_publish_fill(
+        self, user_id: str, order_id: str, result: "OrderResult",
+    ) -> bool:
+        """Check if order is filled and publish fill event to Redpanda.
+
+        Portfolio Service consumes order-filled events to record trades in DB.
+        Uses Redis SETNX to guarantee at-most-once publishing per order.
+
+        Args:
+            user_id: User who placed the order.
+            order_id: Alpaca order ID.
+            result: OrderResult with current status.
+
+        Returns:
+            True if fill event was published (or already published), False otherwise.
+        """
+        if result.status == OrderStatus.FILLED and result.filled_qty > 0:
+            # Dedup: only publish once per order (multiple code paths call this)
+            lock_key = f"fill_published:{order_id}"
+            if not await self.redis.set_nx(lock_key, "1", ex=86400):
+                return True  # Already published by another path
+            try:
+                await self.publisher.publish_order_filled(
+                    user_id=user_id,
+                    order_id=order_id,
+                    symbol=result.symbol,
+                    side=result.side,
+                    filled_qty=float(result.filled_qty),
+                    filled_price=float(result.filled_avg_price or 0),
+                )
+                return True
+            except Exception as e:
+                logger.warning(f"Failed to publish order filled event: {e}")
+        return False
+
+    async def _wait_for_order_fill(self, user_id: str, order_id: str) -> None:
+        """Background task to poll Alpaca for order fill status.
+
+        Paper trading market orders fill almost instantly, but we poll to
+        handle cases where the fill is slightly delayed. Checks every 2s
+        for up to 30s.
+
+        Args:
+            user_id: User who placed the order.
+            order_id: Alpaca order ID.
+        """
+        try:
+            alpaca = await self._ensure_alpaca_client()
+        except Exception as e:
+            logger.warning(f"Cannot check order fill — Alpaca unavailable: {e}")
+            return
+
+        max_attempts = 15  # 15 × 2s = 30s max
+        for attempt in range(max_attempts):
+            await asyncio.sleep(2)
+            try:
+                result = await alpaca.get_order_status(order_id)
+                if await self._check_and_publish_fill(user_id, order_id, result):
+                    logger.info(
+                        f"Order {order_id} filled after {(attempt + 1) * 2}s: "
+                        f"{result.symbol} {result.side} qty={result.filled_qty} "
+                        f"@ {result.filled_avg_price}"
+                    )
+                    return
+                if result.status in (
+                    OrderStatus.CANCELLED,
+                    OrderStatus.REJECTED,
+                    OrderStatus.EXPIRED,
+                ):
+                    logger.info(
+                        f"Order {order_id} terminal status: {result.status.value}, "
+                        f"stopping fill check"
+                    )
+                    return
+            except Exception as e:
+                logger.warning(
+                    f"Fill check attempt {attempt + 1} failed for {order_id}: {e}"
+                )
+
+        logger.warning(
+            f"Order {order_id} not filled after {max_attempts * 2}s, "
+            f"giving up fill check"
+        )
+
+    async def start_pending_order_monitor(self) -> None:
+        """Start a background task to periodically check pending orders for fills.
+
+        Handles orders that don't fill immediately (e.g., orders placed
+        outside market hours, limit orders). Scans Redis for tracked orders
+        and checks their fill status via Alpaca API every 60 seconds.
+        """
+        self._pending_order_monitor = asyncio.create_task(
+            self._monitor_pending_orders()
+        )
+        logger.info("Pending order fill monitor started")
+
+    async def _monitor_pending_orders(self) -> None:
+        """Background loop: check all tracked orders for fills every 60s."""
+        while True:
+            await asyncio.sleep(60)
+            try:
+                await self._check_all_pending_orders()
+            except Exception as e:
+                logger.warning(f"Pending order monitor error: {e}")
+
+    async def _check_all_pending_orders(self) -> None:
+        """Scan Redis for pending orders and publish fill events for any that filled."""
+        try:
+            alpaca = await self._ensure_alpaca_client()
+        except Exception:
+            return  # No credentials yet
+
+        cursor = 0
+        checked = 0
+        filled = 0
+
+        while True:
+            cursor, keys = await self.redis.scan(
+                cursor, match="order:*", count=100,
+            )
+            for key in keys:
+                try:
+                    order_data = await self.redis.hgetall(key)
+                    status = order_data.get("status", "")
+                    if status in ("filled", "cancelled", "rejected", "expired"):
+                        continue  # Skip terminal orders
+
+                    order_id = key.split(":")[-1]
+                    user_id = order_data.get("user_id", "")
+                    if not order_id or not user_id:
+                        continue
+
+                    checked += 1
+                    result = await alpaca.get_order_status(order_id)
+
+                    if await self._check_and_publish_fill(user_id, order_id, result):
+                        await self.redis.hset(key, {"status": "filled"})
+                        filled += 1
+                        logger.info(
+                            f"FILL_MONITOR: Order {order_id} filled: "
+                            f"{result.symbol} {result.side} "
+                            f"qty={result.filled_qty} @ {result.filled_avg_price}"
+                        )
+                    elif result.status in (
+                        OrderStatus.CANCELLED,
+                        OrderStatus.REJECTED,
+                        OrderStatus.EXPIRED,
+                    ):
+                        await self.redis.hset(key, {"status": result.status.value})
+                except Exception as e:
+                    logger.debug(f"Fill monitor check failed for {key}: {e}")
+
+            if cursor == 0:
+                break
+
+        if checked > 0:
+            logger.info(
+                f"FILL_MONITOR: Checked {checked} pending orders, "
+                f"{filled} newly filled"
+            )
+
     # ==================== Trading Control Methods ====================
 
     async def start_trading_control_consumer(self, brokers: str) -> None:
@@ -457,17 +647,90 @@ class ExecutorServicer(executor_pb2_grpc.ExecutorServiceServicer):
             topics=["trading-control-events"],
         )
         self.trading_control_consumer.register_handler(
-            "trading_control",
-            self._handle_trading_control_event
+            "trading_control", self._handle_trading_control_event
         )
         await self.trading_control_consumer.start()
         logger.info("Trading control consumer started")
 
-    async def stop_trading_control_consumer(self) -> None:
-        """Stop trading control event consumer."""
+    async def start_strategy_signal_consumer(self, brokers: str) -> None:
+        """Start strategy signal event consumer.
+
+        Subscribes to strategy-events topic and processes trading signals
+        through Risk Committee → Executor pipeline.
+
+        Args:
+            brokers: Redpanda broker addresses
+        """
+        from shared.utils.event_consumer import EventConsumer
+
+        self.strategy_signal_consumer = EventConsumer(
+            brokers=brokers,
+            group_id="executor-signal-consumer",
+            topics=["strategy-events"],
+        )
+        self.strategy_signal_consumer.register_handler(
+            "strategy_signal",
+            self._handle_strategy_signal,
+        )
+        await self.strategy_signal_consumer.start()
+        logger.info("Strategy signal consumer started")
+
+    async def recover_active_trading(self) -> None:
+        """Recover active trading state from Redis after restart.
+
+        Scans Redis for trading:active:* keys and restarts periodic
+        analysis for each active user.
+        """
+        cursor = 0
+        recovered = 0
+
+        while True:
+            cursor, keys = await self.redis.scan(
+                cursor, match="trading:active:*", count=100,
+            )
+            for key in keys:
+                user_id = key.split("trading:active:")[-1]
+                self.user_trading_status[user_id] = {
+                    "enabled": True,
+                    "stop_mode": "",
+                    "started_at": "recovered",
+                }
+                await self._start_periodic_analysis(user_id)
+                recovered += 1
+                logger.info(f"Recovered active trading for user {user_id}")
+            if cursor == 0:
+                break
+
+        if recovered:
+            logger.info(f"Recovered {recovered} active trading user(s)")
+        else:
+            logger.info("No active trading users to recover")
+
+    async def stop_consumers(self) -> None:
+        """Stop all event consumers and scheduled tasks."""
         if self.trading_control_consumer:
             await self.trading_control_consumer.stop()
             logger.info("Trading control consumer stopped")
+
+        if self.strategy_signal_consumer:
+            await self.strategy_signal_consumer.stop()
+            logger.info("Strategy signal consumer stopped")
+
+        # Cancel pending order fill monitor
+        if self._pending_order_monitor:
+            self._pending_order_monitor.cancel()
+            logger.info("Pending order fill monitor stopped")
+
+        # Cancel in-flight fill check tasks
+        for task in self._fill_check_tasks:
+            task.cancel()
+        self._fill_check_tasks.clear()
+
+        # Cancel all periodic analysis timers
+        for user_id, task in self._analysis_timers.items():
+            task.cancel()
+            logger.info(f"Cancelled analysis timer for user {user_id}")
+        self._analysis_timers.clear()
 
     async def _handle_trading_control_event(self, event: dict) -> None:
         """Handle trading control event.
@@ -486,8 +749,17 @@ class ExecutorServicer(executor_pb2_grpc.ExecutorServiceServicer):
             self.user_trading_status[user_id] = {
                 "enabled": False,
                 "stop_mode": stop_mode,
-                "stopped_at": event.get("timestamp")
+                "stopped_at": event.get("timestamp"),
             }
+
+            # Remove active trading flag from Redis
+            await self.redis.delete(f"trading:active:{user_id}")
+
+            # Cancel periodic analysis for this user
+            if user_id in self._analysis_timers:
+                self._analysis_timers[user_id].cancel()
+                del self._analysis_timers[user_id]
+                logger.info(f"Cancelled analysis timer for user {user_id}")
 
             # Hard Stop: Cancel all pending orders immediately
             if stop_mode == "hard":
@@ -500,9 +772,242 @@ class ExecutorServicer(executor_pb2_grpc.ExecutorServiceServicer):
             self.user_trading_status[user_id] = {
                 "enabled": True,
                 "stop_mode": "",
-                "started_at": event.get("timestamp")
+                "started_at": event.get("timestamp"),
             }
+
+            # Persist active trading flag in Redis for restart recovery
+            await self.redis.set(f"trading:active:{user_id}", "1")
+
             logger.info(f"Trading started for user {user_id}")
+
+            # Trigger initial AI analysis and start periodic scheduler
+            await self._start_periodic_analysis(user_id)
+
+    async def _handle_strategy_signal(self, event: dict) -> None:
+        """Handle strategy signal event from Redpanda.
+
+        Processes trading signals: Risk Committee approval → Order execution.
+
+        Args:
+            event: Strategy signal event from Redpanda
+        """
+        symbol = event.get("symbol", "")
+        action = event.get("action", "")
+        params = event.get("parameters", {})
+        event_id = event.get("event_id", "unknown")
+
+        # Deduplicate: skip if this event was already processed
+        if event_id != "unknown":
+            dedup_key = f"signal:processed:{event_id}"
+            try:
+                is_new = await self.redis.set_nx(dedup_key, "1", ex=86400)
+                if not is_new:
+                    logger.info(f"Duplicate signal {event_id} for {symbol}, skipping")
+                    return
+            except Exception as e:
+                logger.warning(f"Dedup check failed for {event_id}, proceeding: {e}")
+
+        # Skip non-actionable signals
+        if action not in ("buy", "sell"):
+            logger.debug(f"Skipping non-actionable signal: {symbol} {action}")
+            return
+
+        # Extract user_id from parameters (published by event_publishing_node)
+        user_id = params.get("user_id", "")
+        if not user_id:
+            logger.warning(f"Signal {event_id} missing user_id, skipping")
+            return
+
+        # Check if trading is enabled for this user
+        if not self._is_trading_enabled(user_id):
+            logger.info(f"Trading disabled for user {user_id}, skipping signal {event_id}")
+            return
+
+        logger.info(f"Processing strategy signal: {symbol} {action} for user {user_id}")
+
+        # Extract signal parameters
+        entry_price = float(params.get("entry_price", 0))
+        stop_loss = float(params.get("stop_loss", 0))
+        take_profit = float(params.get("take_profit", 0))
+        size_pct = float(params.get("size_recommendation", 0))
+
+        if entry_price <= 0 or size_pct <= 0:
+            logger.warning(
+                f"Invalid signal parameters for {symbol}: price={entry_price}, size={size_pct}"
+            )
+            return
+
+        # Calculate order quantity from position size percentage
+        qty = await self._calculate_order_qty(user_id, symbol, entry_price, size_pct)
+        if qty <= 0:
+            logger.info(f"Calculated qty=0 for {symbol}, skipping")
+            return
+
+        # Request Risk Committee approval
+        if not self.risk_committee:
+            logger.error("Risk Committee client not available, cannot execute signal")
+            return
+
+        try:
+            approval = await self.risk_committee.evaluate_order(
+                user_id=user_id,
+                symbol=symbol,
+                action=action,
+                size=float(qty),
+                price=entry_price,
+                order_type="bracket" if stop_loss > 0 and take_profit > 0 else "market",
+            )
+        except Exception as e:
+            logger.error(f"Risk Committee evaluation failed for {symbol}: {e}")
+            return
+
+        if not approval.approved:
+            logger.info(
+                f"Risk Committee rejected {symbol} {action}: "
+                f"decision={approval.decision}, score={approval.risk_score:.2f}"
+            )
+            return
+
+        # Store risk approval in Redis
+        approval_id = str(uuid4())
+        try:
+            key = f"risk:approval:{approval_id}"
+            await self.redis.set(key, "approved", ex=3600)  # 1-hour TTL
+        except Exception as e:
+            logger.warning(f"Failed to store risk approval: {e}")
+
+        # Build and execute order via gRPC self-call
+        side = "buy" if action == "buy" else "sell"
+
+        # Validate bracket order prices make sense:
+        # Buy: stop_loss < entry_price < take_profit
+        # Sell: take_profit < entry_price < stop_loss
+        use_bracket = stop_loss > 0 and take_profit > 0
+        if use_bracket:
+            if side == "buy" and not (stop_loss < entry_price < take_profit):
+                logger.warning(
+                    f"BRACKET_DOWNGRADE: Invalid bracket prices for buy {symbol}: "
+                    f"SL={stop_loss} entry={entry_price} TP={take_profit}. "
+                    f"Downgrading to market order without SL/TP protection."
+                )
+                use_bracket = False
+            elif side == "sell" and not (take_profit < entry_price < stop_loss):
+                logger.warning(
+                    f"BRACKET_DOWNGRADE: Invalid bracket prices for sell {symbol}: "
+                    f"TP={take_profit} entry={entry_price} SL={stop_loss}. "
+                    f"Downgrading to market order without SL/TP protection."
+                )
+                use_bracket = False
+
+        order_type = "bracket" if use_bracket else "market"
+
+        request = executor_pb2.ExecuteOrderRequest(
+            user_id=user_id,
+            symbol=symbol,
+            side=side,
+            qty=int(qty),
+            order_type=order_type,
+            risk_approval_id=approval_id,
+            stop_loss=stop_loss if use_bracket else 0.0,
+            take_profit=take_profit if use_bracket else 0.0,
+        )
+
+        # Execute order directly (reuse existing logic)
+        response = await self.ExecuteOrder(request, None)
+
+        if response.success:
+            logger.info(
+                f"Auto-trade executed: {symbol} {side} qty={qty} order_id={response.order_id}"
+            )
+        else:
+            logger.warning(f"Auto-trade failed: {symbol} {side} - {response.error_message}")
+            # Clean up unused risk approval
+            try:
+                await self.redis.delete(f"risk:approval:{approval_id}")
+            except Exception as e:
+                logger.debug(f"Failed to clean approval {approval_id}: {e}")
+
+    async def _calculate_order_qty(
+        self, user_id: str, symbol: str, price: float, size_pct: float
+    ) -> int:
+        """Calculate order quantity from position size percentage.
+
+        Args:
+            user_id: User identifier.
+            symbol: Stock symbol.
+            price: Current price per share.
+            size_pct: Target position size as fraction of portfolio (0.0-1.0).
+
+        Returns:
+            Number of shares to order (integer).
+        """
+        try:
+            alpaca = await self._ensure_alpaca_client()
+            account = await alpaca.get_account()
+            portfolio_value = float(account.portfolio_value)
+        except Exception as e:
+            logger.warning(f"Failed to get account value for qty calc: {e}")
+            return 0
+
+        if portfolio_value <= 0 or price <= 0:
+            return 0
+
+        target_value = portfolio_value * size_pct
+        qty = int(target_value / price)
+        return max(0, qty)
+
+    async def _start_periodic_analysis(self, user_id: str) -> None:
+        """Start periodic AI analysis for a user.
+
+        Triggers an immediate AI analysis, then schedules periodic runs.
+
+        Args:
+            user_id: User identifier.
+        """
+        # Cancel existing timer if any
+        if user_id in self._analysis_timers:
+            self._analysis_timers[user_id].cancel()
+
+        async def _periodic_loop() -> None:
+            """Run AI analysis periodically until cancelled."""
+            retry_delay = 60  # Short retry on failure
+            while True:
+                try:
+                    await self._trigger_ai_analysis(user_id)
+                    # Success — use normal interval
+                    await asyncio.sleep(config.ai_analysis_interval)
+                except Exception as e:
+                    logger.error(
+                        f"Periodic AI analysis failed for {user_id}: {e}, "
+                        f"retrying in {retry_delay}s"
+                    )
+                    await asyncio.sleep(retry_delay)
+
+        self._analysis_timers[user_id] = asyncio.create_task(_periodic_loop())
+        logger.info(
+            f"Started periodic AI analysis for user {user_id} "
+            f"(interval: {config.ai_analysis_interval}s)"
+        )
+
+    async def _trigger_ai_analysis(self, user_id: str) -> None:
+        """Trigger AI analysis via Strategy Service.
+
+        Args:
+            user_id: User identifier.
+        """
+        if not self.strategy:
+            logger.warning("Strategy client not available, cannot trigger AI analysis")
+            return
+
+        if not self._is_trading_enabled(user_id):
+            logger.info(f"Trading disabled for {user_id}, skipping AI analysis trigger")
+            return
+
+        response = await self.strategy.run_ai_analysis(user_id)
+        logger.info(
+            f"AI analysis triggered for user {user_id}: "
+            f"phase={response.phase}, signals={response.signals_published}"
+        )
 
     async def _cancel_all_user_orders(self, user_id: str) -> int:
         """Cancel all pending orders for a user (hard stop).
@@ -534,8 +1039,10 @@ class ExecutorServicer(executor_pb2_grpc.ExecutorServiceServicer):
                 try:
                     key = raw_key.decode("utf-8") if isinstance(raw_key, bytes) else raw_key
                     order_data = await self.redis.hgetall(key)
-                    if (order_data.get("user_id") == user_id and
-                        order_data.get("status") in ["new", "partially_filled"]):
+                    if order_data.get("user_id") == user_id and order_data.get("status") in [
+                        "new",
+                        "partially_filled",
+                    ]:
                         order_id = key.split(":")[-1]
 
                         # Cancel via Alpaca

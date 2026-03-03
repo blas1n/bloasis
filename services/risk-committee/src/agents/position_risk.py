@@ -46,13 +46,13 @@ class PositionRiskAgent:
         order_value = Decimal(str(order.size)) * Decimal(str(order.price))
         portfolio_value = Decimal(str(portfolio.total_value))
 
-        # Check for zero portfolio value
+        # Empty portfolio (no positions yet) — first trade is always allowed
         if portfolio_value == 0:
             return RiskVote(
                 agent="PositionRiskAgent",
-                decision=RiskDecision.REJECT,
-                risk_score=1.0,
-                reasoning="Portfolio value is zero",
+                decision=RiskDecision.APPROVE,
+                risk_score=0.1,
+                reasoning="No existing positions — first trade allowed",
             )
 
         order_pct = order_value / portfolio_value

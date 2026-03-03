@@ -36,13 +36,13 @@ class TestPositionRiskAgent:
         assert vote.risk_score <= 1.0
 
     @pytest.mark.asyncio
-    async def test_reject_empty_portfolio(self, agent, sample_order, empty_portfolio):
-        """Test rejection when portfolio value is zero."""
+    async def test_approve_empty_portfolio(self, agent, sample_order, empty_portfolio):
+        """Test approval when portfolio is empty (first trade allowed)."""
         vote = await agent.evaluate(sample_order, empty_portfolio)
 
-        assert vote.decision == RiskDecision.REJECT
-        assert vote.risk_score == 1.0
-        assert "zero" in vote.reasoning.lower()
+        assert vote.decision == RiskDecision.APPROVE
+        assert vote.risk_score <= 0.5
+        assert "first trade" in vote.reasoning.lower()
 
     @pytest.mark.asyncio
     async def test_adjust_order_exceeds_single_order_limit(

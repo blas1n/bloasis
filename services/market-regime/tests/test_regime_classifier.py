@@ -1,5 +1,5 @@
 """
-Unit tests for RegimeClassifier (Claude AI required).
+Unit tests for RegimeClassifier (LLM AI analysis).
 """
 
 from unittest.mock import AsyncMock
@@ -54,18 +54,18 @@ class TestRegimeClassifierClaude:
         assert result.regime == "sideways"
 
     @pytest.mark.asyncio
-    async def test_classify_claude_passes_correct_model(self) -> None:
-        """Should pass the configured model to analyst.analyze."""
+    async def test_classify_passes_model_from_yaml(self) -> None:
+        """Should pass the YAML-configured model to analyst.analyze."""
         mock_analyst = AsyncMock()
         mock_analyst.analyze = AsyncMock(return_value={
             "regime": "bull", "confidence": 0.8, "reasoning": "Low VIX",
         })
 
-        classifier = RegimeClassifier(analyst=mock_analyst, claude_model="claude-haiku-4-5-20251001")
+        classifier = RegimeClassifier(analyst=mock_analyst)
         await classifier.classify()
 
         call_kwargs = mock_analyst.analyze.call_args[1]
-        assert call_kwargs.get("model") == "claude-haiku-4-5-20251001"
+        assert call_kwargs.get("model") is not None
 
     @pytest.mark.asyncio
     async def test_classify_claude_passes_json_format(self) -> None:

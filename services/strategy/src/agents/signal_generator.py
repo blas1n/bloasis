@@ -81,6 +81,13 @@ class SignalGenerator:
         trading_signals = []
 
         for tech_signal in technical_signals:
+            # Skip signals with invalid entry price
+            if not tech_signal.entry_price or tech_signal.entry_price <= 0:
+                logger.warning(
+                    f"Skipping {tech_signal.symbol}: invalid entry_price={tech_signal.entry_price}"
+                )
+                continue
+
             # Compute ATR from OHLCV data
             atr = self._get_atr(tech_signal.symbol, ohlcv_data)
 
@@ -279,7 +286,10 @@ class SignalGenerator:
                 t2_level = entry - t2_dist
 
             # Trailing stop: 2 × ATR as percentage of entry
-            trailing_pct = (Decimal("2") * atr_d * risk_mult / entry * 100)
+            if entry > 0:
+                trailing_pct = (Decimal("2") * atr_d * risk_mult / entry * 100)
+            else:
+                trailing_pct = Decimal("2.0")
             trailing_pct = trailing_pct.quantize(Decimal("0.01"))
         else:
             # Fallback: fixed percentages

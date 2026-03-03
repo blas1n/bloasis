@@ -39,8 +39,8 @@ class MarketDataClient:
             options=[
                 ("grpc.max_send_message_length", 50 * 1024 * 1024),
                 ("grpc.max_receive_message_length", 50 * 1024 * 1024),
-                ("grpc.keepalive_time_ms", 10000),
-                ("grpc.keepalive_timeout_ms", 5000),
+                ("grpc.keepalive_time_ms", 300000),
+                ("grpc.keepalive_timeout_ms", 20000),
             ],
         )
         self.stub = market_data_pb2_grpc.MarketDataServiceStub(self.channel)
@@ -101,8 +101,10 @@ class MarketDataClient:
         assert self.stub is not None, "stub should be initialized after connect()"
 
         try:
+            # Convert days to valid period (closest match)
+            period = "1mo" if days <= 30 else "3mo"
             request = market_data_pb2.GetOHLCVRequest(
-                symbol=symbol, period=f"{days}d", interval="1d"
+                symbol=symbol, period=period, interval="1d"
             )
             response = await self.stub.GetOHLCV(request, timeout=10.0)
 
@@ -174,8 +176,10 @@ class MarketDataClient:
         assert self.stub is not None
 
         try:
+            # Convert days to valid period (closest match)
+            period = "1mo" if days <= 30 else ("3mo" if days <= 90 else "6mo")
             request = market_data_pb2.GetOHLCVRequest(
-                symbol=symbol, period=f"{days}d", interval="1d",
+                symbol=symbol, period=period, interval="1d",
             )
             response = await self.stub.GetOHLCV(request, timeout=10.0)
 

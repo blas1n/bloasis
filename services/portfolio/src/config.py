@@ -42,7 +42,7 @@ class ServiceConfig(BaseSettings):
 
     # Market Data Service configuration
     market_data_host: str = "market-data"
-    market_data_port: int = 50051
+    market_data_port: int = 50053
 
     # Executor Service configuration
     executor_host: str = "executor"

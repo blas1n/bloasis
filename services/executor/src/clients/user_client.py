@@ -49,8 +49,8 @@ class UserClient:
         self.channel = grpc.aio.insecure_channel(
             self.address,
             options=[
-                ("grpc.keepalive_time_ms", 10000),
-                ("grpc.keepalive_timeout_ms", 5000),
+                ("grpc.keepalive_time_ms", 300000),
+                ("grpc.keepalive_timeout_ms", 20000),
             ],
         )
         self.stub = user_pb2_grpc.UserServiceStub(self.channel)

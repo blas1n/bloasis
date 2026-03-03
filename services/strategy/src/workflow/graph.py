@@ -33,7 +33,9 @@ logger = logging.getLogger(__name__)
 def should_proceed_to_technical(state: AnalysisState) -> Literal["technical", "error"]:
     """Conditional edge after macro analysis.
 
-    Checks if extreme risk level detected. If so, abort the analysis.
+    Only aborts if market_context is entirely missing (unrecoverable error)
+    or extreme risk level is detected. Fallback-based analysis is allowed
+    to proceed — errors from using fallback are non-fatal.
 
     Args:
         state: Current workflow state
@@ -41,14 +43,15 @@ def should_proceed_to_technical(state: AnalysisState) -> Literal["technical", "e
     Returns:
         "technical" to continue, "error" to abort
     """
-    # Check for errors
-    if state.get("errors"):
-        logger.warning("Macro analysis errors detected, aborting workflow")
+    market_context = state.get("market_context")
+
+    # Abort only if macro analysis completely failed (no context at all)
+    if not market_context:
+        logger.warning("No market context available, aborting workflow")
         return "error"
 
-    # Check for extreme risk
-    market_context = state.get("market_context")
-    if market_context and market_context.risk_level == "extreme":
+    # Abort on extreme risk
+    if market_context.risk_level == "extreme":
         logger.warning("Extreme risk level detected, aborting workflow")
         return "error"
 
@@ -58,7 +61,8 @@ def should_proceed_to_technical(state: AnalysisState) -> Literal["technical", "e
 def should_approve_signals(state: AnalysisState) -> Literal["generate", "reject"]:
     """Conditional edge after risk assessment.
 
-    Checks if risk manager approved the signals. If not, abort signal generation.
+    Only rejects if risk assessment is entirely missing or explicitly rejected.
+    Fallback-based risk assessment that approves signals is allowed to proceed.
 
     Args:
         state: Current workflow state
@@ -66,14 +70,15 @@ def should_approve_signals(state: AnalysisState) -> Literal["generate", "reject"
     Returns:
         "generate" to proceed with signal generation, "reject" to abort
     """
-    # Check for errors
-    if state.get("errors"):
-        logger.warning("Risk assessment errors detected, rejecting signals")
+    risk_assessment = state.get("risk_assessment")
+
+    # Reject if risk assessment completely failed (no result at all)
+    if not risk_assessment:
+        logger.warning("No risk assessment available, rejecting signals")
         return "reject"
 
-    # Check risk approval
-    risk_assessment = state.get("risk_assessment")
-    if not risk_assessment or not risk_assessment.approved:
+    # Reject only if explicitly not approved
+    if not risk_assessment.approved:
         logger.warning("Risk manager rejected signals, aborting workflow")
         return "reject"
 

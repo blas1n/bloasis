@@ -7,6 +7,7 @@ Implements Stock Selection Pipeline Stage 3:
 - AI Flow Integration (5-Layer LangGraph workflow)
 """
 
+import json
 import logging
 from datetime import datetime
 
@@ -73,9 +74,13 @@ class StrategyServicer(strategy_pb2_grpc.StrategyServiceServicer):
         """
         logger.info(f"Getting stock picks for user {user_id} (max: {max_picks})")
 
-        # Get current regime
-        regime_response = await self.regime_client.get_current_regime()
-        regime = regime_response.regime
+        # Get current regime (with fallback)
+        try:
+            regime_response = await self.regime_client.get_current_regime()
+            regime = regime_response.regime or "sideways"
+        except Exception as e:
+            logger.warning(f"Failed to get regime, using default 'sideways': {e}")
+            regime = "sideways"
 
         # Get user preferences
         preferences = await self.get_preferences(user_id)
@@ -234,6 +239,9 @@ class StrategyServicer(strategy_pb2_grpc.StrategyServiceServicer):
 
         if cached:
             logger.debug(f"Preferences cache HIT for user {user_id}")
+            # Normalize risk_profile to uppercase (User Service stores lowercase)
+            if "risk_profile" in cached and isinstance(cached["risk_profile"], str):
+                cached["risk_profile"] = cached["risk_profile"].upper()
             return UserPreferences(**cached)
 
         # Return default preferences
@@ -300,12 +308,10 @@ class StrategyServicer(strategy_pb2_grpc.StrategyServiceServicer):
         logger.info(f"Running AI analysis workflow for user {user_id}")
 
         # Get stock picks from Stage 3 (Factor Scoring)
-        picks, regime, preferences = await self.get_stock_picks(user_id, max_picks=15)
-
-        # Prepare initial state
-        initial_state = {
-            "user_id": user_id,
-            "stock_picks": [
+        warnings: list[str] = []
+        try:
+            picks, regime, preferences = await self.get_stock_picks(user_id, max_picks=15)
+            stock_picks_data = [
                 {
                     "symbol": p.symbol,
                     "sector": p.sector,
@@ -321,7 +327,40 @@ class StrategyServicer(strategy_pb2_grpc.StrategyServiceServicer):
                     },
                 }
                 for p in picks
-            ],
+            ]
+        except Exception as e:
+            logger.warning(f"Stock picks failed, using fallback symbols: {e}")
+            regime = "sideways"
+            preferences = await self.get_preferences(user_id)
+            warnings.append(f"Stock picks fallback used: {str(e)}")
+            stock_picks_data = [
+                {"symbol": s, "sector": sector, "theme": "Large Cap",
+                 "final_score": 50.0, "factor_scores": {
+                     "momentum": 50.0, "value": 50.0, "quality": 50.0,
+                     "volatility": 50.0, "liquidity": 50.0, "sentiment": 50.0}}
+                for s, sector in [
+                    ("AAPL", "Technology"),
+                    ("MSFT", "Technology"),
+                    ("JNJ", "Healthcare"),
+                    ("JPM", "Financials"),
+                    ("PG", "Consumer Staples"),
+                    ("XOM", "Energy"),
+                    ("NVDA", "Technology"),
+                ]
+            ]
+
+        if not stock_picks_data:
+            logger.warning("No stock picks available, skipping AI analysis")
+            return {
+                "phase": "error",
+                "trading_signals": [],
+                "errors": ["No stock picks available for analysis"],
+            }
+
+        # Prepare initial state
+        initial_state = {
+            "user_id": user_id,
+            "stock_picks": stock_picks_data,
             "preferences": {
                 "user_id": preferences.user_id,
                 "risk_profile": preferences.risk_profile.value,
@@ -332,6 +371,7 @@ class StrategyServicer(strategy_pb2_grpc.StrategyServiceServicer):
             },
             "technical_signals": [],
             "trading_signals": [],
+            "warnings": warnings,
         }
 
         # Execute workflow
@@ -520,6 +560,30 @@ class StrategyServicer(strategy_pb2_grpc.StrategyServiceServicer):
                 max_single_position=result["preferences"]["max_single_position"],
             )
 
+            # Retrieve cached AI signals (from latest RunAIAnalysis)
+            signal_protos = []
+            try:
+                cached_signals = await self.cache.get(f"signals:latest:{user_id}")
+                if cached_signals:
+                    signal_list = json.loads(cached_signals)
+                    signal_protos = [
+                        strategy_pb2.TradingSignal(
+                            symbol=s["symbol"],
+                            action=s["action"],
+                            confidence=s.get("confidence", 0.0),
+                            size_recommendation=s.get("size_recommendation", 0.0),
+                            entry_price=s.get("entry_price", 0.0),
+                            stop_loss=s.get("stop_loss", 0.0),
+                            take_profit=s.get("take_profit", 0.0),
+                            rationale=s.get("rationale", ""),
+                            risk_approved=s.get("risk_approved", False),
+                            trailing_stop_pct=s.get("trailing_stop_pct", 0.0),
+                        )
+                        for s in signal_list
+                    ]
+            except Exception as e:
+                logger.debug(f"No cached signals for {user_id}: {e}")
+
             return strategy_pb2.StrategyResponse(
                 user_id=result["user_id"],
                 regime=result["regime"],
@@ -529,6 +593,7 @@ class StrategyServicer(strategy_pb2_grpc.StrategyServiceServicer):
                 preferences=preferences_proto,
                 cached_at=result["cached_at"],
                 from_cache=from_cache,
+                signals=signal_protos,
             )
 
         except ConnectionError as e:
@@ -650,3 +715,105 @@ class StrategyServicer(strategy_pb2_grpc.StrategyServiceServicer):
             context.set_code(grpc.StatusCode.INTERNAL)
             context.set_details(f"Internal error: {str(e)}")
             return strategy_pb2.UserPreferences()
+
+    async def RunAIAnalysis(  # noqa: N802
+        self,
+        request: strategy_pb2.RunAIAnalysisRequest,
+        context: grpc.aio.ServicerContext,
+    ) -> strategy_pb2.RunAIAnalysisResponse:
+        """Run 5-Layer AI Flow and publish trading signals to Redpanda."""
+        try:
+            user_id = request.user_id
+
+            if not user_id:
+                context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
+                context.set_details("user_id field is required")
+                return strategy_pb2.RunAIAnalysisResponse()
+
+            logger.info(f"RunAIAnalysis request: user_id={user_id}")
+
+            # Execute 5-Layer AI workflow
+            final_state = await self.run_ai_analysis(user_id)
+
+            phase = final_state.get("phase", "error")
+            trading_signals = final_state.get("trading_signals", [])
+            errors = final_state.get("errors", [])
+
+            # Convert TradingSignal dataclasses to proto messages
+            signal_protos = []
+            for sig in trading_signals:
+                tier_protos = [
+                    strategy_pb2.ProfitTier(
+                        level=float(t.level),
+                        size_pct=float(t.size_pct),
+                    )
+                    for t in sig.profit_tiers
+                ]
+                signal_protos.append(
+                    strategy_pb2.TradingSignal(
+                        symbol=sig.symbol,
+                        action=sig.action,
+                        confidence=sig.confidence,
+                        size_recommendation=float(sig.size_recommendation),
+                        entry_price=float(sig.entry_price),
+                        stop_loss=float(sig.stop_loss),
+                        take_profit=float(sig.take_profit),
+                        rationale=sig.rationale,
+                        risk_approved=sig.risk_approved,
+                        profit_tiers=tier_protos,
+                        trailing_stop_pct=float(sig.trailing_stop_pct),
+                    )
+                )
+
+            # Cache signals in Redis for GetPersonalizedStrategy retrieval
+            if trading_signals:
+                signal_dicts = [
+                    {
+                        "symbol": s.symbol,
+                        "action": s.action,
+                        "confidence": s.confidence,
+                        "size_recommendation": float(s.size_recommendation),
+                        "entry_price": float(s.entry_price),
+                        "stop_loss": float(s.stop_loss),
+                        "take_profit": float(s.take_profit),
+                        "rationale": s.rationale,
+                        "risk_approved": s.risk_approved,
+                        "trailing_stop_pct": float(s.trailing_stop_pct),
+                    }
+                    for s in trading_signals
+                ]
+                try:
+                    await self.cache.set(
+                        f"signals:latest:{user_id}",
+                        json.dumps(signal_dicts),
+                        ttl=config.cache_ttl,
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to cache signals: {e}")
+
+            return strategy_pb2.RunAIAnalysisResponse(
+                analysis_id=final_state.get("analysis_id", ""),
+                user_id=user_id,
+                phase=str(phase),
+                signals=signal_protos,
+                signals_published=len(signal_protos),
+                errors=errors,
+            )
+
+        except ConnectionError as e:
+            logger.error(f"Service unavailable: {e}")
+            context.set_code(grpc.StatusCode.UNAVAILABLE)
+            context.set_details("Dependent service unavailable")
+            return strategy_pb2.RunAIAnalysisResponse()
+
+        except TimeoutError as e:
+            logger.error(f"Service timeout: {e}")
+            context.set_code(grpc.StatusCode.DEADLINE_EXCEEDED)
+            context.set_details("Dependent service request timed out")
+            return strategy_pb2.RunAIAnalysisResponse()
+
+        except Exception as e:
+            logger.error(f"RunAIAnalysis error: {e}", exc_info=True)
+            context.set_code(grpc.StatusCode.INTERNAL)
+            context.set_details(f"Internal error: {str(e)}")
+            return strategy_pb2.RunAIAnalysisResponse()

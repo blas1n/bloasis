@@ -31,6 +31,17 @@ class Settings(BaseSettings):
     user_service_host: str = "user"
     user_service_port: int = 50052
 
+    # Risk Committee Service (for order approval)
+    risk_committee_host: str = "risk-committee"
+    risk_committee_port: int = 50059
+
+    # Strategy Service (for AI analysis trigger)
+    strategy_service_host: str = "strategy"
+    strategy_service_port: int = 50055
+
+    # Auto-trading scheduler interval (seconds)
+    ai_analysis_interval: int = 3600  # 1 hour
+
     # Consul Service Discovery
     consul_host: str = "consul"
     consul_port: int = 8500

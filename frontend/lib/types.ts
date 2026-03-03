@@ -91,9 +91,14 @@ export interface Signal {
 
 export interface PersonalizedStrategyResponse {
   userId: string;
+  regime: string;
+  selectedSectors: string[];
+  topThemes: string[];
+  stockPicks: StockPick[];
   signals: Signal[];
-  riskBudget: number;
-  timestamp: string;
+  preferences: Record<string, unknown>;
+  cachedAt: string;
+  fromCache: boolean;
 }
 
 export interface StockPick {

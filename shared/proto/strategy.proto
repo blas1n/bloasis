@@ -50,6 +50,18 @@ service StrategyService {
       get: "/v1/strategy/preferences/{user_id}"
     };
   }
+
+  // RunAIAnalysis executes the 5-Layer AI Flow:
+  // Layer 1: Macro Analysis (Claude) → Layer 2: Technical Analysis (Claude)
+  // → Layer 3: Risk Assessment (Claude) → Layer 4: Signal Generation
+  // → Layer 5: Event Publishing (Redpanda strategy-events)
+  // Called by Executor Service when auto-trading is activated
+  rpc RunAIAnalysis(RunAIAnalysisRequest) returns (RunAIAnalysisResponse) {
+    option (google.api.http) = {
+      post: "/v1/strategy/ai-analysis"
+      body: "*"
+    };
+  }
 }
 
 // StockPicksRequest - Request for stock picks
@@ -158,6 +170,9 @@ message StrategyResponse {
 
   // Whether result came from cache
   bool from_cache = 8;
+
+  // Latest AI trading signals (cached from RunAIAnalysis)
+  repeated TradingSignal signals = 9;
 }
 
 // UserPreferences - User investment preferences
@@ -237,4 +252,67 @@ message ProfitTier {
 message GetPreferencesRequest {
   // User ID
   string user_id = 1;
+}
+
+// RunAIAnalysisRequest - Request for AI-powered trading signal generation
+message RunAIAnalysisRequest {
+  // User ID for personalization and preference lookup
+  string user_id = 1;
+}
+
+// TradingSignal - Individual trading signal from AI analysis
+message TradingSignal {
+  // Stock symbol
+  string symbol = 1;
+
+  // Action: "buy", "sell", "hold"
+  string action = 2;
+
+  // Signal confidence (0.0-1.0)
+  double confidence = 3;
+
+  // Recommended position size as fraction of portfolio (0.0-1.0)
+  double size_recommendation = 4;
+
+  // Suggested entry price
+  double entry_price = 5;
+
+  // Stop-loss price (ATR-based)
+  double stop_loss = 6;
+
+  // Take-profit price (ATR-based)
+  double take_profit = 7;
+
+  // Investment rationale from AI
+  string rationale = 8;
+
+  // Whether risk manager approved this signal
+  bool risk_approved = 9;
+
+  // Multi-tier profit-taking levels
+  repeated ProfitTier profit_tiers = 10;
+
+  // Trailing stop percentage (0.0-1.0)
+  double trailing_stop_pct = 11;
+}
+
+// RunAIAnalysisResponse - AI analysis results with trading signals
+message RunAIAnalysisResponse {
+  // Analysis identifier (UUID)
+  string analysis_id = 1;
+
+  // User ID
+  string user_id = 2;
+
+  // Workflow phase at completion: "COMPLETE" or "ERROR"
+  string phase = 3;
+
+  // Generated trading signals
+  repeated TradingSignal signals = 4;
+
+  // Number of signals published to Redpanda strategy-events
+  int32 signals_published = 5;
+
+  // Errors encountered during workflow (non-fatal)
+  repeated string errors = 6;
 }

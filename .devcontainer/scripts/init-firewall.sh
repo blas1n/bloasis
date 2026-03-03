@@ -104,6 +104,11 @@ echo "Host network detected as: $HOST_NETWORK"
 iptables -A INPUT -s "$HOST_NETWORK" -j ACCEPT
 iptables -A OUTPUT -d "$HOST_NETWORK" -j ACCEPT
 
+# Allow Tailscale CGNAT range (local LLM on Tailscale network)
+TAILSCALE_NETWORK="100.64.0.0/10"
+echo "Adding Tailscale network: $TAILSCALE_NETWORK"
+ipset add allowed-domains "$TAILSCALE_NETWORK"
+
 # Set default policies to DROP first
 iptables -P INPUT DROP
 iptables -P FORWARD DROP

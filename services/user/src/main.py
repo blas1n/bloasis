@@ -7,6 +7,7 @@ Manages user profiles and trading preferences.
 
 import asyncio
 import socket
+import sys
 from typing import Optional
 
 import grpc
@@ -19,6 +20,7 @@ from shared.utils import (
     get_local_ip,
     setup_logger,
 )
+from shared.utils.redpanda_client import RedpandaClient
 
 from .clients.executor_client import ExecutorClient
 from .config import config
@@ -50,7 +52,67 @@ async def serve() -> None:
     await postgres_client.connect()
     logger.info("PostgreSQL client connected")
 
-    # Initialize Consul client if enabled
+    # Initialize repositories
+    repository = UserRepository(postgres_client)
+    broker_config_repo = BrokerConfigRepository(postgres_client)
+
+    # Initialize Redpanda client for event publishing
+    redpanda_client = RedpandaClient(brokers=config.redpanda_brokers)
+    try:
+        await redpanda_client.start()
+        logger.info("Redpanda client connected")
+    except Exception as e:
+        logger.warning(f"Redpanda client connection failed (non-fatal): {e}")
+        redpanda_client = None
+
+    # Initialize Executor client (for broker status checks)
+    executor_client = ExecutorClient()
+    try:
+        await executor_client.connect()
+        logger.info("Executor client connected")
+    except Exception as e:
+        logger.warning(f"Executor client connection failed (non-fatal): {e}")
+        executor_client = None
+
+    # Create gRPC server
+    server = grpc.aio.server(
+        options=[
+            ("grpc.max_send_message_length", 50 * 1024 * 1024),
+            ("grpc.max_receive_message_length", 50 * 1024 * 1024),
+            ("grpc.keepalive_time_ms", 300000),
+            ("grpc.keepalive_timeout_ms", 20000),
+        ]
+    )
+
+    # Add User service
+    servicer = UserServicer(
+        redis_client=redis_client,
+        postgres_client=postgres_client,
+        repository=repository,
+        broker_config_repository=broker_config_repo,
+        executor_client=executor_client,
+        redpanda_client=redpanda_client,
+    )
+    user_pb2_grpc.add_UserServiceServicer_to_server(servicer, server)
+
+    # Add health check service
+    health_servicer = health.HealthServicer()
+    health_servicer.set("", health_pb2.HealthCheckResponse.SERVING)
+    health_servicer.set("bloasis.user.UserService", health_pb2.HealthCheckResponse.SERVING)
+    health_pb2_grpc.add_HealthServicer_to_server(health_servicer, server)
+
+    # Start server
+    listen_addr = f"[::]:{config.grpc_port}"
+    bound_port = server.add_insecure_port(listen_addr)
+    if bound_port == 0:
+        raise RuntimeError(
+            f"Failed to bind gRPC port {listen_addr} "
+            f"(port may be in use by another process)"
+        )
+    await server.start()
+    logger.info(f"gRPC server started on {listen_addr}")
+
+    # Register with Consul AFTER server is ready to accept connections
     if config.consul_enabled:
         consul_client = ConsulClient(
             host=config.consul_host,
@@ -71,47 +133,6 @@ async def serve() -> None:
                 "Consul service registration failed - service will continue without Consul"
             )
 
-    # Initialize repositories
-    repository = UserRepository(postgres_client)
-    broker_config_repo = BrokerConfigRepository(postgres_client)
-
-    # Initialize Executor client (for broker status checks)
-    executor_client = ExecutorClient()
-    try:
-        await executor_client.connect()
-        logger.info("Executor client connected")
-    except Exception as e:
-        logger.warning(f"Executor client connection failed (non-fatal): {e}")
-        executor_client = None
-
-    # Create gRPC server
-    server = grpc.aio.server()
-
-    # Add User service
-    servicer = UserServicer(
-        redis_client=redis_client,
-        postgres_client=postgres_client,
-        repository=repository,
-        broker_config_repository=broker_config_repo,
-        executor_client=executor_client,
-    )
-    user_pb2_grpc.add_UserServiceServicer_to_server(servicer, server)
-
-    # Add health check service
-    health_servicer = health.HealthServicer()
-    health_servicer.set("", health_pb2.HealthCheckResponse.SERVING)
-    health_servicer.set(
-        "bloasis.user.UserService",
-        health_pb2.HealthCheckResponse.SERVING
-    )
-    health_pb2_grpc.add_HealthServicer_to_server(health_servicer, server)
-
-    # Start server
-    listen_addr = f"[::]:{config.grpc_port}"
-    server.add_insecure_port(listen_addr)
-    await server.start()
-    logger.info(f"gRPC server started on {listen_addr}")
-
     # Handle shutdown
     async def shutdown() -> None:
         logger.info("Shutting down...")
@@ -126,6 +147,9 @@ async def serve() -> None:
         if executor_client:
             await executor_client.close()
             logger.info("Executor client disconnected")
+        if redpanda_client:
+            await redpanda_client.stop()
+            logger.info("Redpanda client disconnected")
         if redis_client:
             await redis_client.close()
             logger.info("Redis client disconnected")
@@ -140,7 +164,13 @@ async def serve() -> None:
 
 def main() -> None:
     """Main entry point."""
-    asyncio.run(serve())
+    try:
+        asyncio.run(serve())
+    except KeyboardInterrupt:
+        logger.info("Received keyboard interrupt, exiting...")
+    except Exception as e:
+        logger.error(f"Fatal error: {e}", exc_info=True)
+        sys.exit(1)
 
 
 if __name__ == "__main__":
