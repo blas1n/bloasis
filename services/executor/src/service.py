@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from .clients.risk_committee_client import RiskCommitteeClient
     from .clients.strategy_client import StrategyClient
     from .clients.user_client import UserClient
+    from .models import OrderResult
     from .utils.event_publisher import EventPublisher
     from .utils.redis_client import RedisClient
 
@@ -59,6 +60,8 @@ class ExecutorServicer(executor_pb2_grpc.ExecutorServiceServicer):
         self.trading_control_consumer = None
         self.strategy_signal_consumer = None
         self._analysis_timers: dict[str, asyncio.Task] = {}  # {user_id: periodic_task}
+        self._fill_check_tasks: set[asyncio.Task] = set()
+        self._pending_order_monitor: asyncio.Task | None = None
 
     async def _ensure_alpaca_client(self) -> "AlpacaClient":
         """Ensure Alpaca client is configured with valid credentials.
@@ -216,6 +219,20 @@ class ExecutorServicer(executor_pb2_grpc.ExecutorServiceServicer):
 
         # Publish execution event
         await self._publish_execution_event(request.user_id, result)
+
+        # Check for order fill → publish to order-filled topic for Portfolio
+        if result.order_id and result.status != OrderStatus.REJECTED:
+            filled = await self._check_and_publish_fill(
+                request.user_id, result.order_id, result,
+            )
+            if not filled:
+                # Market orders in paper trading fill almost instantly;
+                # poll in background for slightly delayed fills.
+                task = asyncio.create_task(
+                    self._wait_for_order_fill(request.user_id, result.order_id)
+                )
+                self._fill_check_tasks.add(task)
+                task.add_done_callback(self._fill_check_tasks.discard)
 
         success = result.status != OrderStatus.REJECTED
 
@@ -453,6 +470,167 @@ class ExecutorServicer(executor_pb2_grpc.ExecutorServiceServicer):
         except Exception as e:
             logger.warning(f"Failed to publish execution event: {e}")
 
+    async def _check_and_publish_fill(
+        self, user_id: str, order_id: str, result: "OrderResult",
+    ) -> bool:
+        """Check if order is filled and publish fill event to Redpanda.
+
+        Portfolio Service consumes order-filled events to record trades in DB.
+        Uses Redis SETNX to guarantee at-most-once publishing per order.
+
+        Args:
+            user_id: User who placed the order.
+            order_id: Alpaca order ID.
+            result: OrderResult with current status.
+
+        Returns:
+            True if fill event was published (or already published), False otherwise.
+        """
+        if result.status == OrderStatus.FILLED and result.filled_qty > 0:
+            # Dedup: only publish once per order (multiple code paths call this)
+            lock_key = f"fill_published:{order_id}"
+            if not await self.redis.set_nx(lock_key, "1", ex=86400):
+                return True  # Already published by another path
+            try:
+                await self.publisher.publish_order_filled(
+                    user_id=user_id,
+                    order_id=order_id,
+                    symbol=result.symbol,
+                    side=result.side,
+                    filled_qty=float(result.filled_qty),
+                    filled_price=float(result.filled_avg_price or 0),
+                )
+                return True
+            except Exception as e:
+                logger.warning(f"Failed to publish order filled event: {e}")
+        return False
+
+    async def _wait_for_order_fill(self, user_id: str, order_id: str) -> None:
+        """Background task to poll Alpaca for order fill status.
+
+        Paper trading market orders fill almost instantly, but we poll to
+        handle cases where the fill is slightly delayed. Checks every 2s
+        for up to 30s.
+
+        Args:
+            user_id: User who placed the order.
+            order_id: Alpaca order ID.
+        """
+        try:
+            alpaca = await self._ensure_alpaca_client()
+        except Exception as e:
+            logger.warning(f"Cannot check order fill — Alpaca unavailable: {e}")
+            return
+
+        max_attempts = 15  # 15 × 2s = 30s max
+        for attempt in range(max_attempts):
+            await asyncio.sleep(2)
+            try:
+                result = await alpaca.get_order_status(order_id)
+                if await self._check_and_publish_fill(user_id, order_id, result):
+                    logger.info(
+                        f"Order {order_id} filled after {(attempt + 1) * 2}s: "
+                        f"{result.symbol} {result.side} qty={result.filled_qty} "
+                        f"@ {result.filled_avg_price}"
+                    )
+                    return
+                if result.status in (
+                    OrderStatus.CANCELLED,
+                    OrderStatus.REJECTED,
+                    OrderStatus.EXPIRED,
+                ):
+                    logger.info(
+                        f"Order {order_id} terminal status: {result.status.value}, "
+                        f"stopping fill check"
+                    )
+                    return
+            except Exception as e:
+                logger.warning(
+                    f"Fill check attempt {attempt + 1} failed for {order_id}: {e}"
+                )
+
+        logger.warning(
+            f"Order {order_id} not filled after {max_attempts * 2}s, "
+            f"giving up fill check"
+        )
+
+    async def start_pending_order_monitor(self) -> None:
+        """Start a background task to periodically check pending orders for fills.
+
+        Handles orders that don't fill immediately (e.g., orders placed
+        outside market hours, limit orders). Scans Redis for tracked orders
+        and checks their fill status via Alpaca API every 60 seconds.
+        """
+        self._pending_order_monitor = asyncio.create_task(
+            self._monitor_pending_orders()
+        )
+        logger.info("Pending order fill monitor started")
+
+    async def _monitor_pending_orders(self) -> None:
+        """Background loop: check all tracked orders for fills every 60s."""
+        while True:
+            await asyncio.sleep(60)
+            try:
+                await self._check_all_pending_orders()
+            except Exception as e:
+                logger.warning(f"Pending order monitor error: {e}")
+
+    async def _check_all_pending_orders(self) -> None:
+        """Scan Redis for pending orders and publish fill events for any that filled."""
+        try:
+            alpaca = await self._ensure_alpaca_client()
+        except Exception:
+            return  # No credentials yet
+
+        cursor = 0
+        checked = 0
+        filled = 0
+
+        while True:
+            cursor, keys = await self.redis.scan(
+                cursor, match="order:*", count=100,
+            )
+            for key in keys:
+                try:
+                    order_data = await self.redis.hgetall(key)
+                    status = order_data.get("status", "")
+                    if status in ("filled", "cancelled", "rejected", "expired"):
+                        continue  # Skip terminal orders
+
+                    order_id = key.split(":")[-1]
+                    user_id = order_data.get("user_id", "")
+                    if not order_id or not user_id:
+                        continue
+
+                    checked += 1
+                    result = await alpaca.get_order_status(order_id)
+
+                    if await self._check_and_publish_fill(user_id, order_id, result):
+                        await self.redis.hset(key, {"status": "filled"})
+                        filled += 1
+                        logger.info(
+                            f"FILL_MONITOR: Order {order_id} filled: "
+                            f"{result.symbol} {result.side} "
+                            f"qty={result.filled_qty} @ {result.filled_avg_price}"
+                        )
+                    elif result.status in (
+                        OrderStatus.CANCELLED,
+                        OrderStatus.REJECTED,
+                        OrderStatus.EXPIRED,
+                    ):
+                        await self.redis.hset(key, {"status": result.status.value})
+                except Exception as e:
+                    logger.debug(f"Fill monitor check failed for {key}: {e}")
+
+            if cursor == 0:
+                break
+
+        if checked > 0:
+            logger.info(
+                f"FILL_MONITOR: Checked {checked} pending orders, "
+                f"{filled} newly filled"
+            )
+
     # ==================== Trading Control Methods ====================
 
     async def start_trading_control_consumer(self, brokers: str) -> None:
@@ -497,6 +675,37 @@ class ExecutorServicer(executor_pb2_grpc.ExecutorServiceServicer):
         await self.strategy_signal_consumer.start()
         logger.info("Strategy signal consumer started")
 
+    async def recover_active_trading(self) -> None:
+        """Recover active trading state from Redis after restart.
+
+        Scans Redis for trading:active:* keys and restarts periodic
+        analysis for each active user.
+        """
+        cursor = 0
+        recovered = 0
+
+        while True:
+            cursor, keys = await self.redis.scan(
+                cursor, match="trading:active:*", count=100,
+            )
+            for key in keys:
+                user_id = key.split("trading:active:")[-1]
+                self.user_trading_status[user_id] = {
+                    "enabled": True,
+                    "stop_mode": "",
+                    "started_at": "recovered",
+                }
+                await self._start_periodic_analysis(user_id)
+                recovered += 1
+                logger.info(f"Recovered active trading for user {user_id}")
+            if cursor == 0:
+                break
+
+        if recovered:
+            logger.info(f"Recovered {recovered} active trading user(s)")
+        else:
+            logger.info("No active trading users to recover")
+
     async def stop_consumers(self) -> None:
         """Stop all event consumers and scheduled tasks."""
         if self.trading_control_consumer:
@@ -506,6 +715,16 @@ class ExecutorServicer(executor_pb2_grpc.ExecutorServiceServicer):
         if self.strategy_signal_consumer:
             await self.strategy_signal_consumer.stop()
             logger.info("Strategy signal consumer stopped")
+
+        # Cancel pending order fill monitor
+        if self._pending_order_monitor:
+            self._pending_order_monitor.cancel()
+            logger.info("Pending order fill monitor stopped")
+
+        # Cancel in-flight fill check tasks
+        for task in self._fill_check_tasks:
+            task.cancel()
+        self._fill_check_tasks.clear()
 
         # Cancel all periodic analysis timers
         for user_id, task in self._analysis_timers.items():
@@ -533,6 +752,9 @@ class ExecutorServicer(executor_pb2_grpc.ExecutorServiceServicer):
                 "stopped_at": event.get("timestamp"),
             }
 
+            # Remove active trading flag from Redis
+            await self.redis.delete(f"trading:active:{user_id}")
+
             # Cancel periodic analysis for this user
             if user_id in self._analysis_timers:
                 self._analysis_timers[user_id].cancel()
@@ -552,6 +774,10 @@ class ExecutorServicer(executor_pb2_grpc.ExecutorServiceServicer):
                 "stop_mode": "",
                 "started_at": event.get("timestamp"),
             }
+
+            # Persist active trading flag in Redis for restart recovery
+            await self.redis.set(f"trading:active:{user_id}", "1")
+
             logger.info(f"Trading started for user {user_id}")
 
             # Trigger initial AI analysis and start periodic scheduler
@@ -744,12 +970,18 @@ class ExecutorServicer(executor_pb2_grpc.ExecutorServiceServicer):
 
         async def _periodic_loop() -> None:
             """Run AI analysis periodically until cancelled."""
+            retry_delay = 60  # Short retry on failure
             while True:
                 try:
                     await self._trigger_ai_analysis(user_id)
+                    # Success — use normal interval
+                    await asyncio.sleep(config.ai_analysis_interval)
                 except Exception as e:
-                    logger.error(f"Periodic AI analysis failed for {user_id}: {e}")
-                await asyncio.sleep(config.ai_analysis_interval)
+                    logger.error(
+                        f"Periodic AI analysis failed for {user_id}: {e}, "
+                        f"retrying in {retry_delay}s"
+                    )
+                    await asyncio.sleep(retry_delay)
 
         self._analysis_timers[user_id] = asyncio.create_task(_periodic_loop())
         logger.info(
@@ -771,14 +1003,11 @@ class ExecutorServicer(executor_pb2_grpc.ExecutorServiceServicer):
             logger.info(f"Trading disabled for {user_id}, skipping AI analysis trigger")
             return
 
-        try:
-            response = await self.strategy.run_ai_analysis(user_id)
-            logger.info(
-                f"AI analysis triggered for user {user_id}: "
-                f"phase={response.phase}, signals={response.signals_published}"
-            )
-        except Exception as e:
-            logger.error(f"Failed to trigger AI analysis for {user_id}: {e}")
+        response = await self.strategy.run_ai_analysis(user_id)
+        logger.info(
+            f"AI analysis triggered for user {user_id}: "
+            f"phase={response.phase}, signals={response.signals_published}"
+        )
 
     async def _cancel_all_user_orders(self, user_id: str) -> int:
         """Cancel all pending orders for a user (hard stop).

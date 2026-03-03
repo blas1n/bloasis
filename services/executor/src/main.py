@@ -127,9 +127,35 @@ async def serve() -> None:
     await server.start()
     logger.info(f"gRPC server started on {listen_addr}")
 
+    # Recover active trading state from Redis once Strategy Service is ready.
+    # Uses gRPC channel_ready() — event-driven wait for connectivity, not polling.
+    async def _recovery_when_ready() -> None:
+        if strategy_client and strategy_client.channel:
+            try:
+                await asyncio.wait_for(
+                    strategy_client.channel.channel_ready(), timeout=120,
+                )
+                logger.info("Strategy Service ready, starting trading recovery")
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "Strategy Service not ready after 120s, "
+                    "proceeding with recovery (periodic retry will handle)"
+                )
+        try:
+            await servicer.recover_active_trading()
+        except Exception as e:
+            logger.warning(f"Trading state recovery failed (non-fatal): {e}")
+
+    _recovery_task = asyncio.create_task(_recovery_when_ready())
+
+    # Start periodic fill checker for pending orders
+    # (handles orders placed outside market hours, limit orders, etc.)
+    await servicer.start_pending_order_monitor()
+
     # Handle shutdown
     async def shutdown() -> None:
         logger.info("Shutting down...")
+        _recovery_task.cancel()
         await server.stop(grace=5)
 
         # Stop all consumers and scheduled tasks
