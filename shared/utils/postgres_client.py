@@ -6,8 +6,9 @@ Provides async PostgreSQL operations using SQLAlchemy with asyncpg dialect.
 
 import logging
 import os
+from collections.abc import AsyncGenerator, Sequence
 from contextlib import asynccontextmanager
-from typing import Any, AsyncGenerator, Optional, Sequence
+from typing import Any
 
 from sqlalchemy import text
 from sqlalchemy.engine import Result
@@ -41,7 +42,7 @@ class PostgresClient:
         await client.close()
     """
 
-    def __init__(self, database_url: Optional[str] = None) -> None:
+    def __init__(self, database_url: str | None = None) -> None:
         """
         Initialize PostgreSQL client configuration.
 
@@ -61,12 +62,10 @@ class PostgresClient:
                 host = os.getenv("POSTGRES_HOST") or "postgres"
                 port = os.getenv("POSTGRES_PORT") or "5432"
                 db = os.getenv("POSTGRES_DB") or "bloasis"
-                self.database_url = (
-                    f"postgresql+asyncpg://{user}:{password}@{host}:{port}/{db}"
-                )
+                self.database_url = f"postgresql+asyncpg://{user}:{password}@{host}:{port}/{db}"
 
-        self.engine: Optional[AsyncEngine] = None
-        self.session_maker: Optional[async_sessionmaker[AsyncSession]] = None
+        self.engine: AsyncEngine | None = None
+        self.session_maker: async_sessionmaker[AsyncSession] | None = None
 
     async def connect(self) -> None:
         """
@@ -83,6 +82,8 @@ class PostgresClient:
                 self.database_url,
                 echo=False,
                 pool_pre_ping=True,
+                pool_size=10,
+                max_overflow=20,
             )
             self.session_maker = async_sessionmaker(
                 bind=self.engine,
@@ -107,9 +108,7 @@ class PostgresClient:
                 "PostgreSQL connection failed",
                 extra={"host": host_info, "error": str(e)},
             )
-            raise ConnectionError(
-                f"Failed to connect to PostgreSQL at {host_info}: {e}"
-            ) from e
+            raise ConnectionError(f"Failed to connect to PostgreSQL at {host_info}: {e}") from e
 
     async def close(self) -> None:
         """
@@ -144,9 +143,7 @@ class PostgresClient:
                 rows = result.fetchall()
         """
         if self.session_maker is None:
-            raise ConnectionError(
-                "PostgreSQL client is not connected. Call connect() first."
-            )
+            raise ConnectionError("PostgreSQL client is not connected. Call connect() first.")
 
         async with self.session_maker() as session:
             try:
@@ -159,7 +156,7 @@ class PostgresClient:
     async def execute_query(
         self,
         query: str,
-        params: Optional[dict[str, Any]] = None,
+        params: dict[str, Any] | None = None,
     ) -> Sequence[Any]:
         """
         Execute a raw SQL query with parameters.
@@ -182,9 +179,7 @@ class PostgresClient:
             )
         """
         if self.session_maker is None:
-            raise ConnectionError(
-                "PostgreSQL client is not connected. Call connect() first."
-            )
+            raise ConnectionError("PostgreSQL client is not connected. Call connect() first.")
 
         try:
             async with self.session_maker() as session:

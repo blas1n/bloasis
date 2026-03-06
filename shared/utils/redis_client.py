@@ -7,7 +7,7 @@ Provides async Redis operations for caching with JSON serialization support.
 import json
 import logging
 import os
-from typing import Any, Optional
+from typing import Any
 
 import redis.asyncio as redis
 from redis.exceptions import RedisError
@@ -22,6 +22,7 @@ class RedisClient:
     Uses environment variables for configuration:
     - REDIS_HOST: Redis server hostname (default: 'redis')
     - REDIS_PORT: Redis server port (default: 6379)
+    - REDIS_PASSWORD: Redis server password (default: None)
 
     Example:
         client = RedisClient()
@@ -31,17 +32,16 @@ class RedisClient:
         await client.close()
     """
 
-    def __init__(self, host: Optional[str] = None, port: Optional[int] = None) -> None:
-        """
-        Initialize Redis client configuration.
-
-        Args:
-            host: Redis server hostname. Defaults to REDIS_HOST env var or 'redis'.
-            port: Redis server port. Defaults to REDIS_PORT env var or 6379.
-        """
+    def __init__(
+        self,
+        host: str | None = None,
+        port: int | None = None,
+        password: str | None = None,
+    ) -> None:
         self.host: str = host if host is not None else (os.getenv("REDIS_HOST") or "redis")
         self.port: int = port if port is not None else int(os.getenv("REDIS_PORT") or "6379")
-        self.client: Optional[redis.Redis] = None  # type: ignore[type-arg]
+        self.password: str | None = password or os.getenv("REDIS_PASSWORD") or None
+        self.client: redis.Redis | None = None  # type: ignore[type-arg]
 
     async def connect(self) -> None:
         """
@@ -54,6 +54,7 @@ class RedisClient:
             self.client = redis.Redis(
                 host=self.host,
                 port=self.port,
+                password=self.password,
                 decode_responses=True,
             )
             await self.client.ping()  # type: ignore[misc]
@@ -66,7 +67,9 @@ class RedisClient:
                 "Redis connection failed",
                 extra={"host": self.host, "port": self.port, "error": str(e)},
             )
-            raise ConnectionError(f"Failed to connect to Redis at {self.host}:{self.port}: {e}") from e
+            raise ConnectionError(
+                f"Failed to connect to Redis at {self.host}:{self.port}: {e}"
+            ) from e
 
     async def close(self) -> None:
         """
@@ -80,7 +83,7 @@ class RedisClient:
                 extra={"host": self.host, "port": self.port},
             )
 
-    async def get(self, key: str) -> Optional[Any]:
+    async def get(self, key: str) -> Any | None:
         """
         Get a value from Redis.
 
