@@ -73,7 +73,7 @@ class UserService:
         row = await self.user_repo.find_by_id(user_id)
         if not row:
             return None
-        return {"userId": row.user_id, "name": row.name or "", "email": row.email}
+        return {"userId": str(row.user_id), "name": row.name or "", "email": row.email}
 
     def validate_token(self, token: str) -> str | None:
         """Validate JWT access token. Returns user_id or None."""

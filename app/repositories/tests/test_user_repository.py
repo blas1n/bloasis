@@ -176,6 +176,7 @@ class TestGetBrokerConfig:
 
 class TestUpsertBrokerConfig:
     async def test_creates_new(self, mock_session):
+        mock_session.get = AsyncMock(return_value=None)
         postgres = _make_mock_postgres(mock_session)
         repo = UserRepository(postgres=postgres)
         await repo.upsert_broker_config("user-1", "api_key", "encrypted_value")
@@ -183,7 +184,7 @@ class TestUpsertBrokerConfig:
 
     async def test_updates_existing(self, mock_session):
         existing = MagicMock(encrypted_value="old_value")
-        mock_session.execute.return_value.scalar_one_or_none.return_value = existing
+        mock_session.get = AsyncMock(return_value=existing)
 
         postgres = _make_mock_postgres(mock_session)
         repo = UserRepository(postgres=postgres)

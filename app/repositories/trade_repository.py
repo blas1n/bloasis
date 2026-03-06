@@ -4,6 +4,7 @@ Handles trade recording + position updates atomically using SELECT FOR UPDATE
 to prevent race conditions on concurrent orders.
 """
 
+import uuid as uuid_mod
 from decimal import Decimal
 
 from sqlalchemy import select
@@ -11,6 +12,13 @@ from sqlalchemy import select
 from shared.utils.postgres_client import PostgresClient
 
 from .models import PositionRecord, TradeRecord
+
+
+def _to_uuid(user_id: str) -> uuid_mod.UUID | str:
+    try:
+        return uuid_mod.UUID(user_id) if isinstance(user_id, str) else user_id
+    except ValueError:
+        return user_id
 
 
 class TradeRepository:
@@ -21,7 +29,7 @@ class TradeRepository:
         async with self.postgres.get_session() as session:
             result = await session.execute(
                 select(TradeRecord)
-                .where(TradeRecord.user_id == user_id)
+                .where(TradeRecord.user_id == _to_uuid(user_id))
                 .order_by(TradeRecord.executed_at.desc())
                 .limit(limit)
             )
@@ -86,7 +94,7 @@ class TradeRepository:
             # 2. Insert trade record (after sell logic so actual_qty and realized_pnl are known)
             session.add(
                 TradeRecord(
-                    user_id=user_id,
+                    user_id=_to_uuid(user_id),
                     order_id=order_id,
                     symbol=symbol,
                     action=side.upper(),

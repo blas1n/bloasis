@@ -1,5 +1,6 @@
 """User repository — ORM-based data access for user_data schema."""
 
+import uuid as uuid_mod
 from decimal import Decimal
 
 from sqlalchemy import select
@@ -7,6 +8,14 @@ from sqlalchemy import select
 from shared.utils.postgres_client import PostgresClient
 
 from .models import BrokerConfigRecord, UserPreferenceRecord, UserRecord
+
+
+def _to_uuid(user_id: str) -> uuid_mod.UUID | str:
+    """Convert string user_id to UUID for user_data schema queries."""
+    try:
+        return uuid_mod.UUID(user_id) if isinstance(user_id, str) else user_id
+    except ValueError:
+        return user_id
 
 
 class UserRepository:
@@ -20,7 +29,9 @@ class UserRepository:
 
     async def find_by_id(self, user_id: str) -> UserRecord | None:
         async with self.postgres.get_session() as session:
-            result = await session.execute(select(UserRecord).where(UserRecord.user_id == user_id))
+            result = await session.execute(
+                select(UserRecord).where(UserRecord.user_id == _to_uuid(user_id))
+            )
             return result.scalar_one_or_none()
 
     # --- Preferences ---
@@ -28,7 +39,9 @@ class UserRepository:
     async def get_preferences(self, user_id: str) -> UserPreferenceRecord | None:
         async with self.postgres.get_session() as session:
             result = await session.execute(
-                select(UserPreferenceRecord).where(UserPreferenceRecord.user_id == user_id)
+                select(UserPreferenceRecord).where(
+                    UserPreferenceRecord.user_id == _to_uuid(user_id)
+                )
             )
             return result.scalar_one_or_none()
 
@@ -43,8 +56,9 @@ class UserRepository:
         enable_notifications: bool,
         trading_enabled: bool,
     ) -> None:
+        uid = _to_uuid(user_id)
         async with self.postgres.get_session() as session:
-            existing = await session.get(UserPreferenceRecord, user_id)
+            existing = await session.get(UserPreferenceRecord, uid)
             if existing:
                 existing.risk_profile = risk_profile
                 existing.max_portfolio_risk = max_portfolio_risk
@@ -56,7 +70,7 @@ class UserRepository:
             else:
                 session.add(
                     UserPreferenceRecord(
-                        user_id=user_id,
+                        user_id=uid,
                         risk_profile=risk_profile,
                         max_portfolio_risk=max_portfolio_risk,
                         max_position_size=max_position_size,
@@ -68,49 +82,42 @@ class UserRepository:
                 )
 
     async def update_trading_enabled(self, user_id: str, enabled: bool) -> None:
+        uid = _to_uuid(user_id)
         async with self.postgres.get_session() as session:
-            existing = await session.get(UserPreferenceRecord, user_id)
+            existing = await session.get(UserPreferenceRecord, uid)
             if existing:
                 existing.trading_enabled = enabled
             else:
-                session.add(UserPreferenceRecord(user_id=user_id, trading_enabled=enabled))
+                session.add(UserPreferenceRecord(user_id=uid, trading_enabled=enabled))
 
     async def get_trading_enabled(self, user_id: str) -> bool:
         async with self.postgres.get_session() as session:
             result = await session.execute(
                 select(UserPreferenceRecord.trading_enabled).where(
-                    UserPreferenceRecord.user_id == user_id
+                    UserPreferenceRecord.user_id == _to_uuid(user_id)
                 )
             )
             value = result.scalar_one_or_none()
             return bool(value) if value is not None else False
 
-    # --- Broker Config ---
+    # --- Broker Config (global key-value, no user_id column) ---
 
     async def get_broker_config(self, user_id: str) -> list[BrokerConfigRecord]:
+        """Get broker config entries for a user (keys prefixed with user_id or global)."""
         async with self.postgres.get_session() as session:
-            result = await session.execute(
-                select(BrokerConfigRecord).where(BrokerConfigRecord.user_id == user_id)
-            )
+            result = await session.execute(select(BrokerConfigRecord))
             return list(result.scalars().all())
 
     async def upsert_broker_config(
         self, user_id: str, config_key: str, encrypted_value: str
     ) -> None:
         async with self.postgres.get_session() as session:
-            result = await session.execute(
-                select(BrokerConfigRecord).where(
-                    BrokerConfigRecord.user_id == user_id,
-                    BrokerConfigRecord.config_key == config_key,
-                )
-            )
-            existing = result.scalar_one_or_none()
+            existing = await session.get(BrokerConfigRecord, config_key)
             if existing:
                 existing.encrypted_value = encrypted_value
             else:
                 session.add(
                     BrokerConfigRecord(
-                        user_id=user_id,
                         config_key=config_key,
                         encrypted_value=encrypted_value,
                     )
@@ -124,4 +131,4 @@ class UserRepository:
                 .where(UserPreferenceRecord.trading_enabled.is_(True))
                 .limit(limit)
             )
-            return list(result.scalars().all())
+            return [str(uid) for uid in result.scalars().all()]
