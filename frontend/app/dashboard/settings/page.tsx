@@ -2,9 +2,12 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { api } from "@/lib/api";
+import { useAuth } from "@/lib/auth-context";
 import type { BrokerStatus } from "@/lib/types";
 
 export default function SettingsPage() {
+  const { user } = useAuth();
+  const userId = user?.userId ?? "";
   const [apiKey, setApiKey] = useState("");
   const [secretKey, setSecretKey] = useState("");
   const [paper, setPaper] = useState(true);
@@ -16,11 +19,11 @@ export default function SettingsPage() {
   } | null>(null);
 
   const checkStatus = useCallback(async () => {
-    const res = await api.getBrokerStatus();
+    const res = await api.getBrokerStatus(userId);
     if (!res.error) {
       setStatus(res.data);
     }
-  }, []);
+  }, [userId]);
 
   useEffect(() => {
     checkStatus();
@@ -36,7 +39,7 @@ export default function SettingsPage() {
     setMessage(null);
 
     // 1. Save credentials
-    const saveRes = await api.updateBrokerConfig({ apiKey, secretKey, paper });
+    const saveRes = await api.updateBrokerConfig(userId, { apiKey, secretKey, paper });
     if (saveRes.error) {
       setMessage({ type: "error", text: saveRes.error });
       setSaving(false);
@@ -44,7 +47,7 @@ export default function SettingsPage() {
     }
 
     // 2. Test connection with saved credentials
-    const testRes = await api.getBrokerStatus();
+    const testRes = await api.getBrokerStatus(userId);
     if (testRes.error) {
       setMessage({ type: "error", text: testRes.error });
     } else if (!testRes.data.connected) {

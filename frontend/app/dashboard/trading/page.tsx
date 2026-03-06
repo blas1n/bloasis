@@ -3,9 +3,11 @@
 import { AITradingControl } from "@/components/trading/AITradingControl";
 import { RiskProfileCard } from "@/components/trading/RiskProfileCard";
 import { TradingLog } from "@/components/trading/TradingLog";
+import { useAuth } from "@/lib/auth-context";
 
 export default function TradingPage() {
-  const userId = "00000000-0000-0000-0000-000000000001";
+  const { user } = useAuth();
+  const userId = user?.userId ?? "";
 
   return (
     <div className="p-8 space-y-8">

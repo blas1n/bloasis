@@ -5,10 +5,12 @@ import { MarketRegime } from "@/components/dashboard/MarketRegime";
 import { AITradingControl } from "@/components/trading/AITradingControl";
 import { MetricCard } from "@/components/dashboard/MetricCard";
 import { usePortfolio } from "@/hooks/usePortfolio";
+import { useAuth } from "@/lib/auth-context";
 import { formatCurrency, formatPercent } from "@/lib/formatters";
 
 export default function DashboardPage() {
-  const userId = "00000000-0000-0000-0000-000000000001";
+  const { user } = useAuth();
+  const userId = user?.userId ?? "";
   const { summary, isLoading, error, refetch } = usePortfolio(userId);
 
   return (

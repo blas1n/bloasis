@@ -1,18 +1,15 @@
 /**
- * API client for BLOASIS backend services via Kong Gateway.
+ * API client for BLOASIS backend (FastAPI monolith).
  */
 
 import type {
   ApiResponse,
   BrokerConfig,
   BrokerStatus,
-  CandidateSymbolsResponse,
   MarketRegimeResponse,
   PersonalizedStrategyResponse,
   PortfolioSummary,
   PositionsResponse,
-  SectorAnalysisResponse,
-  StockPicksResponse,
   SyncResponse,
   TradeHistoryResponse,
   TradingStatus,
@@ -21,10 +18,8 @@ import type {
   RiskProfile,
 } from "./types";
 
-// In browser: go through Next.js API proxy (/api/[...path] → Envoy Gateway)
-// NEXT_PUBLIC_API_URL can override (e.g. for production direct access)
-const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_URL || "/api";
+// In browser: go through Next.js API proxy (/api/[...path] → FastAPI)
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "/api";
 
 class ApiClient {
   private baseUrl: string;
@@ -57,69 +52,82 @@ class ApiClient {
     }
   }
 
-  // Portfolio endpoints
-  async getPortfolioSummary(userId: string): Promise<ApiResponse<PortfolioSummary>> {
-    return this.request<PortfolioSummary>(`/v1/portfolio/${userId}/summary`);
+  // ========================================================================
+  // Portfolio — /v1/portfolios/{userId}/*
+  // ========================================================================
+
+  async getPortfolioSummary(
+    userId: string
+  ): Promise<ApiResponse<PortfolioSummary>> {
+    return this.request<PortfolioSummary>(`/v1/portfolios/${userId}`);
   }
 
   async getPositions(userId: string): Promise<ApiResponse<PositionsResponse>> {
-    return this.request<PositionsResponse>(`/v1/portfolio/${userId}/positions`);
+    return this.request<PositionsResponse>(
+      `/v1/portfolios/${userId}/positions`
+    );
   }
 
   async getTradeHistory(
     userId: string,
-    options?: { symbol?: string; limit?: number }
+    options?: { limit?: number }
   ): Promise<ApiResponse<TradeHistoryResponse>> {
     const params = new URLSearchParams();
-    if (options?.symbol) params.set("symbol", options.symbol);
     if (options?.limit) params.set("limit", options.limit.toString());
     const query = params.toString() ? `?${params.toString()}` : "";
     return this.request<TradeHistoryResponse>(
-      `/v1/portfolio/${userId}/trades${query}`
+      `/v1/portfolios/${userId}/trades${query}`
     );
   }
 
-  // Market Regime endpoints
+  async syncWithAlpaca(userId: string): Promise<ApiResponse<SyncResponse>> {
+    return this.request<SyncResponse>(`/v1/portfolios/${userId}/sync`, {
+      method: "POST",
+    });
+  }
+
+  // ========================================================================
+  // Market — /v1/market/*
+  // ========================================================================
+
   async getCurrentRegime(): Promise<ApiResponse<MarketRegimeResponse>> {
-    return this.request<MarketRegimeResponse>("/v1/market-regime/current");
+    return this.request<MarketRegimeResponse>("/v1/market/regimes/current");
   }
 
-  // Classification endpoints (Stage 1-2)
-  async getSectorAnalysis(regime: string): Promise<ApiResponse<SectorAnalysisResponse>> {
-    return this.request<SectorAnalysisResponse>(
-      `/v1/classification/sectors?regime=${regime}`
+  // ========================================================================
+  // Signals — /v1/users/{userId}/signals
+  // ========================================================================
+
+  async getSignals(
+    userId: string
+  ): Promise<ApiResponse<PersonalizedStrategyResponse>> {
+    return this.request<PersonalizedStrategyResponse>(
+      `/v1/users/${userId}/signals`
     );
   }
 
-  async getCandidateSymbols(): Promise<ApiResponse<CandidateSymbolsResponse>> {
-    return this.request<CandidateSymbolsResponse>("/v1/classification/candidates");
-  }
-
-  // Strategy endpoint (Stage 3 + AI Flow)
-  async getPersonalizedStrategy(userId: string): Promise<ApiResponse<PersonalizedStrategyResponse>> {
-    return this.request<PersonalizedStrategyResponse>("/v1/strategy/personalized", {
-      method: "POST",
-      body: JSON.stringify({ user_id: userId }),
-    });
-  }
-
-  async getStockPicks(
-    userId: string,
-    maxPicks: number = 15
-  ): Promise<ApiResponse<StockPicksResponse>> {
-    return this.request<StockPicksResponse>("/v1/strategy/picks", {
-      method: "POST",
-      body: JSON.stringify({ user_id: userId, max_picks: maxPicks }),
-    });
+  async triggerAnalysis(
+    userId: string
+  ): Promise<ApiResponse<PersonalizedStrategyResponse>> {
+    return this.request<PersonalizedStrategyResponse>(
+      `/v1/users/${userId}/signals`,
+      { method: "POST" }
+    );
   }
 
   // ========================================================================
-  // Trading Control APIs
+  // Trading Control — /v1/users/{userId}/trading
   // ========================================================================
 
-  async startTrading(userId: string): Promise<ApiResponse<TradingControlResponse>> {
+  async getTradingStatus(userId: string): Promise<ApiResponse<TradingStatus>> {
+    return this.request<TradingStatus>(`/v1/users/${userId}/trading`);
+  }
+
+  async startTrading(
+    userId: string
+  ): Promise<ApiResponse<TradingControlResponse>> {
     return this.request<TradingControlResponse>(
-      `/v1/users/${userId}/trading/start`,
+      `/v1/users/${userId}/trading`,
       { method: "POST" }
     );
   }
@@ -129,79 +137,54 @@ class ApiClient {
     stopMode: "hard" | "soft" = "soft"
   ): Promise<ApiResponse<TradingControlResponse>> {
     return this.request<TradingControlResponse>(
-      `/v1/users/${userId}/trading/stop`,
+      `/v1/users/${userId}/trading`,
       {
-        method: "POST",
-        body: JSON.stringify({ stop_mode: stopMode }),
+        method: "DELETE",
+        body: JSON.stringify({ mode: stopMode }),
       }
     );
   }
 
-  async getTradingStatus(userId: string): Promise<ApiResponse<TradingStatus>> {
-    return this.request<TradingStatus>(`/v1/users/${userId}/trading/status`);
-  }
-
   // ========================================================================
-  // User Preferences APIs
+  // User Preferences — /v1/users/{userId}/preferences
   // ========================================================================
 
-  async getUserPreferences(userId: string): Promise<ApiResponse<UserPreferences>> {
-    const result = await this.request<{ preferences: UserPreferences }>(
-      `/v1/users/${userId}/preferences`
-    );
-    if (result.data?.preferences) {
-      return { data: result.data.preferences };
-    }
-    return { data: null as unknown as UserPreferences, error: result.error };
-  }
-
-  async updateRiskProfile(
-    userId: string,
-    riskProfile: RiskProfile
+  async getUserPreferences(
+    userId: string
   ): Promise<ApiResponse<UserPreferences>> {
-    const result = await this.request<{ preferences: UserPreferences }>(
-      `/v1/users/${userId}/preferences`,
-      {
-        method: "PATCH",
-        body: JSON.stringify({
-          preferences: { risk_profile: riskProfile },
-        }),
-      }
-    );
-    if (result.data?.preferences) {
-      return { data: result.data.preferences };
-    }
-    return { data: null as unknown as UserPreferences, error: result.error };
+    return this.request<UserPreferences>(`/v1/users/${userId}/preferences`);
   }
+
+  async updatePreferences(
+    userId: string,
+    prefs: UserPreferences
+  ): Promise<ApiResponse<UserPreferences>> {
+    return this.request<UserPreferences>(`/v1/users/${userId}/preferences`, {
+      method: "PUT",
+      body: JSON.stringify(prefs),
+    });
+  }
+
   // ========================================================================
-  // Broker Config APIs
+  // Broker Config — /v1/users/{userId}/broker
   // ========================================================================
 
   async updateBrokerConfig(
+    userId: string,
     config: BrokerConfig
-  ): Promise<ApiResponse<{ success: boolean }>> {
-    return this.request<{ success: boolean }>("/v1/settings/broker", {
-      method: "PATCH",
+  ): Promise<ApiResponse<BrokerStatus>> {
+    return this.request<BrokerStatus>(`/v1/users/${userId}/broker`, {
+      method: "PUT",
       body: JSON.stringify({
-        alpaca_api_key: config.apiKey,
-        alpaca_secret_key: config.secretKey,
+        apiKey: config.apiKey,
+        secretKey: config.secretKey,
         paper: config.paper,
       }),
     });
   }
 
-  async getBrokerStatus(): Promise<ApiResponse<BrokerStatus>> {
-    return this.request<BrokerStatus>("/v1/settings/broker/status");
-  }
-
-  // ========================================================================
-  // Portfolio Sync APIs
-  // ========================================================================
-
-  async syncWithAlpaca(userId: string): Promise<ApiResponse<SyncResponse>> {
-    return this.request<SyncResponse>(`/v1/portfolio/${userId}/sync`, {
-      method: "POST",
-    });
+  async getBrokerStatus(userId: string): Promise<ApiResponse<BrokerStatus>> {
+    return this.request<BrokerStatus>(`/v1/users/${userId}/broker`);
   }
 }
 

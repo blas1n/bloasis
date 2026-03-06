@@ -24,8 +24,12 @@ export function useRiskProfile(userId: string) {
 
   const updateRiskProfile = useCallback(
     async (riskProfile: RiskProfile) => {
+      if (!preferences) return;
       setIsLoading(true);
-      const { data, error: apiError } = await api.updateRiskProfile(userId, riskProfile);
+      const { data, error: apiError } = await api.updatePreferences(userId, {
+        ...preferences,
+        riskProfile,
+      });
 
       if (apiError) {
         setError(apiError);
@@ -35,7 +39,7 @@ export function useRiskProfile(userId: string) {
 
       setIsLoading(false);
     },
-    [userId]
+    [userId, preferences]
   );
 
   useEffect(() => {

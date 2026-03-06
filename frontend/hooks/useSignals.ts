@@ -20,7 +20,7 @@ export function useSignals(userId: string): UseSignalsResult {
     setIsLoading(true);
     setError(null);
 
-    const result = await api.getPersonalizedStrategy(userId);
+    const result = await api.getSignals(userId);
 
     if (result.error) {
       setError(result.error);
