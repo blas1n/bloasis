@@ -1,0 +1,107 @@
+[project]
+name = "bloasis"
+version = "2.0.0"
+description = "BLOASIS AI Trading Platform (monolith)"
+requires-python = ">=3.11"
+
+dependencies = [
+    # Web framework
+    "fastapi>=0.110.0",
+    "uvicorn[standard]>=0.27.0",
+
+    # Database
+    "sqlalchemy[asyncio]>=2.0.23",
+    "asyncpg>=0.29.0",
+    "alembic>=1.13.0",
+
+    # Caching
+    "redis[hiredis]>=5.0.1",
+
+    # AI / LLM
+    "litellm>=1.55.0",
+
+    # Data / Analysis
+    "yfinance>=0.2.30",
+    "pandas>=2.0.0",
+    "numpy>=1.24.0",
+    "TA-Lib>=0.4.32",
+    "vectorbt>=0.25.0",
+    "riskfolio-lib>=7.0.0",
+
+    # Validation / Config
+    "pydantic>=2.4.2",
+    "pydantic-settings>=2.0.0",
+    "python-dotenv>=1.0.0",
+
+    # Auth
+    "pyjwt>=2.8.0",
+    "cryptography>=41.0.0",
+    "bcrypt>=4.0.0",
+
+    # Rate limiting
+    "slowapi>=0.1.9",
+
+    # Macro data
+    "fredapi>=0.5.0",
+
+    # Utilities
+    "tenacity>=9.0.0",
+    "pyyaml>=6.0.1",
+    "httpx>=0.27.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-cov>=4.1.0",
+    "ruff>=0.4.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app", "shared"]
+
+[tool.pytest.ini_options]
+pythonpath = ["/workspace"]
+asyncio_mode = "auto"
+testpaths = ["app"]
+addopts = [
+    "-v",
+    "--strict-markers",
+    "--cov=app",
+    "--cov-report=term-missing",
+    "--cov-fail-under=80",
+]
+
+[tool.coverage.run]
+omit = [
+    "app/main.py",
+    "app/config.py",
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+exclude = [
+    ".git",
+    "__pycache__",
+    ".pytest_cache",
+    ".venv",
+    "services/",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "UP",  # pyupgrade
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app", "shared"]
