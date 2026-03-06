@@ -1,60 +1,38 @@
 ---
-description: gRPC communication rules for internal MSA services
+description: REST API rules for BLOASIS FastAPI monolith
 ---
 
-# gRPC Communication Rules
+# REST API Rules
 
-## CRITICAL: Internal MSA Communication
+## Architecture: FastAPI Monolith
 
-**ALWAYS use gRPC for internal service-to-service communication.**
+**BLOASIS uses a single FastAPI process. No gRPC, no message brokers.**
 
-**NEVER use HTTP/REST between backend services.**
+### API Design
 
-### Why
-
-- gRPC is 10x faster than HTTP (10-50ms vs 100-500ms)
-- This is a core architectural decision
-- Performance is critical for trading algorithms
-
-### Implementation
-
-1. **All .proto files MUST include HTTP annotations** (for Envoy Gateway transcoding)
-2. **Backend services implement gRPC only** (not HTTP)
-3. **Envoy Gateway handles REST for external clients** (automatic transcoding)
-
-### Example
-
-```protobuf
-service MarketRegimeService {
-  rpc GetCurrentRegime(RegimeRequest) returns (RegimeResponse) {
-    option (google.api.http) = {
-      get: "/v1/market-regime/current"
-    };
-  }
-}
-```
+- RESTful endpoints under `/v1/` prefix
+- JWT authentication on all endpoints except `/v1/auth/*` and `/health`
+- CamelCase JSON responses (via CamelJSONResponse)
+- Pydantic request validation
 
 ### Error Handling
 
-**ALWAYS handle gRPC errors explicitly:**
-
 ```python
-try:
-    response = await stub.GetStrategy(request)
-except grpc.RpcError as e:
-    if e.code() == grpc.StatusCode.UNAVAILABLE:
-        # Service unavailable
-        pass
-    elif e.code() == grpc.StatusCode.DEADLINE_EXCEEDED:
-        # Timeout
-        pass
-    raise
+from fastapi import HTTPException
+
+# Return appropriate HTTP status codes
+raise HTTPException(status_code=404, detail="Resource not found")
+raise HTTPException(status_code=401, detail="Invalid token")
+raise HTTPException(status_code=403, detail="Access denied")
 ```
 
-### Verification
+### External API Calls
 
-Before committing any service:
-- [ ] Uses gRPC for inter-service calls
-- [ ] .proto has HTTP annotations
-- [ ] Handles gRPC errors
-- [ ] No HTTP client imports (requests, httpx) for internal calls
+Use `httpx` for external HTTP calls (e.g., Alpaca API):
+
+```python
+import httpx
+
+async with httpx.AsyncClient() as client:
+    resp = await client.post(url, json=payload, timeout=30)
+```

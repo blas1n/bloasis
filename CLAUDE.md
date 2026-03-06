@@ -1,64 +1,81 @@
 # BLOASIS
 
-AI-powered multi-asset trading platform combining LLMs and Reinforcement Learning.
+AI-powered multi-asset trading platform combining LLMs and deterministic risk rules.
 
 ## Tech Stack
 
-- **Backend**: Python 3.11+ (gRPC-only services, no FastAPI/HTTP)
-- **AI/ML**: Claude (claude-haiku-4-5-20251001), LangGraph (multi-agent orchestration)
-- **Backtesting**: VectorBT, FinRL
-- **Infra**: Envoy Gateway (gRPC→REST), Redpanda (messaging), PostgreSQL/TimescaleDB
+- **Backend**: Python 3.11+ (FastAPI monolith)
+- **AI/ML**: Claude Haiku (via LiteLLM), deterministic risk rules, 6-factor scoring
+- **Data**: yfinance (market data), TA-Lib (technical indicators)
+- **Infra**: PostgreSQL/TimescaleDB, Redis (caching), Docker Compose
 - **Frontend**: TypeScript (React/Next.js)
-- **Tooling**: uv (package manager), buf (proto), ruff (lint/format)
+- **Tooling**: uv (package manager), ruff (lint/format), Alembic (migrations)
 
 ## Project Structure
 
 ```
-services/           # Microservices (gRPC-only, Python)
-  auth/             # Authentication
-  backtesting/      # Strategy backtesting
-  classification/   # Asset classification
-  executor/         # Trade execution
-  market-data/      # Market data ingestion
-  market-regime/    # Market regime detection
-  portfolio/        # Portfolio management
-  risk-committee/   # Risk assessment
-  strategy/         # Strategy generation
-  user/             # User management
-shared/             # Cross-service code
-  proto/            # .proto definitions (buf managed)
-  generated/        # Auto-generated proto files (gitignored)
-  ai_clients/       # Claude API wrappers
-  models/           # Shared data models
-  prompts/          # LLM prompt templates
-  utils/            # Shared utilities
-tests/              # Integration & E2E tests
+app/                # FastAPI monolith
+  main.py           # Application entry point + lifespan
+  config.py         # Unified Pydantic Settings
+  dependencies.py   # FastAPI dependency injection + auth
+  routers/          # API endpoints (REST)
+    auth.py         # /v1/auth/tokens
+    market.py       # /v1/market/regimes/current
+    signals.py      # /v1/users/{userId}/signals
+    trading.py      # /v1/users/{userId}/trading
+    users.py        # /v1/users/{userId}/preferences, broker
+    portfolios.py   # /v1/portfolios/{userId}
+  services/         # Business logic layer
+    strategy.py     # Analysis pipeline (regime → classification → scoring → signals)
+    executor.py     # Order execution with risk checks + Alpaca API
+    market_regime.py # Market regime classification (LLM)
+    classification.py # Sector/asset classification (LLM)
+    market_data.py  # yfinance data + caching
+    portfolio.py    # Position/trade management
+    user.py         # Auth, preferences, broker config
+  core/             # Pure computation (no I/O)
+    models.py       # Pydantic domain models
+    risk_rules.py   # Deterministic risk evaluation
+    signal_generator.py # ATR-based signal generation
+    factor_scoring.py   # 6-factor stock scoring engine
+    technical_indicators.py # TA-Lib calculations
+    regime_classifier.py    # Regime response parsing
+    prompts/        # LLM prompt templates
+  repositories/     # Database access (SQLAlchemy ORM)
+    models.py       # ORM table definitions
+    user_repository.py
+    portfolio_repository.py
+    trade_repository.py
+  shared/utils/     # App-level utilities
+    response.py     # CamelCase JSON response
+    cache.py        # @cache_aside decorator
+shared/             # Shared infrastructure clients
+  ai_clients/       # LLM client (LiteLLM)
+  utils/            # PostgresClient, RedisClient
 frontend/           # Next.js frontend
-infra/              # Infrastructure configs
-deploy/             # Deployment configs
+deploy/             # Docker Compose configs
 ```
 
 ## Quick Commands
 
 ```bash
-make proto-generate  # Generate proto files + Envoy descriptor
-make lint            # ruff check shared/ services/
-make test            # pytest with 80% coverage gate
-make check           # lint + proto-lint + test
+ruff check app/ shared/          # Lint
+ruff format app/ shared/         # Format
+pytest app/ --cov=app            # Test with coverage
+uvicorn app.main:app --reload    # Dev server
 ```
 
 ## Architecture Rules (Quick Reference)
 
 Full rules in `.claude/rules/` — these are the non-negotiable ones:
 
-- **gRPC only** between services (no HTTP/REST internally)
-- **Redpanda** for messaging (not Redis Pub/Sub or RabbitMQ)
-- **Envoy Gateway** handles external REST via gRPC-to-REST transcoding
-- **All .proto files** must have HTTP annotations for Envoy
+- **FastAPI REST** — single monolith, no gRPC or message brokers
+- **Repository pattern** — all DB access via `app/repositories/` (SQLAlchemy ORM, no raw SQL)
+- **Pure core/** — no I/O in `app/core/`, only computation and models
 - **Decimal** for all financial calculations (never float)
 - **Type hints** on all public functions
+- **JWT auth** on all endpoints except `/v1/auth/*` and `/health`
 - **No sys.path.insert()** — use PYTHONPATH
-- **No service-level Dockerfiles** or requirements.txt — use pyproject.toml + uv
 - **No hardcoded secrets** — use .env files (gitignored)
 - **Tests mandatory** — 80% minimum coverage, mock all external APIs
 - **ruff check** must pass before commit
@@ -69,8 +86,16 @@ Full rules in `.claude/rules/` — these are the non-negotiable ones:
 - Format: `type(scope): short description`
 - Types: feat, fix, refactor, test, docs, chore
 
+## Caching Strategy (3-Tier)
+
+| Tier | Data | TTL | Shared? |
+|------|------|-----|---------|
+| Tier 1 | Market regime, sector candidates | 6h | All users |
+| Tier 2 | User analysis results | 1h | Per-user |
+| Tier 3 | Preferences, OHLCV, stock info | 5m-30d | Per-user/symbol |
+
 ## Cost Optimization
 
-- **Hybrid 3-Tier**: Shared analysis (Tier 1-2) cached across users + per-user customization (Tier 3)
+- **Hybrid 3-Tier**: Shared analysis (Tier 1) cached across users + per-user customization (Tier 2-3)
 - Claude Haiku for classification, rule-based fallback when no API key
-- Reduces API costs by ~93%
+- Deterministic risk rules (no LLM for risk evaluation)

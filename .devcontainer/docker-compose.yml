@@ -32,10 +32,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      redpanda:
-        condition: service_healthy
-      consul:
-        condition: service_healthy
     networks:
       - bloasis-network
 
@@ -74,74 +70,12 @@ services:
     networks:
       - bloasis-network
 
-  redpanda:
-    image: docker.redpanda.com/redpandadata/redpanda:v24.1.1
-    container_name: bloasis-redpanda
-    restart: unless-stopped
-    command:
-      - redpanda
-      - start
-      - --kafka-addr internal://0.0.0.0:9092
-      - --advertise-kafka-addr internal://redpanda:9092
-      - --pandaproxy-addr internal://0.0.0.0:8082
-      - --advertise-pandaproxy-addr internal://redpanda:8082
-      - --schema-registry-addr internal://0.0.0.0:8081
-      - --rpc-addr redpanda:33145
-      - --advertise-rpc-addr redpanda:33145
-      - --mode dev-container
-      - --smp 1
-      - --memory 1G
-    volumes:
-      - redpanda-data:/var/lib/redpanda/data
-    healthcheck:
-      test: ["CMD-SHELL", "rpk cluster health | grep -E 'Healthy:.+true' || exit 1"]
-      interval: 15s
-      timeout: 10s
-      retries: 5
-      start_period: 45s
-    networks:
-      - bloasis-network
-
-  consul:
-    image: hashicorp/consul:1.18
-    container_name: bloasis-consul
-    restart: unless-stopped
-    command: agent -dev -ui -client=0.0.0.0
-    ports:
-      - "8500:8500"  # HTTP API & UI
-      - "8600:8600/udp"  # DNS
-    volumes:
-      - consul-data:/consul/data
-    healthcheck:
-      test: ["CMD", "consul", "members"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    networks:
-      - bloasis-network
-
-  envoy:
-    image: envoyproxy/envoy:v1.29-latest
-    container_name: bloasis-envoy
-    extra_hosts:
-      - "host.docker.internal:host-gateway"  # Access host's localhost
-    volumes:
-      - ../infra/envoy/envoy.yaml:/etc/envoy/envoy.yaml:ro
-      - ../infra/envoy/proto.pb:/etc/envoy/proto.pb:ro
-    ports:
-      - "8081:8000"  # API Gateway (gRPC-JSON transcoding)
-      - "9901:9901"  # Admin interface
-    command: ["-c", "/etc/envoy/envoy.yaml"]
-    networks:
-      - bloasis-network
 
 volumes:
   claude-code-bashhistory:
   claude-code-config:
   postgres-data:
   redis-data:
-  redpanda-data:
-  consul-data:
 
 networks:
   bloasis-network:
