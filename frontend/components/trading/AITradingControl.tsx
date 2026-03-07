@@ -11,12 +11,12 @@ export function AITradingControl({ userId }: { userId: string }) {
   const [brokerConfigured, setBrokerConfigured] = useState<boolean | null>(null);
 
   useEffect(() => {
-    api.getBrokerStatus().then((res) => {
+    api.getBrokerStatus(userId).then((res) => {
       if (!res.error) {
         setBrokerConfigured(res.data.configured);
       }
     });
-  }, []);
+  }, [userId]);
 
   const handleToggle = async () => {
     if (status?.tradingEnabled) {

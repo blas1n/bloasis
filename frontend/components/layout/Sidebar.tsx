@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { useAuth } from "@/lib/auth-context";
 
 interface NavItem {
   name: string;
@@ -51,6 +52,13 @@ const navigation: NavItem[] = [
 
 export function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
+  const { user, logout } = useAuth();
+
+  async function handleLogout() {
+    await logout();
+    router.push("/login");
+  }
 
   return (
     <div className="flex flex-col w-[180px] bg-bg-base min-h-screen">
@@ -81,16 +89,26 @@ export function Sidebar() {
       </nav>
 
       {/* User Section */}
-      <div className="flex items-center px-4 py-4 border-t border-border-custom">
-        <div className="flex-shrink-0">
-          <div className="h-8 w-8 rounded-full bg-bg-elevated flex items-center justify-center">
-            <span className="text-sm font-medium text-text-primary">U</span>
+      <div className="px-4 py-4 border-t border-border-custom">
+        <div className="flex items-center">
+          <div className="flex-shrink-0">
+            <div className="h-8 w-8 rounded-full bg-bg-elevated flex items-center justify-center">
+              <span className="text-sm font-medium text-text-primary">
+                {user?.name?.[0]?.toUpperCase() ?? "U"}
+              </span>
+            </div>
+          </div>
+          <div className="ml-3">
+            <p className="text-sm font-medium text-text-primary">{user?.name ?? "User"}</p>
+            <p className="text-xs text-text-secondary">Paper Trading</p>
           </div>
         </div>
-        <div className="ml-3">
-          <p className="text-sm font-medium text-text-primary">Demo User</p>
-          <p className="text-xs text-text-secondary">Paper Trading</p>
-        </div>
+        <button
+          onClick={handleLogout}
+          className="mt-3 w-full text-xs text-text-secondary hover:text-text-primary transition-colors text-left"
+        >
+          Sign out
+        </button>
       </div>
     </div>
   );

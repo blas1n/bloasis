@@ -3,9 +3,11 @@
 import { PortfolioSummary } from "@/components/dashboard/PortfolioSummary";
 import { PositionsList } from "@/components/dashboard/PositionsList";
 import { usePortfolio } from "@/hooks/usePortfolio";
+import { useAuth } from "@/lib/auth-context";
 
 export default function PortfolioPage() {
-  const userId = "00000000-0000-0000-0000-000000000001";
+  const { user } = useAuth();
+  const userId = user?.userId ?? "";
   const { summary, positions, isLoading, error, refetch } = usePortfolio(userId);
 
   return (

@@ -30,6 +30,7 @@ CREATE TABLE user_data.user_preferences (
     max_portfolio_risk DECIMAL(5,4) DEFAULT 0.20 CHECK (max_portfolio_risk BETWEEN 0 AND 1),
     max_position_size DECIMAL(5,4) DEFAULT 0.10 CHECK (max_position_size BETWEEN 0 AND 1),
     preferred_sectors TEXT[] DEFAULT '{}',
+    excluded_sectors TEXT[] DEFAULT '{}',
     enable_notifications BOOLEAN DEFAULT true,
     trading_enabled BOOLEAN DEFAULT false,
     updated_at TIMESTAMPTZ DEFAULT NOW()
@@ -40,6 +41,7 @@ COMMENT ON COLUMN user_data.user_preferences.risk_profile IS 'Risk tolerance: co
 COMMENT ON COLUMN user_data.user_preferences.max_portfolio_risk IS 'Maximum portfolio risk as decimal (0-1)';
 COMMENT ON COLUMN user_data.user_preferences.max_position_size IS 'Maximum single position size as decimal (0-1)';
 COMMENT ON COLUMN user_data.user_preferences.preferred_sectors IS 'Preferred trading sectors';
+COMMENT ON COLUMN user_data.user_preferences.excluded_sectors IS 'Sectors to exclude from analysis';
 COMMENT ON COLUMN user_data.user_preferences.enable_notifications IS 'Whether to receive trading notifications';
 COMMENT ON COLUMN user_data.user_preferences.trading_enabled IS 'AI 자동 거래 활성화 여부';
 
@@ -66,11 +68,12 @@ CREATE TRIGGER update_user_preferences_updated_at
     EXECUTE FUNCTION user_data.update_updated_at_column();
 
 -- Seed demo user with fixed UUID (idempotent)
+-- Login: demo@bloasis.ai / demo1234
 INSERT INTO user_data.users (user_id, email, password_hash, name)
 VALUES (
     '00000000-0000-0000-0000-000000000001',
     'demo@bloasis.ai',
-    '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQyCgK8a0nRvO.JnJG0RsTI3S',
+    '$2b$12$6oXHl7HyxjIMn.ZtukowoOT5RhlKObEMXgBgMp1DfduOPYiyOFWX2',
     'Demo User'
 ) ON CONFLICT (user_id) DO NOTHING;
 
