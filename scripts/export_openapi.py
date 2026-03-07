@@ -1,10 +1,9 @@
-"""Export OpenAPI schema from FastAPI app to JSON file."""
-import json
-import sys
-from pathlib import Path
+"""Export OpenAPI schema from FastAPI app to JSON file.
 
-# Add workspace to path so app module can be found
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+Usage: PYTHONPATH=/workspace python scripts/export_openapi.py
+"""
+import json
+from pathlib import Path
 
 from app.main import app
 
