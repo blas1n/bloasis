@@ -1,5 +1,6 @@
 """Tests for TradeRepository — trade recording with row-level locking."""
 
+import uuid
 from contextlib import asynccontextmanager
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock
@@ -7,6 +8,8 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from app.repositories.trade_repository import TradeRepository
+
+TEST_USER_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 
 
 def _make_mock_postgres(session):
@@ -37,7 +40,7 @@ class TestRecordTradeAndUpdatePosition:
         repo = TradeRepository(postgres=postgres)
 
         await repo.record_trade_and_update_position(
-            user_id="user-1",
+            user_id=TEST_USER_ID,
             order_id="order-1",
             symbol="AAPL",
             side="buy",
@@ -62,7 +65,7 @@ class TestRecordTradeAndUpdatePosition:
         repo = TradeRepository(postgres=postgres)
 
         await repo.record_trade_and_update_position(
-            user_id="user-1",
+            user_id=TEST_USER_ID,
             order_id="order-2",
             symbol="AAPL",
             side="buy",
@@ -91,7 +94,7 @@ class TestRecordTradeAndUpdatePosition:
         repo = TradeRepository(postgres=postgres)
 
         await repo.record_trade_and_update_position(
-            user_id="user-1",
+            user_id=TEST_USER_ID,
             order_id="order-3",
             symbol="AAPL",
             side="sell",
@@ -113,7 +116,7 @@ class TestRecordTradeAndUpdatePosition:
         repo = TradeRepository(postgres=postgres)
 
         await repo.record_trade_and_update_position(
-            user_id="user-1",
+            user_id=TEST_USER_ID,
             order_id="order-4",
             symbol="AAPL",
             side="sell",

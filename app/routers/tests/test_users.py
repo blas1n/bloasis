@@ -1,5 +1,6 @@
 """Tests for users router — /v1/users/{userId}/*."""
 
+import uuid
 from unittest.mock import AsyncMock
 
 import pytest
@@ -9,7 +10,9 @@ from app.core.models import UserPreferences
 from app.dependencies import get_current_user, get_user_service
 from app.main import create_app
 
-USER_ID = "test-user-id"
+USER_ID = "00000000-0000-0000-0000-000000000001"
+OTHER_USER_ID = "00000000-0000-0000-0000-000000000002"
+USER_UUID = uuid.UUID(USER_ID)
 
 
 @pytest.fixture
@@ -21,7 +24,7 @@ def mock_user_svc():
 @pytest.fixture
 def app(mock_user_svc):
     application = create_app()
-    application.dependency_overrides[get_current_user] = lambda: USER_ID
+    application.dependency_overrides[get_current_user] = lambda: USER_UUID
     application.dependency_overrides[get_user_service] = lambda: mock_user_svc
     yield application
     application.dependency_overrides.clear()
@@ -49,7 +52,7 @@ class TestGetPreferences:
         assert "Energy" in data["excludedSectors"]
 
     def test_access_denied(self, client):
-        resp = client.get("/v1/users/other-user-id/preferences")
+        resp = client.get(f"/v1/users/{OTHER_USER_ID}/preferences")
         assert resp.status_code == 403
         assert resp.json()["detail"] == "Access denied"
 
@@ -80,7 +83,7 @@ class TestUpdatePreferences:
 
     def test_access_denied(self, client):
         resp = client.put(
-            "/v1/users/other-user-id/preferences",
+            f"/v1/users/{OTHER_USER_ID}/preferences",
             json={"riskProfile": "moderate"},
         )
         assert resp.status_code == 403
@@ -102,7 +105,7 @@ class TestGetBrokerStatus:
         assert data["connected"] is True
 
     def test_access_denied(self, client):
-        resp = client.get("/v1/users/other-user-id/broker")
+        resp = client.get(f"/v1/users/{OTHER_USER_ID}/broker")
         assert resp.status_code == 403
 
 
@@ -124,12 +127,12 @@ class TestUpdateBrokerConfig:
         data = resp.json()
         assert data["configured"] is True
         mock_user_svc.update_broker_config.assert_awaited_once_with(
-            USER_ID, "PKTEST123", "secret456", True
+            USER_UUID, "PKTEST123", "secret456", True
         )
 
     def test_access_denied(self, client):
         resp = client.put(
-            "/v1/users/other-user-id/broker",
+            f"/v1/users/{OTHER_USER_ID}/broker",
             json={"apiKey": "x", "secretKey": "y", "paper": True},
         )
         assert resp.status_code == 403

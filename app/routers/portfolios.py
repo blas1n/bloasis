@@ -1,5 +1,6 @@
 """Portfolios router — /v1/portfolios/{userId}/*"""
 
+import uuid
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, Query
@@ -12,7 +13,7 @@ router = APIRouter()
 
 @router.get("/{user_id}")
 async def get_portfolio(
-    user_id: str = Depends(verify_user_access),
+    user_id: uuid.UUID = Depends(verify_user_access),
     portfolio_svc: PortfolioService = Depends(get_portfolio_service),
 ):
     """Get portfolio summary with computed metrics."""
@@ -36,7 +37,7 @@ async def get_portfolio(
 
 @router.get("/{user_id}/positions")
 async def get_positions(
-    user_id: str = Depends(verify_user_access),
+    user_id: uuid.UUID = Depends(verify_user_access),
     portfolio_svc: PortfolioService = Depends(get_portfolio_service),
 ):
     """Get all portfolio positions."""
@@ -46,7 +47,7 @@ async def get_positions(
 
 @router.get("/{user_id}/trades")
 async def get_trades(
-    user_id: str = Depends(verify_user_access),
+    user_id: uuid.UUID = Depends(verify_user_access),
     limit: int = Query(default=20, ge=1, le=100),
     portfolio_svc: PortfolioService = Depends(get_portfolio_service),
 ):
@@ -61,7 +62,7 @@ async def get_trades(
 
 @router.post("/{user_id}/sync")
 async def sync_portfolio(
-    user_id: str = Depends(verify_user_access),
+    user_id: uuid.UUID = Depends(verify_user_access),
     portfolio_svc: PortfolioService = Depends(get_portfolio_service),
 ):
     """Sync positions from Alpaca broker."""

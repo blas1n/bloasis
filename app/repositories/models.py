@@ -82,7 +82,7 @@ class PortfolioRecord(Base):
     __table_args__ = {"schema": "trading"}
 
     id: Mapped[uuid_mod.UUID] = mapped_column(Uuid, primary_key=True, default=uuid_mod.uuid4)
-    user_id: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    user_id: Mapped[uuid_mod.UUID] = mapped_column(Uuid, unique=True, nullable=False)
     total_value: Mapped[Decimal] = mapped_column(Numeric, default=Decimal("0"))
     cash_balance: Mapped[Decimal] = mapped_column(Numeric, default=Decimal("0"))
     invested_value: Mapped[Decimal] = mapped_column(Numeric, default=Decimal("0"))
@@ -105,7 +105,7 @@ class PositionRecord(Base):
     )
 
     id: Mapped[uuid_mod.UUID] = mapped_column(Uuid, primary_key=True, default=uuid_mod.uuid4)
-    user_id: Mapped[str] = mapped_column(String, nullable=False)
+    user_id: Mapped[uuid_mod.UUID] = mapped_column(Uuid, nullable=False)
     symbol: Mapped[str] = mapped_column(String, nullable=False)
     quantity: Mapped[Decimal] = mapped_column(Numeric(18, 8), default=Decimal("0"))
     avg_cost: Mapped[Decimal] = mapped_column(Numeric, nullable=False)

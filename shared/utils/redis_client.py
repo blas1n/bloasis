@@ -7,12 +7,19 @@ Provides async Redis operations for caching with JSON serialization support.
 import json
 import logging
 import os
+from decimal import Decimal
 from typing import Any
 
 import redis.asyncio as redis
 from redis.exceptions import RedisError
 
 logger = logging.getLogger(__name__)
+
+
+def _json_default(obj: Any) -> Any:
+    if isinstance(obj, Decimal):
+        return str(obj)
+    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
 
 
 class RedisClient:
@@ -124,7 +131,7 @@ class RedisClient:
             raise ConnectionError("Redis client is not connected. Call connect() first.")
 
         if isinstance(value, (dict, list)):
-            serialized = json.dumps(value)
+            serialized = json.dumps(value, default=_json_default)
         else:
             serialized = str(value) if not isinstance(value, str) else value
 

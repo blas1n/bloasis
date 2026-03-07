@@ -1,5 +1,7 @@
 """Auth router — /v1/auth/tokens"""
 
+import uuid
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
@@ -35,7 +37,7 @@ async def login(
 
 @router.get("/me")
 async def me(
-    user_id: str = Depends(get_current_user),
+    user_id: uuid.UUID = Depends(get_current_user),
     user_svc: UserService = Depends(get_user_service),
 ):
     """Get current user info from validated JWT."""

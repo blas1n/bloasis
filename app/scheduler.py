@@ -6,6 +6,7 @@ Replaces the old microservices' periodic analysis (10-minute interval).
 
 import asyncio
 import logging
+import uuid
 
 from fastapi import FastAPI
 
@@ -64,7 +65,7 @@ async def _run_analysis_cycle(app: FastAPI) -> None:
             logger.error("Scheduler: analysis failed for user %s", user_id, exc_info=True)
 
 
-async def _get_active_users(user_repo: UserRepository, limit: int = 200) -> list[str]:
+async def _get_active_users(user_repo: UserRepository, limit: int = 200) -> list[uuid.UUID]:
     """Get list of user IDs with trading enabled (via repository pattern)."""
     try:
         return await user_repo.get_active_trading_users(limit)

@@ -1,8 +1,9 @@
 """Users router — /v1/users/{userId}/*"""
 
+import uuid
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Body, Depends
 from pydantic import BaseModel, Field
 
 from ..core.models import RiskProfile, UserPreferences
@@ -32,7 +33,7 @@ class BrokerConfigUpdate(BaseModel):
 
 @router.get("/{user_id}/preferences")
 async def get_preferences(
-    user_id: str = Depends(verify_user_access),
+    user_id: uuid.UUID = Depends(verify_user_access),
     user_svc: UserService = Depends(get_user_service),
 ):
     """Get user risk profile and preferences."""
@@ -42,13 +43,13 @@ async def get_preferences(
 
 @router.put("/{user_id}/preferences")
 async def update_preferences(
-    user_id: str = Depends(verify_user_access),
-    body: PreferencesUpdate = ...,
+    user_id: uuid.UUID = Depends(verify_user_access),
+    body: PreferencesUpdate = Body(),
     user_svc: UserService = Depends(get_user_service),
 ):
     """Update user risk profile and preferences."""
     prefs = UserPreferences(
-        user_id=user_id,
+        user_id=str(user_id),
         risk_profile=body.riskProfile,
         max_portfolio_risk=body.maxPortfolioRisk,
         max_position_size=body.maxPositionSize,
@@ -63,7 +64,7 @@ async def update_preferences(
 
 @router.get("/{user_id}/broker")
 async def get_broker_status(
-    user_id: str = Depends(verify_user_access),
+    user_id: uuid.UUID = Depends(verify_user_access),
     user_svc: UserService = Depends(get_user_service),
 ):
     """Get broker connection status."""
@@ -72,8 +73,8 @@ async def get_broker_status(
 
 @router.put("/{user_id}/broker")
 async def update_broker_config(
-    user_id: str = Depends(verify_user_access),
-    body: BrokerConfigUpdate = ...,
+    user_id: uuid.UUID = Depends(verify_user_access),
+    body: BrokerConfigUpdate = Body(),
     user_svc: UserService = Depends(get_user_service),
 ):
     """Save broker API credentials."""

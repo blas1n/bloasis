@@ -1,5 +1,6 @@
 """Trading router — /v1/users/{userId}/trading"""
 
+import uuid
 from typing import Literal
 
 from fastapi import APIRouter, Depends
@@ -17,7 +18,7 @@ class StopTradingRequest(BaseModel):
 
 @router.get("/{user_id}/trading")
 async def get_trading_status(
-    user_id: str = Depends(verify_user_access),
+    user_id: uuid.UUID = Depends(verify_user_access),
     executor_svc: ExecutorService = Depends(get_executor_service),
 ):
     """Get automated trading session status."""
@@ -26,7 +27,7 @@ async def get_trading_status(
 
 @router.post("/{user_id}/trading")
 async def start_trading(
-    user_id: str = Depends(verify_user_access),
+    user_id: uuid.UUID = Depends(verify_user_access),
     executor_svc: ExecutorService = Depends(get_executor_service),
 ):
     """Start automated trading session."""
@@ -35,7 +36,7 @@ async def start_trading(
 
 @router.delete("/{user_id}/trading")
 async def stop_trading(
-    user_id: str = Depends(verify_user_access),
+    user_id: uuid.UUID = Depends(verify_user_access),
     body: StopTradingRequest | None = None,
     executor_svc: ExecutorService = Depends(get_executor_service),
 ):

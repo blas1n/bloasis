@@ -6,6 +6,7 @@ All services are created per-request with shared infrastructure from app.state.
 
 from __future__ import annotations
 
+import uuid
 from typing import TYPE_CHECKING
 
 from fastapi import Depends, HTTPException, Request
@@ -175,22 +176,27 @@ def get_strategy_service(
 async def get_current_user(
     request: Request,
     user_svc: UserService = Depends(get_user_service),
-) -> str:
-    """Extract and validate JWT from Authorization header. Returns user_id."""
+) -> uuid.UUID:
+    """Extract and validate JWT from Authorization header. Returns user_id as UUID."""
     auth_header = request.headers.get("Authorization", "")
     if not auth_header.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing authorization token")
 
     token = auth_header.removeprefix("Bearer ")
-    user_id = user_svc.validate_token(token)
+    user_id_str = user_svc.validate_token(token)
 
-    if not user_id:
+    if not user_id_str:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
-    return user_id
+    try:
+        return uuid.UUID(user_id_str)
+    except ValueError:
+        raise HTTPException(status_code=401, detail="Invalid user ID in token")
 
 
-def verify_user_access(user_id: str, current_user: str = Depends(get_current_user)) -> str:
+def verify_user_access(
+    user_id: uuid.UUID, current_user: uuid.UUID = Depends(get_current_user)
+) -> uuid.UUID:
     """Verify the authenticated user matches the requested user_id."""
     if user_id != current_user:
         raise HTTPException(status_code=403, detail="Access denied")

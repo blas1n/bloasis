@@ -1,5 +1,6 @@
 """Tests for portfolios router — /v1/portfolios/{userId}/*."""
 
+import uuid
 from decimal import Decimal
 from unittest.mock import AsyncMock
 
@@ -10,7 +11,8 @@ from app.core.models import Portfolio, Position, Trade
 from app.dependencies import get_current_user, get_portfolio_service
 from app.main import create_app
 
-USER_ID = "test-user-id"
+USER_ID = "00000000-0000-0000-0000-000000000001"
+OTHER_USER_ID = "00000000-0000-0000-0000-000000000002"
 
 
 @pytest.fixture
@@ -22,7 +24,7 @@ def mock_portfolio_svc():
 @pytest.fixture
 def app(mock_portfolio_svc):
     application = create_app()
-    application.dependency_overrides[get_current_user] = lambda: USER_ID
+    application.dependency_overrides[get_current_user] = lambda: uuid.UUID(USER_ID)
     application.dependency_overrides[get_portfolio_service] = lambda: mock_portfolio_svc
     yield application
     application.dependency_overrides.clear()
@@ -63,7 +65,6 @@ class TestGetPortfolio:
         resp = client.get(f"/v1/portfolios/{USER_ID}")
         assert resp.status_code == 200
         data = resp.json()
-        # CamelCase keys
         assert data["userId"] == USER_ID
         assert data["totalEquity"] is not None
         assert data["buyingPower"] is not None
@@ -72,7 +73,7 @@ class TestGetPortfolio:
         assert data["positionCount"] == 1
 
     def test_access_denied_different_user(self, client):
-        resp = client.get("/v1/portfolios/other-user-id")
+        resp = client.get(f"/v1/portfolios/{OTHER_USER_ID}")
         assert resp.status_code == 403
         assert resp.json()["detail"] == "Access denied"
 
@@ -104,7 +105,7 @@ class TestGetPositions:
         assert len(data["positions"]) == 2
 
     def test_access_denied(self, client):
-        resp = client.get("/v1/portfolios/other-user-id/positions")
+        resp = client.get(f"/v1/portfolios/{OTHER_USER_ID}/positions")
         assert resp.status_code == 403
 
 
@@ -127,7 +128,7 @@ class TestGetTrades:
         assert data["totalRealizedPnl"] is not None
 
     def test_access_denied(self, client):
-        resp = client.get("/v1/portfolios/other-user-id/trades")
+        resp = client.get(f"/v1/portfolios/{OTHER_USER_ID}/trades")
         assert resp.status_code == 403
 
 
@@ -144,5 +145,5 @@ class TestSyncPortfolio:
         assert data["positionsSynced"] == 3
 
     def test_access_denied(self, client):
-        resp = client.post("/v1/portfolios/other-user-id/sync")
+        resp = client.post(f"/v1/portfolios/{OTHER_USER_ID}/sync")
         assert resp.status_code == 403

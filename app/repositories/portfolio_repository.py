@@ -1,5 +1,6 @@
 """Portfolio repository — ORM-based data access for trading schema."""
 
+import uuid as uuid_mod
 from decimal import Decimal
 
 from sqlalchemy import delete, select
@@ -13,7 +14,7 @@ class PortfolioRepository:
     def __init__(self, postgres: PostgresClient) -> None:
         self.postgres = postgres
 
-    async def get_positions(self, user_id: str) -> list[PositionRecord]:
+    async def get_positions(self, user_id: uuid_mod.UUID) -> list[PositionRecord]:
         async with self.postgres.get_session() as session:
             result = await session.execute(
                 select(PositionRecord).where(
@@ -23,7 +24,7 @@ class PortfolioRepository:
             )
             return list(result.scalars().all())
 
-    async def get_cash_balance(self, user_id: str) -> Decimal:
+    async def get_cash_balance(self, user_id: uuid_mod.UUID) -> Decimal:
         async with self.postgres.get_session() as session:
             result = await session.execute(
                 select(PortfolioRecord).where(PortfolioRecord.user_id == user_id)
@@ -31,7 +32,9 @@ class PortfolioRepository:
             record = result.scalar_one_or_none()
             return record.cash_balance if record else Decimal("0")
 
-    async def get_position_by_symbol(self, user_id: str, symbol: str) -> PositionRecord | None:
+    async def get_position_by_symbol(
+        self, user_id: uuid_mod.UUID, symbol: str
+    ) -> PositionRecord | None:
         """Get a single position by user and symbol."""
         async with self.postgres.get_session() as session:
             result = await session.execute(
@@ -45,7 +48,7 @@ class PortfolioRepository:
 
     async def upsert_position(
         self,
-        user_id: str,
+        user_id: uuid_mod.UUID,
         symbol: str,
         quantity: Decimal,
         avg_cost: Decimal,
@@ -78,7 +81,7 @@ class PortfolioRepository:
                     )
                 )
 
-    async def delete_position(self, user_id: str, symbol: str) -> None:
+    async def delete_position(self, user_id: uuid_mod.UUID, symbol: str) -> None:
         """Delete a position by user and symbol."""
         async with self.postgres.get_session() as session:
             await session.execute(
@@ -89,7 +92,7 @@ class PortfolioRepository:
                 )
             )
 
-    async def update_cash_balance(self, user_id: str, amount: Decimal) -> None:
+    async def update_cash_balance(self, user_id: uuid_mod.UUID, amount: Decimal) -> None:
         """Set cash balance for a user (creates portfolio record if needed)."""
         async with self.postgres.get_session() as session:
             result = await session.execute(

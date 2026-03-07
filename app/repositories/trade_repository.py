@@ -14,22 +14,15 @@ from shared.utils.postgres_client import PostgresClient
 from .models import PositionRecord, TradeRecord
 
 
-def _to_uuid(user_id: str) -> uuid_mod.UUID | str:
-    try:
-        return uuid_mod.UUID(user_id) if isinstance(user_id, str) else user_id
-    except ValueError:
-        return user_id
-
-
 class TradeRepository:
     def __init__(self, postgres: PostgresClient) -> None:
         self.postgres = postgres
 
-    async def get_trades(self, user_id: str, limit: int = 20) -> list[TradeRecord]:
+    async def get_trades(self, user_id: uuid_mod.UUID, limit: int = 20) -> list[TradeRecord]:
         async with self.postgres.get_session() as session:
             result = await session.execute(
                 select(TradeRecord)
-                .where(TradeRecord.user_id == _to_uuid(user_id))
+                .where(TradeRecord.user_id == user_id)
                 .order_by(TradeRecord.executed_at.desc())
                 .limit(limit)
             )
@@ -37,7 +30,7 @@ class TradeRepository:
 
     async def record_trade_and_update_position(
         self,
-        user_id: str,
+        user_id: uuid_mod.UUID,
         order_id: str,
         symbol: str,
         side: str,
@@ -94,7 +87,7 @@ class TradeRepository:
             # 2. Insert trade record (after sell logic so actual_qty and realized_pnl are known)
             session.add(
                 TradeRecord(
-                    user_id=_to_uuid(user_id),
+                    user_id=user_id,
                     order_id=order_id,
                     symbol=symbol,
                     action=side.upper(),

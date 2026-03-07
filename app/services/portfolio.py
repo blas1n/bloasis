@@ -7,6 +7,7 @@ No event consumption — executor calls record_trade() directly.
 from __future__ import annotations
 
 import logging
+import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING
@@ -44,7 +45,7 @@ class PortfolioService:
         self.market_data_svc = market_data_svc
         self.user_repo = user_repo
 
-    async def get_portfolio(self, user_id: str) -> Portfolio:
+    async def get_portfolio(self, user_id: uuid.UUID) -> Portfolio:
         """Get portfolio summary for a user."""
         cache_key = f"user:{user_id}:portfolio"
         cached = await self.redis.get(cache_key)
@@ -63,7 +64,7 @@ class PortfolioService:
         daily_pnl_pct = float(daily_pnl / total_value * 100) if total_value > 0 else 0.0
 
         portfolio = Portfolio(
-            user_id=user_id,
+            user_id=str(user_id),
             total_value=total_value,
             cash_balance=cash,
             invested_value=invested,
@@ -78,7 +79,7 @@ class PortfolioService:
         await self.redis.setex(cache_key, settings.cache_user_portfolio_ttl, portfolio.model_dump())
         return portfolio
 
-    async def get_positions(self, user_id: str) -> list[Position]:
+    async def get_positions(self, user_id: uuid.UUID) -> list[Position]:
         """Get all positions for a user."""
         rows = await self.portfolio_repo.get_positions(user_id)
 
@@ -123,7 +124,7 @@ class PortfolioService:
 
         return positions
 
-    async def get_trades(self, user_id: str, limit: int = 20) -> list[Trade]:
+    async def get_trades(self, user_id: uuid.UUID, limit: int = 20) -> list[Trade]:
         """Get trade history for a user."""
         rows = await self.trade_repo.get_trades(user_id, limit)
 
@@ -144,7 +145,7 @@ class PortfolioService:
 
     async def record_trade(
         self,
-        user_id: str,
+        user_id: uuid.UUID,
         order_id: str,
         symbol: str,
         side: str,
@@ -168,7 +169,7 @@ class PortfolioService:
         )
         await self.redis.delete(f"user:{user_id}:portfolio")
 
-    async def sync_with_alpaca(self, user_id: str) -> dict:
+    async def sync_with_alpaca(self, user_id: uuid.UUID) -> dict:
         """Sync positions from Alpaca broker.
 
         Reconciles local DB with Alpaca as source of truth:
@@ -225,7 +226,7 @@ class PortfolioService:
 
         return {"success": True, "positionsSynced": len(alpaca_symbols)}
 
-    async def _get_alpaca_credentials(self, user_id: str) -> tuple[str, str]:
+    async def _get_alpaca_credentials(self, user_id: uuid.UUID) -> tuple[str, str]:
         """Get Alpaca API credentials (user-specific or global fallback)."""
         if self.user_repo:
             configs = await self.user_repo.get_broker_config(user_id)

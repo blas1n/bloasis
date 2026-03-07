@@ -1,12 +1,16 @@
 """Tests for auth router — /v1/auth/tokens."""
 
+import uuid
 from unittest.mock import AsyncMock
 
 import pytest
 from fastapi.testclient import TestClient
 
-from app.dependencies import get_user_service
+from app.dependencies import get_current_user, get_user_service
 from app.main import create_app
+
+USER_ID = "00000000-0000-0000-0000-000000000001"
+USER_UUID = uuid.UUID(USER_ID)
 
 
 @pytest.fixture
@@ -19,6 +23,7 @@ def mock_user_svc():
 def app(mock_user_svc):
     application = create_app()
     application.dependency_overrides[get_user_service] = lambda: mock_user_svc
+    application.dependency_overrides[get_current_user] = lambda: USER_UUID
     yield application
     application.dependency_overrides.clear()
 
@@ -33,7 +38,7 @@ class TestLogin:
         mock_user_svc.login.return_value = {
             "accessToken": "access-tok",
             "refreshToken": "refresh-tok",
-            "userId": "user-1",
+            "userId": USER_ID,
             "name": "Test User",
         }
         resp = client.post("/v1/auth/tokens", json={"email": "a@b.com", "password": "pw"})
@@ -41,7 +46,7 @@ class TestLogin:
         data = resp.json()
         assert data["accessToken"] == "access-tok"
         assert data["refreshToken"] == "refresh-tok"
-        assert data["userId"] == "user-1"
+        assert data["userId"] == USER_ID
         mock_user_svc.login.assert_awaited_once_with("a@b.com", "pw")
 
     def test_login_invalid_credentials(self, client, mock_user_svc):
@@ -57,6 +62,20 @@ class TestLogin:
     def test_login_missing_password(self, client):
         resp = client.post("/v1/auth/tokens", json={"email": "a@b.com"})
         assert resp.status_code == 422
+
+
+class TestMe:
+    def test_success(self, client, mock_user_svc):
+        mock_user_svc.get_user_info.return_value = {
+            "userId": USER_ID,
+            "name": "Test User",
+            "email": "test@example.com",
+        }
+        resp = client.get("/v1/auth/me")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["userId"] == USER_ID
+        mock_user_svc.get_user_info.assert_awaited_once_with(USER_UUID)
 
 
 class TestRefresh:

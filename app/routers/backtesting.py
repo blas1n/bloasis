@@ -4,6 +4,7 @@ REST endpoints for running backtests, retrieving results, and comparing strategi
 """
 
 import re
+import uuid
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -73,7 +74,7 @@ class CompareRequest(BaseModel):
 @router.post("/run")
 async def run_backtest(
     body: RunBacktestRequest,
-    current_user: str = Depends(get_current_user),
+    current_user: uuid.UUID = Depends(get_current_user),
     backtesting_svc: BacktestingService = Depends(get_backtesting_service),
 ):
     """Run a VectorBT backtest for the given symbols and strategy."""
@@ -93,7 +94,7 @@ async def run_backtest(
             strategy_type=body.strategyType,
             config=config,
             period=body.period,
-            user_id=current_user,
+            user_id=str(current_user),
         )
         return result.model_dump()
     except ValueError as e:
@@ -103,11 +104,11 @@ async def run_backtest(
 @router.get("/results/{backtest_id}")
 async def get_backtest_results(
     backtest_id: str,
-    current_user: str = Depends(get_current_user),
+    current_user: uuid.UUID = Depends(get_current_user),
     backtesting_svc: BacktestingService = Depends(get_backtesting_service),
 ):
     """Get cached backtest results by ID."""
-    result = await backtesting_svc.get_results(backtest_id, user_id=current_user)
+    result = await backtesting_svc.get_results(backtest_id, user_id=str(current_user))
     if result is None:
         raise HTTPException(status_code=404, detail=f"Backtest not found: {backtest_id}")
     return result.model_dump()
@@ -116,11 +117,11 @@ async def get_backtest_results(
 @router.post("/compare")
 async def compare_strategies(
     body: CompareRequest,
-    current_user: str = Depends(get_current_user),
+    current_user: uuid.UUID = Depends(get_current_user),
     backtesting_svc: BacktestingService = Depends(get_backtesting_service),
 ):
     """Compare multiple backtest results, ranked by Sharpe ratio."""
     try:
-        return await backtesting_svc.compare_strategies(body.backtestIds, user_id=current_user)
+        return await backtesting_svc.compare_strategies(body.backtestIds, user_id=str(current_user))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e

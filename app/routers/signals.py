@@ -1,6 +1,7 @@
 """Signals router — /v1/users/{userId}/signals"""
 
 import logging
+import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
@@ -17,7 +18,7 @@ logger = logging.getLogger(__name__)
 @limiter.limit("30/minute")
 async def get_signals(
     request: Request,
-    user_id: str = Depends(verify_user_access),
+    user_id: uuid.UUID = Depends(verify_user_access),
     strategy_svc: StrategyService = Depends(get_strategy_service),
     user_svc: UserService = Depends(get_user_service),
 ):
@@ -39,7 +40,7 @@ async def get_signals(
 @limiter.limit("5/minute")
 async def trigger_analysis(
     request: Request,
-    user_id: str = Depends(verify_user_access),
+    user_id: uuid.UUID = Depends(verify_user_access),
     strategy_svc: StrategyService = Depends(get_strategy_service),
     user_svc: UserService = Depends(get_user_service),
 ):

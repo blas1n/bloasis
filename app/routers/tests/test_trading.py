@@ -1,5 +1,6 @@
 """Tests for trading router — /v1/users/{userId}/trading."""
 
+import uuid
 from unittest.mock import AsyncMock
 
 import pytest
@@ -8,7 +9,9 @@ from fastapi.testclient import TestClient
 from app.dependencies import get_current_user, get_executor_service
 from app.main import create_app
 
-USER_ID = "test-user-id"
+USER_ID = "00000000-0000-0000-0000-000000000001"
+OTHER_USER_ID = "00000000-0000-0000-0000-000000000002"
+USER_UUID = uuid.UUID(USER_ID)
 
 
 @pytest.fixture
@@ -20,7 +23,7 @@ def mock_executor_svc():
 @pytest.fixture
 def app(mock_executor_svc):
     application = create_app()
-    application.dependency_overrides[get_current_user] = lambda: USER_ID
+    application.dependency_overrides[get_current_user] = lambda: USER_UUID
     application.dependency_overrides[get_executor_service] = lambda: mock_executor_svc
     yield application
     application.dependency_overrides.clear()
@@ -45,7 +48,7 @@ class TestGetTradingStatus:
         assert data["status"] == "active"
 
     def test_access_denied(self, client):
-        resp = client.get("/v1/users/other-user-id/trading")
+        resp = client.get(f"/v1/users/{OTHER_USER_ID}/trading")
         assert resp.status_code == 403
 
 
@@ -60,10 +63,10 @@ class TestStartTrading:
         data = resp.json()
         assert data["tradingEnabled"] is True
         assert data["status"] == "active"
-        mock_executor_svc.start_trading.assert_awaited_once_with(USER_ID)
+        mock_executor_svc.start_trading.assert_awaited_once_with(USER_UUID)
 
     def test_access_denied(self, client):
-        resp = client.post("/v1/users/other-user-id/trading")
+        resp = client.post(f"/v1/users/{OTHER_USER_ID}/trading")
         assert resp.status_code == 403
 
 
@@ -81,7 +84,7 @@ class TestStopTrading:
         assert resp.status_code == 200
         data = resp.json()
         assert data["tradingEnabled"] is False
-        mock_executor_svc.stop_trading.assert_awaited_once_with(USER_ID, "soft")
+        mock_executor_svc.stop_trading.assert_awaited_once_with(USER_UUID, "soft")
 
     def test_success_hard(self, client, mock_executor_svc):
         mock_executor_svc.stop_trading.return_value = {
@@ -105,8 +108,8 @@ class TestStopTrading:
         }
         resp = client.delete(f"/v1/users/{USER_ID}/trading")
         assert resp.status_code == 200
-        mock_executor_svc.stop_trading.assert_awaited_once_with(USER_ID, "soft")
+        mock_executor_svc.stop_trading.assert_awaited_once_with(USER_UUID, "soft")
 
     def test_access_denied(self, client):
-        resp = client.delete("/v1/users/other-user-id/trading")
+        resp = client.delete(f"/v1/users/{OTHER_USER_ID}/trading")
         assert resp.status_code == 403

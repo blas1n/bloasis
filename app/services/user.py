@@ -68,7 +68,7 @@ class UserService:
         """Invalidate refresh token."""
         await self.redis.delete(f"refresh:{refresh_token}")
 
-    async def get_user_info(self, user_id: str) -> dict | None:
+    async def get_user_info(self, user_id: uuid.UUID) -> dict | None:
         """Get basic user info by ID. Returns None if not found."""
         row = await self.user_repo.find_by_id(user_id)
         if not row:
@@ -99,7 +99,7 @@ class UserService:
 
     # --- Preferences ---
 
-    async def get_preferences(self, user_id: str) -> UserPreferences:
+    async def get_preferences(self, user_id: uuid.UUID) -> UserPreferences:
         """Get user preferences (cached)."""
         cache_key = f"user:{user_id}:preferences"
         cached = await self.redis.get(cache_key)
@@ -108,9 +108,10 @@ class UserService:
 
         row = await self.user_repo.get_preferences(user_id)
 
+        uid_str = str(user_id)
         if row:
             prefs = UserPreferences(
-                user_id=user_id,
+                user_id=uid_str,
                 risk_profile=row.risk_profile,
                 max_portfolio_risk=row.max_portfolio_risk,
                 max_position_size=row.max_position_size,
@@ -120,12 +121,14 @@ class UserService:
                 trading_enabled=row.trading_enabled,
             )
         else:
-            prefs = UserPreferences(user_id=user_id)
+            prefs = UserPreferences(user_id=uid_str)
 
         await self.redis.setex(cache_key, settings.cache_user_preferences_ttl, prefs.model_dump())
         return prefs
 
-    async def update_preferences(self, user_id: str, prefs: UserPreferences) -> UserPreferences:
+    async def update_preferences(
+        self, user_id: uuid.UUID, prefs: UserPreferences
+    ) -> UserPreferences:
         """Update user preferences."""
         await self.user_repo.upsert_preferences(
             user_id=user_id,
@@ -142,7 +145,7 @@ class UserService:
 
     # --- Broker ---
 
-    async def get_broker_status(self, user_id: str) -> dict:
+    async def get_broker_status(self, user_id: uuid.UUID) -> dict:
         """Get broker connection status by testing Alpaca API connectivity."""
         configs = await self.user_repo.get_broker_config(user_id)
         configured = len(configs) > 0
@@ -207,7 +210,7 @@ class UserService:
         return decrypt_alpaca_credentials(configs)
 
     async def update_broker_config(
-        self, user_id: str, api_key: str, secret_key: str, paper: bool
+        self, user_id: uuid.UUID, api_key: str, secret_key: str, paper: bool
     ) -> dict:
         """Update broker configuration for a specific user."""
         from cryptography.fernet import Fernet

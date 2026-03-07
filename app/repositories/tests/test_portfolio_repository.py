@@ -1,5 +1,6 @@
 """Tests for PortfolioRepository — ORM-based data access."""
 
+import uuid
 from contextlib import asynccontextmanager
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock
@@ -7,6 +8,8 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from app.repositories.portfolio_repository import PortfolioRepository
+
+TEST_USER_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 
 
 def _make_mock_postgres(session):
@@ -41,7 +44,7 @@ class TestGetPositions:
 
         postgres = _make_mock_postgres(mock_session)
         repo = PortfolioRepository(postgres=postgres)
-        result = await repo.get_positions("user-1")
+        result = await repo.get_positions(TEST_USER_ID)
 
         assert len(result) == 2
         mock_session.execute.assert_awaited_once()
@@ -49,7 +52,7 @@ class TestGetPositions:
     async def test_returns_empty_list(self, mock_session):
         postgres = _make_mock_postgres(mock_session)
         repo = PortfolioRepository(postgres=postgres)
-        result = await repo.get_positions("user-1")
+        result = await repo.get_positions(TEST_USER_ID)
         assert result == []
 
 
@@ -60,13 +63,13 @@ class TestGetCashBalance:
 
         postgres = _make_mock_postgres(mock_session)
         repo = PortfolioRepository(postgres=postgres)
-        result = await repo.get_cash_balance("user-1")
+        result = await repo.get_cash_balance(TEST_USER_ID)
         assert result == Decimal("50000")
 
     async def test_returns_zero_when_no_record(self, mock_session):
         postgres = _make_mock_postgres(mock_session)
         repo = PortfolioRepository(postgres=postgres)
-        result = await repo.get_cash_balance("user-1")
+        result = await repo.get_cash_balance(TEST_USER_ID)
         assert result == Decimal("0")
 
 
@@ -77,13 +80,13 @@ class TestGetPositionBySymbol:
 
         postgres = _make_mock_postgres(mock_session)
         repo = PortfolioRepository(postgres=postgres)
-        result = await repo.get_position_by_symbol("user-1", "AAPL")
+        result = await repo.get_position_by_symbol(TEST_USER_ID, "AAPL")
         assert result.symbol == "AAPL"
 
     async def test_returns_none_when_not_found(self, mock_session):
         postgres = _make_mock_postgres(mock_session)
         repo = PortfolioRepository(postgres=postgres)
-        result = await repo.get_position_by_symbol("user-1", "UNKNOWN")
+        result = await repo.get_position_by_symbol(TEST_USER_ID, "UNKNOWN")
         assert result is None
 
 
@@ -91,7 +94,7 @@ class TestUpsertPosition:
     async def test_creates_new_position(self, mock_session):
         postgres = _make_mock_postgres(mock_session)
         repo = PortfolioRepository(postgres=postgres)
-        await repo.upsert_position("user-1", "AAPL", Decimal("10"), Decimal("150"), Decimal("155"))
+        await repo.upsert_position(TEST_USER_ID, "AAPL", Decimal("10"), Decimal("150"), Decimal("155"))
 
         mock_session.add.assert_called_once()
 
@@ -104,7 +107,7 @@ class TestUpsertPosition:
 
         postgres = _make_mock_postgres(mock_session)
         repo = PortfolioRepository(postgres=postgres)
-        await repo.upsert_position("user-1", "AAPL", Decimal("15"), Decimal("148"), Decimal("155"))
+        await repo.upsert_position(TEST_USER_ID, "AAPL", Decimal("15"), Decimal("148"), Decimal("155"))
 
         assert existing.quantity == Decimal("15")
         assert existing.avg_cost == Decimal("148")
@@ -116,7 +119,7 @@ class TestDeletePosition:
     async def test_deletes_position(self, mock_session):
         postgres = _make_mock_postgres(mock_session)
         repo = PortfolioRepository(postgres=postgres)
-        await repo.delete_position("user-1", "AAPL")
+        await repo.delete_position(TEST_USER_ID, "AAPL")
 
         mock_session.execute.assert_awaited_once()
 
@@ -128,7 +131,7 @@ class TestUpdateCashBalance:
 
         postgres = _make_mock_postgres(mock_session)
         repo = PortfolioRepository(postgres=postgres)
-        await repo.update_cash_balance("user-1", Decimal("75000"))
+        await repo.update_cash_balance(TEST_USER_ID, Decimal("75000"))
 
         assert existing.cash_balance == Decimal("75000")
         mock_session.add.assert_not_called()
@@ -136,6 +139,6 @@ class TestUpdateCashBalance:
     async def test_creates_portfolio_if_none(self, mock_session):
         postgres = _make_mock_postgres(mock_session)
         repo = PortfolioRepository(postgres=postgres)
-        await repo.update_cash_balance("user-1", Decimal("100000"))
+        await repo.update_cash_balance(TEST_USER_ID, Decimal("100000"))
 
         mock_session.add.assert_called_once()

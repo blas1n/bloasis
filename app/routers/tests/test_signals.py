@@ -1,5 +1,6 @@
 """Tests for signals router — /v1/users/{userId}/signals."""
 
+import uuid
 from unittest.mock import AsyncMock
 
 import pytest
@@ -9,7 +10,9 @@ from app.core.models import AnalysisResult, MarketRegime, UserPreferences
 from app.dependencies import get_current_user, get_strategy_service, get_user_service
 from app.main import create_app
 
-USER_ID = "test-user-id"
+USER_ID = "00000000-0000-0000-0000-000000000001"
+OTHER_USER_ID = "00000000-0000-0000-0000-000000000002"
+USER_UUID = uuid.UUID(USER_ID)
 
 
 @pytest.fixture
@@ -27,7 +30,7 @@ def mock_user_svc():
 @pytest.fixture
 def app(mock_strategy_svc, mock_user_svc):
     application = create_app()
-    application.dependency_overrides[get_current_user] = lambda: USER_ID
+    application.dependency_overrides[get_current_user] = lambda: USER_UUID
     application.dependency_overrides[get_strategy_service] = lambda: mock_strategy_svc
     application.dependency_overrides[get_user_service] = lambda: mock_user_svc
     yield application
@@ -71,7 +74,7 @@ class TestGetSignals:
         mock_strategy_svc.run_analysis.assert_awaited_once()
 
     def test_access_denied(self, client):
-        resp = client.get("/v1/users/other-user-id/signals")
+        resp = client.get(f"/v1/users/{OTHER_USER_ID}/signals")
         assert resp.status_code == 403
 
 
@@ -88,9 +91,9 @@ class TestTriggerAnalysis:
         assert resp.status_code == 200
         data = resp.json()
         assert data["userId"] == USER_ID
-        mock_strategy_svc.invalidate_user_cache.assert_awaited_once_with(USER_ID)
+        mock_strategy_svc.invalidate_user_cache.assert_awaited_once_with(USER_UUID)
         mock_strategy_svc.run_analysis.assert_awaited_once()
 
     def test_access_denied(self, client):
-        resp = client.post("/v1/users/other-user-id/signals")
+        resp = client.post(f"/v1/users/{OTHER_USER_ID}/signals")
         assert resp.status_code == 403

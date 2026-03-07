@@ -1,5 +1,6 @@
 """Tests for backtesting router — /v1/backtesting/*."""
 
+import uuid
 from unittest.mock import AsyncMock
 
 import pytest
@@ -13,6 +14,8 @@ from app.core.backtesting.models import (
 from app.dependencies import get_backtesting_service, get_current_user
 from app.main import create_app
 
+USER_UUID = uuid.UUID("00000000-0000-0000-0000-000000000001")
+
 
 @pytest.fixture
 def mock_backtesting_svc():
@@ -22,7 +25,7 @@ def mock_backtesting_svc():
 @pytest.fixture
 def app(mock_backtesting_svc):
     application = create_app()
-    application.dependency_overrides[get_current_user] = lambda: "test-user-id"
+    application.dependency_overrides[get_current_user] = lambda: USER_UUID
     application.dependency_overrides[get_backtesting_service] = lambda: mock_backtesting_svc
     yield application
     application.dependency_overrides.clear()

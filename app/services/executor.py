@@ -42,7 +42,7 @@ class ExecutorService:
 
     async def execute_order(
         self,
-        user_id: str,
+        user_id: uuid.UUID,
         symbol: str,
         side: str,
         qty: Decimal,
@@ -72,7 +72,7 @@ class ExecutorService:
         vix = await self.market_data_svc.get_vix()
 
         order = OrderRequest(
-            user_id=user_id,
+            user_id=str(user_id),
             symbol=symbol,
             side=side,
             qty=qty,
@@ -236,7 +236,7 @@ class ExecutorService:
             filled_avg_price=price,
         )
 
-    async def get_trading_status(self, user_id: str) -> dict:
+    async def get_trading_status(self, user_id: uuid.UUID) -> dict:
         """Get automated trading status for a user.
 
         Checks Redis first (fast path), falls back to DB for durability.
@@ -262,14 +262,14 @@ class ExecutorService:
 
         return {"tradingEnabled": False, "status": "inactive", "lastChanged": ""}
 
-    async def start_trading(self, user_id: str) -> dict:
+    async def start_trading(self, user_id: uuid.UUID) -> dict:
         """Start automated trading for a user."""
         await self.redis.setex(f"trading:{user_id}:status", 86400, "active")
         if self.user_repo:
             await self.user_repo.update_trading_enabled(user_id, True)
         return {"tradingEnabled": True, "status": "active"}
 
-    async def stop_trading(self, user_id: str, mode: str = "soft") -> dict:
+    async def stop_trading(self, user_id: uuid.UUID, mode: str = "soft") -> dict:
         """Stop automated trading for a user."""
         status = f"{mode}_stopped"
         await self.redis.setex(f"trading:{user_id}:status", 86400, status)

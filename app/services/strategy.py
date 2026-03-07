@@ -11,6 +11,7 @@ Pipeline:
 """
 
 import logging
+import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
 
@@ -54,13 +55,13 @@ class StrategyService:
         self.market_regime = market_regime
         self.classification = classification
 
-    async def invalidate_user_cache(self, user_id: str) -> None:
+    async def invalidate_user_cache(self, user_id: uuid.UUID) -> None:
         """Invalidate cached analysis for a user."""
         await self.redis.delete(f"user:{user_id}:analysis")
 
     async def run_analysis(
         self,
-        user_id: str,
+        user_id: uuid.UUID,
         risk_profile: str = "moderate",
         preferred_sectors: list[str] | None = None,
         excluded_sectors: list[str] | None = None,
@@ -138,7 +139,7 @@ class StrategyService:
         )
 
         result = AnalysisResult(
-            user_id=user_id,
+            user_id=str(user_id),
             regime=regime,
             selected_sectors=list({c.sector for c in candidates}),
             top_themes=list({c.theme for c in candidates if c.theme})[:5],
