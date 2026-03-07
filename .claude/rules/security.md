@@ -1,7 +1,3 @@
----
-description: Security rules for the BLOASIS trading platform
----
-
 # Security Rules
 
 ## CRITICAL: Financial Platform Security
@@ -12,18 +8,12 @@ description: Security rules for the BLOASIS trading platform
 
 **NEVER commit secrets to git.**
 
-**ALWAYS use .env files (gitignored):**
+**ALWAYS use .env files (gitignored) + Pydantic Settings in `app/config.py`:**
 
 ```python
-# Correct
-import os
-from dotenv import load_dotenv
-
-load_dotenv()
-ANTHROPIC_API_KEY = os.getenv('ANTHROPIC_API_KEY')
-
-if not ANTHROPIC_API_KEY:
-    raise ValueError("ANTHROPIC_API_KEY not set")
+# Correct — Pydantic Settings validates at startup
+from app.config import settings
+api_key = settings.llm_api_key
 
 # Wrong
 ANTHROPIC_API_KEY = "sk-1234567890"  # NEVER hardcode!
@@ -33,10 +23,11 @@ ANTHROPIC_API_KEY = "sk-1234567890"  # NEVER hardcode!
 
 ```bash
 # .env.example (committed)
-ANTHROPIC_API_KEY=your_api_key_here
+LLM_API_KEY=your_api_key_here
+JWT_SECRET_KEY=your_secret_here
 
 # .env (gitignored, actual secrets)
-ANTHROPIC_API_KEY=sk-real-key-here
+LLM_API_KEY=sk-real-key-here
 ```
 
 ### 2. API Keys in Logs
@@ -53,14 +44,11 @@ logger.info(f"Using API key: {api_key}")  # NO!
 
 ### 3. SQL Injection Prevention
 
-**ALWAYS use parameterized queries.**
+**ALWAYS use SQLAlchemy ORM via repositories. No raw SQL.**
 
 ```python
-# Correct
-from sqlalchemy import select
-result = await session.execute(
-    select(User).where(User.id == user_id)
-)
+# Correct — repository with ORM
+user = await self.user_repo.find_by_email(email)
 
 # Wrong
 query = f"SELECT * FROM users WHERE id = {user_id}"  # NO! SQL injection
@@ -68,57 +56,54 @@ query = f"SELECT * FROM users WHERE id = {user_id}"  # NO! SQL injection
 
 ### 4. Input Validation
 
-**Validate ALL user inputs:**
+**Validate ALL user inputs via Pydantic models:**
 
 ```python
 from pydantic import BaseModel, validator
 
-class StrategyRequest(BaseModel):
-    user_id: str
-    symbols: List[str]
+class OrderRequest(BaseModel):
+    symbol: str
+    qty: Decimal
+    side: Literal["buy", "sell"]
 
-    @validator('symbols')
-    def validate_symbols(cls, v):
-        if len(v) > 50:
-            raise ValueError('Too many symbols')
-        for symbol in v:
-            if not symbol.isalnum() or len(symbol) > 10:
-                raise ValueError(f'Invalid symbol: {symbol}')
-        return v
+    @validator('symbol')
+    def validate_symbol(cls, v):
+        if not v.isalnum() or len(v) > 10:
+            raise ValueError(f'Invalid symbol: {v}')
+        return v.upper()
 ```
 
-### 5. Authentication (Phase 2)
+### 5. Authentication
 
-**All external endpoints MUST require authentication.**
-
-**Envoy JWT verification:**
-
-```yaml
-# Envoy config (Phase 2)
-plugins:
-  - name: jwt
-    config:
-      key_claim_name: sub
-```
-
-**Backend trusts Envoy:**
+**All endpoints except `/v1/auth/*` and `/health` require JWT auth.**
 
 ```python
-# Backend receives authenticated user_id from Envoy header
-user_id = request.headers.get('X-User-Id')
+# FastAPI dependency injection for auth
+from app.dependencies import get_current_user
+
+@router.get("/v1/users/{user_id}/preferences")
+async def get_preferences(
+    user_id: uuid.UUID,
+    current_user = Depends(get_current_user),
+):
+    verify_user_access(current_user, user_id)
+    ...
 ```
 
 ### 6. Rate Limiting
 
-**Prevent abuse with rate limits:**
+**Prevent abuse with slowapi rate limits:**
 
-```yaml
-# Envoy config
-plugins:
-  - name: rate-limiting
-    config:
-      minute: 60
-      policy: local
+```python
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+
+limiter = Limiter(key_func=get_remote_address)
+
+@router.post("/v1/auth/tokens")
+@limiter.limit("10/minute")
+async def login(request: Request, ...):
+    ...
 ```
 
 ### 7. Financial Data Precision
@@ -143,21 +128,21 @@ total = 150.25 * 10  # Float precision errors!
 
 - Database users: minimal permissions
 - API keys: read-only where possible
-- Service accounts: scoped to specific resources
+- Alpaca: paper trading by default
 
 ### 9. Error Messages
 
 **NEVER expose internal details in error messages:**
 
 ```python
-# Correct (external API)
-return {"error": "Invalid request"}
+# Correct (API response)
+raise HTTPException(status_code=400, detail="Invalid request")
 
 # Correct (logs)
 logger.error("Database connection failed", exc_info=True)
 
-# Wrong (external API)
-return {"error": f"Database error: {str(e)}"}  # Exposes internals!
+# Wrong (API response)
+raise HTTPException(status_code=500, detail=f"DB error: {str(e)}")  # Exposes internals!
 ```
 
 ### 10. Dependency Security
@@ -166,10 +151,10 @@ return {"error": f"Database error: {str(e)}"}  # Exposes internals!
 
 ```bash
 # Check for vulnerabilities
-pip-audit
+uv run pip-audit
 
 # Update dependencies
-pip install --upgrade -r requirements.txt
+uv lock --upgrade
 ```
 
 ## Verification Checklist
@@ -178,17 +163,8 @@ Before every commit:
 - [ ] No hardcoded secrets
 - [ ] .env.example provided
 - [ ] No API keys in logs
-- [ ] Parameterized SQL queries
-- [ ] Input validation implemented
+- [ ] ORM queries only (no raw SQL)
+- [ ] Input validation via Pydantic
 - [ ] Decimal used for money
 - [ ] No internal errors exposed
-- [ ] Rate limiting configured (if external endpoint)
-
-## Security Incident Response
-
-If a security issue is discovered:
-1. **DO NOT commit the fix immediately** (reveals vulnerability)
-2. Notify team privately
-3. Prepare patch in private branch
-4. Deploy fix to production first
-5. Then commit to public repo
+- [ ] JWT auth on all protected endpoints

@@ -2,49 +2,40 @@
 
 **AI-Powered Multi-Asset Trading Platform**
 
-BLOASIS combines Large Language Models and Reinforcement Learning for automated trading decisions across multiple asset classes.
+BLOASIS combines LLMs and deterministic risk rules for automated trading decisions across multiple asset classes.
 
-## Mission
+## Key Features
 
-- **Risk Management**: User-specific risk profiles (Conservative/Moderate/Aggressive)
-- **Strategy Optimization**: LLM strategy generation → Quantitative parameter fitting → RL validation
-- **Multi-Asset Trading**: Diversified trading across different asset classes
-- **Event-Driven Response**: Real-time market regime detection for critical events (FOMC, CPI, etc.)
+- **Market Regime Detection**: LLM-based classification (bull/bear/crisis/recovery/sideways)
+- **6-Factor Scoring**: Momentum, value, quality, volatility, liquidity, sentiment
+- **Deterministic Risk Rules**: Position sizing, sector concentration, VIX-based controls
+- **ATR-Based Signals**: Stop loss, take profit, trailing stops, multi-tier profit levels
+- **Alpaca Integration**: Paper/live trading via Alpaca API
 
 ## Architecture
 
-Microservices architecture with gRPC-only internal communication and Envoy Gateway for external REST access.
+Single FastAPI monolith with pure domain logic isolated in `core/`.
 
 ```
-Frontend (Next.js) → Envoy Gateway (REST→gRPC) → Backend Services (gRPC)
-                                               ↓
-                                    Redpanda, PostgreSQL/TimescaleDB
+Frontend (Next.js) --> FastAPI (REST) --> PostgreSQL + Redis
 ```
 
-**Services**:
-- **Market Regime**: Market condition classification (bull/bear/crisis/recovery)
-- **Strategy**: LangGraph multi-agent strategy generation via Claude
-- **Classification**: 3-Tier asset selection (Sector → Thematic → Factor)
-- **Backtesting**: Multi-strategy backtesting with VectorBT + FinRL
-- **Risk Committee**: Risk assessment and position sizing
-- **Portfolio**: Portfolio tracking and management
-- **Executor**: Real-time order execution
-- **Market Data**: OHLCV ingestion and caching
-- **Auth**: Authentication and authorization
-- **User**: User preferences and profiles
+**Design principles**:
+- `core/` -- Pure computation, zero I/O, testable without mocks
+- `services/` -- Orchestration layer (LLM calls, DB, cache)
+- `routers/` -- Thin HTTP layer, Pydantic validation
+- `shared/` -- Infrastructure adapters (LLM, Postgres, Redis clients)
 
 ## Tech Stack
 
 | Layer | Technology |
 |-------|-----------|
-| Backend | Python 3.11+, gRPC-only (no HTTP/REST) |
-| AI/ML | Claude (claude-haiku-4-5-20251001), LangGraph |
-| Backtesting | VectorBT, FinRL |
-| Gateway | Envoy Gateway (gRPC-to-REST transcoding) |
-| Messaging | Redpanda (Kafka-compatible) |
-| Database | PostgreSQL, TimescaleDB |
+| Backend | Python 3.11+, FastAPI |
+| AI/ML | LiteLLM, deterministic risk rules |
+| Data | yfinance, TA-Lib, FRED API |
+| Database | PostgreSQL/TimescaleDB, Redis |
 | Frontend | TypeScript, React/Next.js |
-| Tooling | uv, buf, ruff |
+| Tooling | uv, ruff, Alembic |
 
 ## Quick Start
 
@@ -53,7 +44,6 @@ Frontend (Next.js) → Envoy Gateway (REST→gRPC) → Backend Services (gRPC)
 - Docker & Docker Compose
 - Python 3.11+
 - [uv](https://docs.astral.sh/uv/) (package manager)
-- [buf](https://buf.build/) (proto tooling)
 
 ### Setup
 
@@ -62,70 +52,116 @@ Frontend (Next.js) → Envoy Gateway (REST→gRPC) → Backend Services (gRPC)
 git clone https://github.com/yourusername/bloasis.git
 cd bloasis
 
-# 2. Generate proto files
-make proto-generate
+# 2. Install dependencies
+uv sync
 
 # 3. Start infrastructure
-docker-compose -f deploy/docker-compose.yml up -d
+docker compose -f deploy/docker-compose.yml up -d postgres redis
 
-# 4. Run a service
-cd services/market-regime
-uv run python -m src.main
+# 4. Run database migrations
+uv run alembic upgrade head
+
+# 5. Start backend
+uv run uvicorn app.main:app --reload
+
+# 6. Start frontend
+cd frontend && npm run dev
 ```
+
+Visit: **http://localhost:3000**
 
 ### Development Commands
 
 ```bash
-make proto-generate  # Generate proto files + Envoy descriptor
-make lint            # ruff check shared/ services/
-make test            # pytest with 80% coverage gate
-make check           # lint + proto-lint + test
+ruff check app/ shared/          # Lint
+ruff format app/ shared/         # Format
+pytest app/ --cov=app            # Test (80% coverage gate)
+uvicorn app.main:app --reload    # Dev server
 ```
 
 ## Project Structure
 
 ```
-services/           # Microservices (gRPC-only, Python)
-  auth/             # port 50056
-  backtesting/      # port 50058
-  classification/   # port 50054
-  executor/         # port 50060
-  market-data/      # port 50053
-  market-regime/    # port 50051
-  portfolio/        # port 50057
-  risk-committee/   # port 50059
-  strategy/         # port 50055
-  user/             # port 50052
-shared/             # Cross-service code
-  proto/            # .proto definitions (buf managed)
-  generated/        # Auto-generated (gitignored)
-  ai_clients/       # Claude API wrappers
-  prompts/          # LLM prompt templates
-  utils/            # Shared utilities
-tests/              # Integration & E2E tests
-frontend/           # Next.js dashboard
-infra/              # Envoy, Redpanda, PostgreSQL configs
-deploy/             # Docker Compose, Dockerfile
+app/                  # FastAPI monolith
+  main.py             # Entry point + lifespan
+  config.py           # Pydantic Settings (all env vars)
+  dependencies.py     # FastAPI DI + auth
+  core/               # Pure computation (no I/O)
+    models.py          # Pydantic domain models
+    risk_rules.py      # Deterministic risk evaluation
+    signal_generator.py # ATR-based signal generation
+    factor_scoring.py  # 6-factor stock scoring
+    technical_indicators.py # TA-Lib calculations
+    regime_classifier.py # Regime response parsing
+    prompts/           # LLM prompt templates
+  services/            # Business logic (orchestration)
+    strategy.py        # Analysis pipeline
+    executor.py        # Order execution + Alpaca
+    market_regime.py   # Market regime classification
+    classification.py  # Sector/asset classification
+    market_data.py     # yfinance + caching
+    portfolio.py       # Position/trade management
+    user.py            # Auth, preferences, broker
+  routers/             # REST endpoints
+    auth.py            # /v1/auth/tokens
+    market.py          # /v1/market/regimes/current
+    signals.py         # /v1/users/{id}/signals
+    trading.py         # /v1/users/{id}/trading
+    users.py           # /v1/users/{id}/preferences, broker
+    portfolios.py      # /v1/portfolios/{id}
+    orders.py          # /v1/orders
+  shared/utils/        # App utilities
+    response.py        # CamelCase JSON response
+    cache.py           # @cache_aside decorator
+shared/                # Infrastructure adapters
+  ai_clients/          # LLM client (LiteLLM)
+  utils/               # PostgresClient, RedisClient
+frontend/              # Next.js dashboard
+deploy/                # Docker Compose
 ```
+
+## API Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | /v1/auth/tokens | Login |
+| POST | /v1/auth/tokens/refresh | Refresh token |
+| DELETE | /v1/auth/tokens | Logout |
+| GET | /v1/market/regimes/current | Current market regime |
+| GET | /v1/users/{id}/preferences | Get preferences |
+| PUT | /v1/users/{id}/preferences | Update preferences |
+| GET | /v1/users/{id}/broker | Broker status |
+| PUT | /v1/users/{id}/broker | Update broker config |
+| GET | /v1/users/{id}/signals | Get cached signals |
+| POST | /v1/users/{id}/signals | Trigger analysis |
+| GET | /v1/users/{id}/trading | Trading status |
+| POST | /v1/users/{id}/trading | Start trading |
+| DELETE | /v1/users/{id}/trading | Stop trading |
+| GET | /v1/portfolios/{id} | Portfolio summary |
+| GET | /v1/portfolios/{id}/positions | Positions |
+| GET | /v1/portfolios/{id}/trades | Trade history |
+| POST | /v1/portfolios/{id}/sync | Sync with Alpaca |
+| POST | /v1/orders | Execute order |
 
 ## Testing
 
 ```bash
-# All tests with coverage
-make test
+# Full test suite with coverage
+pytest app/ --cov=app --cov-fail-under=80
 
-# Integration tests only
-uv run pytest tests/integration/
+# Core domain tests only (no mocks needed)
+pytest app/core/tests/ -v
 
-# Single service
-uv run pytest services/market-regime/tests/ --cov=src --cov-fail-under=80
+# Lint + format check
+ruff check app/ shared/
+ruff format --check app/ shared/
 ```
 
 ## Contributing
 
 1. Fork the repository
 2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Run `make check` (lint + proto-lint + tests must pass)
+3. Run `ruff check app/ shared/` and `pytest app/` (must pass)
 4. Commit: `git commit -m 'feat(scope): description'`
 5. Open a Pull Request
 
