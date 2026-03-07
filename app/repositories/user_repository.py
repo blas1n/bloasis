@@ -21,9 +21,7 @@ class UserRepository:
 
     async def find_by_id(self, user_id: uuid_mod.UUID) -> UserRecord | None:
         async with self.postgres.get_session() as session:
-            result = await session.execute(
-                select(UserRecord).where(UserRecord.user_id == user_id)
-            )
+            result = await session.execute(select(UserRecord).where(UserRecord.user_id == user_id))
             return result.scalar_one_or_none()
 
     # --- Preferences ---
@@ -31,9 +29,7 @@ class UserRepository:
     async def get_preferences(self, user_id: uuid_mod.UUID) -> UserPreferenceRecord | None:
         async with self.postgres.get_session() as session:
             result = await session.execute(
-                select(UserPreferenceRecord).where(
-                    UserPreferenceRecord.user_id == user_id
-                )
+                select(UserPreferenceRecord).where(UserPreferenceRecord.user_id == user_id)
             )
             return result.scalar_one_or_none()
 
