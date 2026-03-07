@@ -6,6 +6,7 @@ REST endpoints for running backtests, retrieving results, and comparing strategi
 import re
 import uuid
 from decimal import Decimal
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, field_validator
@@ -76,7 +77,7 @@ async def run_backtest(
     body: RunBacktestRequest,
     current_user: uuid.UUID = Depends(get_current_user),
     backtesting_svc: BacktestingService = Depends(get_backtesting_service),
-):
+) -> dict[str, Any]:
     """Run a VectorBT backtest for the given symbols and strategy."""
     from ..core.backtesting.models import BacktestConfig
 
@@ -106,7 +107,7 @@ async def get_backtest_results(
     backtest_id: str,
     current_user: uuid.UUID = Depends(get_current_user),
     backtesting_svc: BacktestingService = Depends(get_backtesting_service),
-):
+) -> dict[str, Any]:
     """Get cached backtest results by ID."""
     result = await backtesting_svc.get_results(backtest_id, user_id=str(current_user))
     if result is None:
@@ -119,7 +120,7 @@ async def compare_strategies(
     body: CompareRequest,
     current_user: uuid.UUID = Depends(get_current_user),
     backtesting_svc: BacktestingService = Depends(get_backtesting_service),
-):
+) -> dict[str, Any]:
     """Compare multiple backtest results, ranked by Sharpe ratio."""
     try:
         return await backtesting_svc.compare_strategies(body.backtestIds, user_id=str(current_user))

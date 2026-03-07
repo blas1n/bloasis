@@ -10,6 +10,7 @@ Key simplifications:
 import json
 import logging
 from datetime import UTC, datetime
+from typing import Any
 from uuid import uuid4
 
 from shared.utils.redis_client import RedisClient
@@ -166,7 +167,7 @@ class BacktestingService:
         self,
         backtest_ids: list[str],
         user_id: str = "",
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Compare multiple backtest results.
 
         Ranks strategies by Sharpe ratio and identifies the best performer.

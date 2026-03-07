@@ -5,6 +5,7 @@ No I/O dependencies.
 """
 
 import logging
+from typing import Any
 
 import numpy as np
 
@@ -159,7 +160,7 @@ class MetricsCalculator:
         return float(annual_return / max_drawdown)
 
     @staticmethod
-    def calculate_win_rate(trades: list[dict]) -> float:
+    def calculate_win_rate(trades: list[dict[str, Any]]) -> float:
         """Calculate win rate from trade list.
 
         Args:
@@ -175,7 +176,7 @@ class MetricsCalculator:
         return float(winning_trades / len(trades))
 
     @staticmethod
-    def calculate_profit_factor(trades: list[dict]) -> float:
+    def calculate_profit_factor(trades: list[dict[str, Any]]) -> float:
         """Calculate profit factor from trade list.
 
         Args:

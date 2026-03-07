@@ -21,7 +21,8 @@ def _rate_limit_key(request: Request) -> str:
                 return user_id
         except Exception:
             pass
-    return get_remote_address(request)
+    result: str = get_remote_address(request)
+    return result
 
 
 limiter = Limiter(key_func=_rate_limit_key, default_limits=["60/minute"])

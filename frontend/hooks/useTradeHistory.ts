@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { api } from "@/lib/api";
-import { Trade } from "@/lib/types";
+import client from "@/lib/api-client";
+import type { Trade, TradeHistoryResponse } from "@/lib/api-types";
 
 const DEFAULT_POLL_MS = 5000;
 
@@ -13,16 +13,23 @@ export function useTradeHistory(userId: string, limit: number = 50) {
   const fetchTrades = useCallback(async () => {
     try {
       setError(null);
-      const response = await api.getTradeHistory(userId, { limit });
-      if (response.error) {
-        setError(response.error);
+      const { data, error: apiError } = await client.GET(
+        "/v1/portfolios/{user_id}/trades",
+        {
+          params: {
+            path: { user_id: userId },
+            query: { limit },
+          },
+        }
+      );
+      if (apiError) {
+        setError("Failed to load trades");
         timeoutRef.current = setTimeout(fetchTrades, DEFAULT_POLL_MS);
-      } else if (response.data) {
-        setTrades(response.data.trades);
-        timeoutRef.current = setTimeout(
-          fetchTrades,
-          response.data.nextPollMs ?? DEFAULT_POLL_MS
-        );
+      } else if (data) {
+        // Runtime data is camelCase (CamelJSONResponse), cast accordingly
+        const camelData = data as unknown as TradeHistoryResponse;
+        setTrades(camelData.trades);
+        timeoutRef.current = setTimeout(fetchTrades, DEFAULT_POLL_MS);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load trades");

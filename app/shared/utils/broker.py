@@ -5,13 +5,14 @@ Falls back to global env settings when per-user credentials are not configured.
 """
 
 import logging
+from typing import Any
 
 from app.config import settings
 
 logger = logging.getLogger(__name__)
 
 
-def decrypt_alpaca_credentials(configs: list) -> tuple[str, str]:
+def decrypt_alpaca_credentials(configs: list[Any]) -> tuple[str, str]:
     """Decrypt Alpaca API credentials from broker config records.
 
     Args:

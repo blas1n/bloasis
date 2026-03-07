@@ -6,12 +6,14 @@ Calculates risk level from regime + VIX.
 Source: services/market-regime/src/models.py:185-226
 """
 
+from typing import Any
+
 from .models import RegimeType, RiskLevel
 
 VALID_REGIMES = {r.value for r in RegimeType}
 
 
-def parse_regime_response(data: dict) -> dict:
+def parse_regime_response(data: dict[str, Any]) -> dict[str, Any]:
     """Validate and normalize Claude's regime classification response.
 
     Args:

@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useTradingControl } from "@/hooks/useTradingControl";
-import { api } from "@/lib/api";
+import client from "@/lib/api-client";
 
 export function AITradingControl({ userId }: { userId: string }) {
   const { status, isLoading, error, startTrading, stopTrading } =
@@ -11,11 +11,15 @@ export function AITradingControl({ userId }: { userId: string }) {
   const [brokerConfigured, setBrokerConfigured] = useState<boolean | null>(null);
 
   useEffect(() => {
-    api.getBrokerStatus(userId).then((res) => {
-      if (!res.error) {
-        setBrokerConfigured(res.data.configured);
-      }
-    });
+    client
+      .GET("/v1/users/{user_id}/broker", {
+        params: { path: { user_id: userId } },
+      })
+      .then(({ data }) => {
+        if (data) {
+          setBrokerConfigured(data.configured);
+        }
+      });
   }, [userId]);
 
   const handleToggle = async () => {

@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { api } from "@/lib/api";
-import type { PortfolioSummary, Position } from "@/lib/types";
+import client from "@/lib/api-client";
+import type { PortfolioSummary, Position } from "@/lib/api-types";
 
 interface UsePortfolioResult {
   summary: PortfolioSummary | null;
@@ -31,23 +31,33 @@ export function usePortfolio(userId: string): UsePortfolioResult {
 
     // Auto-sync with Alpaca on first load (fire-and-forget on subsequent polls)
     if (isInitialLoad.current) {
-      await api.syncWithAlpaca(userId).catch(() => {});
+      await client
+        .POST("/v1/portfolios/{user_id}/sync", {
+          params: { path: { user_id: userId } },
+        })
+        .catch(() => {});
     }
 
     const [summaryRes, positionsRes] = await Promise.all([
-      api.getPortfolioSummary(userId),
-      api.getPositions(userId),
+      client.GET("/v1/portfolios/{user_id}", {
+        params: { path: { user_id: userId } },
+      }),
+      client.GET("/v1/portfolios/{user_id}/positions", {
+        params: { path: { user_id: userId } },
+      }),
     ]);
 
     if (summaryRes.error || positionsRes.error) {
-      setError(summaryRes.error || positionsRes.error || "Unknown error");
+      setError("Failed to load portfolio data");
     } else {
       setSummary((prev) => {
-        const next = summaryRes.data;
+        // Runtime data is camelCase (CamelJSONResponse), cast accordingly
+        const next = (summaryRes.data as unknown as PortfolioSummary) ?? null;
         return JSON.stringify(prev) === JSON.stringify(next) ? prev : next;
       });
       setPositions((prev) => {
-        const next = positionsRes.data?.positions || [];
+        const rawPositions = positionsRes.data?.positions || [];
+        const next = rawPositions as unknown as Position[];
         return JSON.stringify(prev) === JSON.stringify(next) ? prev : next;
       });
     }

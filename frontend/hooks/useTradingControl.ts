@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useCallback, useEffect, useRef } from "react";
-import { api } from "@/lib/api";
-import type { TradingStatus, TradingControlResponse } from "@/lib/types";
+import client from "@/lib/api-client";
+import type { TradingStatus, TradingControlResponse } from "@/lib/api-types";
 
 const DEFAULT_POLL_MS = 5000;
 
@@ -19,18 +19,24 @@ export function useTradingControl(userId: string) {
 
   const fetchStatus = useCallback(async () => {
     setError(null);
-    const { data, error: apiError } = await api.getTradingStatus(userId);
+    const { data, error: apiError } = await client.GET(
+      "/v1/users/{user_id}/trading",
+      {
+        params: { path: { user_id: userId } },
+      }
+    );
 
     if (apiError) {
-      setError(apiError);
+      setError("Failed to load trading status");
       setIsLoading(false);
       scheduleNextPoll(DEFAULT_POLL_MS, fetchStatus);
       return;
     }
 
     if (data) {
-      setStatus(data);
-      scheduleNextPoll(data.nextPollMs ?? DEFAULT_POLL_MS, fetchStatus);
+      // Runtime data is camelCase (CamelJSONResponse), cast accordingly
+      setStatus(data as unknown as TradingStatus);
+      scheduleNextPoll(DEFAULT_POLL_MS, fetchStatus);
     }
 
     setIsLoading(false);
@@ -40,19 +46,24 @@ export function useTradingControl(userId: string) {
     setIsLoading(true);
     setError(null);
 
-    const { data, error: apiError } = await api.startTrading(userId);
+    const { data, error: apiError } = await client.POST(
+      "/v1/users/{user_id}/trading",
+      {
+        params: { path: { user_id: userId } },
+      }
+    );
 
     if (apiError) {
-      setError(apiError);
+      setError("Failed to start trading");
       setIsLoading(false);
       return null;
     }
 
-    // Immediately re-fetch to get new status + updated nextPollMs (active → 3s)
+    // Immediately re-fetch to get new status + updated nextPollMs (active -> 3s)
     if (timeoutRef.current) clearTimeout(timeoutRef.current);
     await fetchStatus();
     setIsLoading(false);
-    return data;
+    return (data as unknown as TradingControlResponse) ?? null;
   }, [userId, fetchStatus]);
 
   const stopTrading = useCallback(async (
@@ -61,19 +72,25 @@ export function useTradingControl(userId: string) {
     setIsLoading(true);
     setError(null);
 
-    const { data, error: apiError } = await api.stopTrading(userId, mode);
+    const { data, error: apiError } = await client.DELETE(
+      "/v1/users/{user_id}/trading",
+      {
+        params: { path: { user_id: userId } },
+        body: { mode },
+      }
+    );
 
     if (apiError) {
-      setError(apiError);
+      setError("Failed to stop trading");
       setIsLoading(false);
       return null;
     }
 
-    // Immediately re-fetch to get new status + updated nextPollMs (inactive → 10s)
+    // Immediately re-fetch to get new status + updated nextPollMs (inactive -> 10s)
     if (timeoutRef.current) clearTimeout(timeoutRef.current);
     await fetchStatus();
     setIsLoading(false);
-    return data;
+    return (data as unknown as TradingControlResponse) ?? null;
   }, [userId, fetchStatus]);
 
   useEffect(() => {

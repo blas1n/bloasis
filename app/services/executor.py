@@ -9,6 +9,7 @@ Key simplifications:
 import logging
 import uuid
 from decimal import Decimal
+from typing import Any
 
 import httpx
 from tenacity import retry, stop_after_attempt, wait_exponential
@@ -16,7 +17,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 from shared.utils.redis_client import RedisClient
 
 from ..config import settings
-from ..core.models import OrderRequest, OrderResult, RiskLimits
+from ..core.models import OrderRequest, OrderResult, OrderSide, RiskLimits
 from ..core.risk_rules import evaluate_risk
 from ..repositories.user_repository import UserRepository
 from .market_data import MarketDataService
@@ -61,7 +62,7 @@ class ExecutorService:
                 return OrderResult(
                     order_id="",
                     symbol=symbol,
-                    side=side,
+                    side=OrderSide(side),
                     qty=qty,
                     status="rejected",
                     error_message="Cannot determine price",
@@ -74,7 +75,7 @@ class ExecutorService:
         order = OrderRequest(
             user_id=str(user_id),
             symbol=symbol,
-            side=side,
+            side=OrderSide(side),
             qty=qty,
             price=price,
             sector=sector,
@@ -94,7 +95,7 @@ class ExecutorService:
             return OrderResult(
                 order_id="",
                 symbol=symbol,
-                side=side,
+                side=OrderSide(side),
                 qty=qty,
                 status="rejected",
                 error_message=risk_result.reasoning,
@@ -132,7 +133,7 @@ class ExecutorService:
                 return OrderResult(
                     order_id=result.order_id,
                     symbol=symbol,
-                    side=side,
+                    side=OrderSide(side),
                     qty=effective_qty,
                     status="error",
                     error_message=str(e),
@@ -157,7 +158,7 @@ class ExecutorService:
                 return OrderResult(
                     order_id="",
                     symbol=symbol,
-                    side=side,
+                    side=OrderSide(side),
                     qty=qty,
                     status="rejected",
                     error_message="Alpaca API keys not configured",
@@ -170,7 +171,7 @@ class ExecutorService:
                 "APCA-API-KEY-ID": settings.alpaca_api_key,
                 "APCA-API-SECRET-KEY": settings.alpaca_secret_key,
             }
-            payload: dict = {
+            payload: dict[str, str] = {
                 "symbol": symbol,
                 "qty": str(qty),
                 "side": side,
@@ -189,7 +190,7 @@ class ExecutorService:
                 return OrderResult(
                     order_id="",
                     symbol=symbol,
-                    side=side,
+                    side=OrderSide(side),
                     qty=qty,
                     status="rejected",
                     error_message=f"Alpaca error: {resp.status_code}",
@@ -200,7 +201,7 @@ class ExecutorService:
                 order_id=data["id"],
                 client_order_id=data.get("client_order_id", ""),
                 symbol=data["symbol"],
-                side=data["side"],
+                side=OrderSide(data["side"]),
                 qty=Decimal(data["qty"]),
                 status=data["status"],
                 filled_qty=Decimal(data.get("filled_qty") or "0"),
@@ -229,14 +230,14 @@ class ExecutorService:
             order_id=order_id,
             client_order_id=order_id,
             symbol=symbol,
-            side=side,
+            side=OrderSide(side),
             qty=qty,
             status="filled",
             filled_qty=qty,
             filled_avg_price=price,
         )
 
-    async def get_trading_status(self, user_id: uuid.UUID) -> dict:
+    async def get_trading_status(self, user_id: uuid.UUID) -> dict[str, Any]:
         """Get automated trading status for a user.
 
         Checks Redis first (fast path), falls back to DB for durability.
@@ -262,14 +263,14 @@ class ExecutorService:
 
         return {"tradingEnabled": False, "status": "inactive", "lastChanged": ""}
 
-    async def start_trading(self, user_id: uuid.UUID) -> dict:
+    async def start_trading(self, user_id: uuid.UUID) -> dict[str, Any]:
         """Start automated trading for a user."""
         await self.redis.setex(f"trading:{user_id}:status", 86400, "active")
         if self.user_repo:
             await self.user_repo.update_trading_enabled(user_id, True)
         return {"tradingEnabled": True, "status": "active"}
 
-    async def stop_trading(self, user_id: uuid.UUID, mode: str = "soft") -> dict:
+    async def stop_trading(self, user_id: uuid.UUID, mode: str = "soft") -> dict[str, Any]:
         """Stop automated trading for a user."""
         status = f"{mode}_stopped"
         await self.redis.setex(f"trading:{user_id}:status", 86400, status)

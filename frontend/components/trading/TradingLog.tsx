@@ -13,12 +13,12 @@ export function TradingLog({ userId }: { userId: string }) {
     );
   }
 
-  const formatCurrency = (value: number) => {
+  const formatCurrency = (value: number | string) => {
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
       currency: 'USD',
       minimumFractionDigits: 2,
-    }).format(value);
+    }).format(Number(value));
   };
 
   const formatDateTime = (dateString: string) => {
@@ -85,12 +85,12 @@ export function TradingLog({ userId }: { userId: string }) {
               )}
 
               {/* Realized P&L (for sell trades) */}
-              {trade.side === "sell" && trade.realizedPnl !== 0 && (
+              {trade.side === "sell" && Number(trade.realizedPnl) !== 0 && (
                 <div className="mt-2 text-sm">
                   <span className="text-text-muted">Realized P&L: </span>
                   <span
                     className={
-                      trade.realizedPnl > 0
+                      Number(trade.realizedPnl) > 0
                         ? "text-theme-success"
                         : "text-theme-danger"
                     }

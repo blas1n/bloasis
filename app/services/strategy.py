@@ -14,6 +14,7 @@ import logging
 import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
+from typing import Any
 
 from shared.ai_clients.llm_client import LLMClient
 from shared.utils.redis_client import RedisClient
@@ -106,7 +107,7 @@ class StrategyService:
         )
 
         # 4. AI analysis — single Claude call (Technical + Risk merged)
-        ohlcv_data: dict[str, list[dict]] = {}
+        ohlcv_data: dict[str, list[dict[str, Any]]] = {}
         ohlcv_summary_parts = []
         for pick in picks[:10]:
             bars = await self.market_data.get_ohlcv(pick.symbol)
@@ -212,12 +213,12 @@ class StrategyService:
 
     async def _run_ai_analysis(
         self,
-        stock_data: list[dict],
+        stock_data: list[dict[str, Any]],
         ohlcv_summary: str,
         regime: MarketRegime,
         risk_profile: str,
         excluded_sectors: list[str],
-    ) -> list[dict]:
+    ) -> list[dict[str, Any]]:
         """Run unified AI analysis (Technical + Risk in one call)."""
         market_context = {
             "regime": regime.regime,
@@ -250,8 +251,8 @@ class StrategyService:
 
     def _generate_signals(
         self,
-        analysis_results: list[dict],
-        ohlcv_data: dict[str, list[dict]],
+        analysis_results: list[dict[str, Any]],
+        ohlcv_data: dict[str, list[dict[str, Any]]],
         risk_level: str,
         risk_profile: str,
     ) -> list[TradingSignal]:

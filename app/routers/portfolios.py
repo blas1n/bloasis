@@ -2,20 +2,27 @@
 
 import uuid
 from decimal import Decimal
+from typing import Any
 
 from fastapi import APIRouter, Depends, Query
 
+from ..core.responses import (
+    PortfolioSummaryResponse,
+    PositionsResponse,
+    SyncResponse,
+    TradeHistoryResponse,
+)
 from ..dependencies import get_portfolio_service, verify_user_access
 from ..services.portfolio import PortfolioService
 
 router = APIRouter()
 
 
-@router.get("/{user_id}")
+@router.get("/{user_id}", response_model=PortfolioSummaryResponse)
 async def get_portfolio(
     user_id: uuid.UUID = Depends(verify_user_access),
     portfolio_svc: PortfolioService = Depends(get_portfolio_service),
-):
+) -> dict[str, Any]:
     """Get portfolio summary with computed metrics."""
     portfolio = await portfolio_svc.get_portfolio(user_id)
     data = portfolio.model_dump()
@@ -35,22 +42,22 @@ async def get_portfolio(
     return data
 
 
-@router.get("/{user_id}/positions")
+@router.get("/{user_id}/positions", response_model=PositionsResponse)
 async def get_positions(
     user_id: uuid.UUID = Depends(verify_user_access),
     portfolio_svc: PortfolioService = Depends(get_portfolio_service),
-):
+) -> dict[str, Any]:
     """Get all portfolio positions."""
     positions = await portfolio_svc.get_positions(user_id)
-    return {"userId": user_id, "positions": [p.model_dump() for p in positions]}
+    return {"userId": str(user_id), "positions": [p.model_dump() for p in positions]}
 
 
-@router.get("/{user_id}/trades")
+@router.get("/{user_id}/trades", response_model=TradeHistoryResponse)
 async def get_trades(
     user_id: uuid.UUID = Depends(verify_user_access),
     limit: int = Query(default=20, ge=1, le=100),
     portfolio_svc: PortfolioService = Depends(get_portfolio_service),
-):
+) -> dict[str, Any]:
     """Get trade history."""
     trades = await portfolio_svc.get_trades(user_id, limit=limit)
     total_pnl = sum((t.realized_pnl for t in trades), Decimal("0"))
@@ -60,10 +67,10 @@ async def get_trades(
     }
 
 
-@router.post("/{user_id}/sync")
+@router.post("/{user_id}/sync", response_model=SyncResponse)
 async def sync_portfolio(
     user_id: uuid.UUID = Depends(verify_user_access),
     portfolio_svc: PortfolioService = Depends(get_portfolio_service),
-):
+) -> dict[str, Any]:
     """Sync positions from Alpaca broker."""
     return await portfolio_svc.sync_with_alpaca(user_id)

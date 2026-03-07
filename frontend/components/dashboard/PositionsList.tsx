@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/Badge";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import { ErrorMessage } from "@/components/ui/ErrorMessage";
 import { formatCurrency, formatPercent } from "@/lib/formatters";
-import type { Position } from "@/lib/types";
+import type { Position } from "@/lib/api-types";
 
 interface PositionsListProps {
   userId?: string;
@@ -104,7 +104,7 @@ export function PositionsList({
                 <td className="px-4 py-3 whitespace-nowrap text-right">
                   <div
                     className={
-                      position.unrealizedPnl >= 0
+                      Number(position.unrealizedPnl) >= 0
                         ? "text-theme-success"
                         : "text-theme-danger"
                     }
@@ -114,7 +114,7 @@ export function PositionsList({
                     </span>
                     <Badge
                       variant={
-                        position.unrealizedPnlPercent >= 0 ? "success" : "danger"
+                        Number(position.unrealizedPnlPercent) >= 0 ? "success" : "danger"
                       }
                       className="ml-2"
                     >

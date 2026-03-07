@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useCallback, useEffect } from "react";
-import { api } from "@/lib/api";
-import type { UserPreferences, RiskProfile } from "@/lib/types";
+import client from "@/lib/api-client";
+import type { UserPreferences, RiskProfile } from "@/lib/api-types";
 
 export function useRiskProfile(userId: string) {
   const [preferences, setPreferences] = useState<UserPreferences | null>(null);
@@ -11,12 +11,18 @@ export function useRiskProfile(userId: string) {
 
   const fetchPreferences = useCallback(async () => {
     setIsLoading(true);
-    const { data, error: apiError } = await api.getUserPreferences(userId);
+    const { data, error: apiError } = await client.GET(
+      "/v1/users/{user_id}/preferences",
+      {
+        params: { path: { user_id: userId } },
+      }
+    );
 
     if (apiError) {
-      setError(apiError);
+      setError("Failed to load preferences");
     } else if (data) {
-      setPreferences(data);
+      // Runtime data is camelCase (CamelJSONResponse), cast accordingly
+      setPreferences(data as unknown as UserPreferences);
     }
 
     setIsLoading(false);
@@ -26,15 +32,27 @@ export function useRiskProfile(userId: string) {
     async (riskProfile: RiskProfile) => {
       if (!preferences) return;
       setIsLoading(true);
-      const { data, error: apiError } = await api.updatePreferences(userId, {
-        ...preferences,
-        riskProfile,
-      });
+      const { data, error: apiError } = await client.PUT(
+        "/v1/users/{user_id}/preferences",
+        {
+          params: { path: { user_id: userId } },
+          body: {
+            riskProfile,
+            maxPortfolioRisk: preferences.maxPortfolioRisk,
+            maxPositionSize: preferences.maxPositionSize,
+            preferredSectors: preferences.preferredSectors ?? [],
+            excludedSectors: preferences.excludedSectors ?? [],
+            enableNotifications: preferences.enableNotifications,
+            tradingEnabled: preferences.tradingEnabled,
+          },
+        }
+      );
 
       if (apiError) {
-        setError(apiError);
+        setError("Failed to update risk profile");
       } else if (data) {
-        setPreferences(data);
+        // Runtime data is camelCase (CamelJSONResponse), cast accordingly
+        setPreferences(data as unknown as UserPreferences);
       }
 
       setIsLoading(false);

@@ -17,7 +17,7 @@ _LOCK_TTL = 30  # seconds — max time to hold a computation lock
 def cache_aside(
     key_fn: Callable[..., str],
     ttl: int = 300,
-):
+) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """Cache-aside decorator for async methods.
 
     The decorated method must belong to a class with a `redis` attribute
@@ -37,7 +37,7 @@ def cache_aside(
             return await self._fetch_from_api(symbol, period)
     """
 
-    def decorator(func: Callable) -> Callable:
+    def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
         @functools.wraps(func)
         async def wrapper(self: Any, *args: Any, **kwargs: Any) -> Any:
             redis = getattr(self, "redis", None)

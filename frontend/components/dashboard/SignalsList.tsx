@@ -2,7 +2,7 @@
 
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
-import type { Signal } from "@/lib/types";
+import type { Signal } from "@/lib/api-types";
 
 interface SignalsListProps {
   signals: Signal[];
@@ -72,17 +72,17 @@ export function SignalsList({ signals, isLoading }: SignalsListProps) {
               </div>
               <p className="text-sm text-text-secondary mt-1">{signal.rationale}</p>
               <div className="flex gap-4 mt-2 text-xs text-text-secondary">
-                <span>SL: ${signal.stopLoss.toFixed(2)}</span>
-                <span>TP: ${signal.takeProfit.toFixed(2)}</span>
+                <span>SL: ${Number(signal.stopLoss).toFixed(2)}</span>
+                <span>TP: ${Number(signal.takeProfit).toFixed(2)}</span>
               </div>
             </div>
 
             <div className="text-right">
               <p className="text-sm font-medium text-text-primary">
-                {(signal.confidence * 100).toFixed(0)}%
+                {(Number(signal.confidence) * 100).toFixed(0)}%
               </p>
               <p className="text-xs text-text-secondary">
-                Size: {(signal.sizeRecommendation * 100).toFixed(1)}%
+                Size: {(Number(signal.sizeRecommendation) * 100).toFixed(1)}%
               </p>
             </div>
           </div>

@@ -1,10 +1,12 @@
 """Auth router — /v1/auth/tokens"""
 
 import uuid
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
+from ..core.responses import RefreshTokenResponse, SuccessResponse, TokenResponse, UserInfoResponse
 from ..dependencies import get_current_user, get_user_service
 from ..rate_limit import limiter
 from ..services.user import UserService
@@ -21,13 +23,13 @@ class RefreshRequest(BaseModel):
     refreshToken: str
 
 
-@router.post("/tokens")
+@router.post("/tokens", response_model=TokenResponse)
 @limiter.limit("10/minute")
 async def login(
     request: Request,
     body: LoginRequest,
     user_svc: UserService = Depends(get_user_service),
-):
+) -> dict[str, Any]:
     """Login — create tokens."""
     result = await user_svc.login(body.email, body.password)
     if not result:
@@ -35,11 +37,11 @@ async def login(
     return result
 
 
-@router.get("/me")
+@router.get("/me", response_model=UserInfoResponse)
 async def me(
     user_id: uuid.UUID = Depends(get_current_user),
     user_svc: UserService = Depends(get_user_service),
-):
+) -> dict[str, Any]:
     """Get current user info from validated JWT."""
     info = await user_svc.get_user_info(user_id)
     if not info:
@@ -47,13 +49,13 @@ async def me(
     return info
 
 
-@router.post("/tokens/refresh")
+@router.post("/tokens/refresh", response_model=RefreshTokenResponse)
 @limiter.limit("10/minute")
 async def refresh(
     request: Request,
     body: RefreshRequest,
     user_svc: UserService = Depends(get_user_service),
-):
+) -> dict[str, Any]:
     """Refresh access token."""
     result = await user_svc.refresh_token(body.refreshToken)
     if not result:
@@ -61,13 +63,13 @@ async def refresh(
     return result
 
 
-@router.delete("/tokens")
+@router.delete("/tokens", response_model=SuccessResponse)
 @limiter.limit("10/minute")
 async def logout(
     request: Request,
     body: RefreshRequest,
     user_svc: UserService = Depends(get_user_service),
-):
+) -> dict[str, Any]:
     """Logout — invalidate tokens."""
     await user_svc.logout(body.refreshToken)
     return {"success": True}

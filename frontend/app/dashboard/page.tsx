@@ -29,12 +29,12 @@ export default function DashboardPage() {
         <MetricCard
           label="Daily P&L"
           value={summary ? `${formatCurrency(summary.dailyPnl)} (${formatPercent(summary.dailyPnlPct)})` : "—"}
-          trend={summary && summary.dailyPnl >= 0 ? "up" : "down"}
+          trend={summary && Number(summary.dailyPnl) >= 0 ? "up" : "down"}
         />
         <MetricCard
           label="Unrealized P&L"
           value={summary ? formatCurrency(summary.unrealizedPnl) : "—"}
-          trend={summary && summary.unrealizedPnl >= 0 ? "up" : "down"}
+          trend={summary && Number(summary.unrealizedPnl) >= 0 ? "up" : "down"}
         />
         <MetricCard
           label="Buying Power"

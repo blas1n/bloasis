@@ -1,4 +1,4 @@
-import { Trade } from "@/lib/types";
+import type { Trade } from "@/lib/api-types";
 import { Card, LoadingSpinner, ErrorMessage, Badge } from "@/components/ui";
 import { formatCurrency, formatDateTime } from "@/lib/formatters";
 
@@ -74,10 +74,10 @@ export function TradeHistoryTable({
                   {formatDateTime(trade.executedAt)}
                 </td>
                 <td className="px-4 py-3 text-right">
-                  {trade.realizedPnl !== 0 && (
+                  {Number(trade.realizedPnl) !== 0 && (
                     <span
                       className={
-                        trade.realizedPnl >= 0
+                        Number(trade.realizedPnl) >= 0
                           ? "text-green-600 dark:text-green-400"
                           : "text-red-600 dark:text-red-400"
                       }

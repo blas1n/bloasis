@@ -7,13 +7,14 @@ Uses core/regime_classifier.py for pure parsing logic.
 import asyncio
 import logging
 from datetime import UTC, datetime
+from typing import Any
 
 from shared.ai_clients.llm_client import LLMClient
 from shared.utils.postgres_client import PostgresClient
 from shared.utils.redis_client import RedisClient
 
 from ..config import settings
-from ..core.models import MarketRegime, MarketRegimeIndicators, RiskLevel
+from ..core.models import MarketRegime, MarketRegimeIndicators, RegimeType, RiskLevel
 from ..core.prompts.regime import REGIME_SYSTEM_PROMPT, format_regime_prompt
 from ..core.regime_classifier import calculate_risk_level, parse_regime_response
 from .macro import MacroService
@@ -87,7 +88,7 @@ class MarketRegimeService:
             risk_level = calculate_risk_level(result["regime"], vix)
 
             return MarketRegime(
-                regime=result["regime"],
+                regime=RegimeType(result["regime"]),
                 confidence=result["confidence"],
                 timestamp=datetime.now(UTC).isoformat(),
                 trigger=trigger,
@@ -105,15 +106,15 @@ class MarketRegimeService:
             logger.error("Regime classification failed", extra={"error": str(e)})
             return self._fallback_regime()
 
-    async def _fetch_market_data(self) -> dict:
+    async def _fetch_market_data(self) -> dict[str, Any]:
         """Fetch VIX and S&P 500 data via yfinance (run in thread to avoid blocking)."""
         return await asyncio.to_thread(self._sync_fetch_market_data)
 
-    def _sync_fetch_market_data(self) -> dict:
+    def _sync_fetch_market_data(self) -> dict[str, Any]:
         """Synchronous yfinance calls for VIX and S&P 500."""
         import yfinance as yf
 
-        data: dict = {"vix": 20.0, "sp500_1m_change": 0.0, "sp500_trend": "neutral"}
+        data: dict[str, Any] = {"vix": 20.0, "sp500_1m_change": 0.0, "sp500_trend": "neutral"}
 
         try:
             vix_ticker = yf.Ticker("^VIX")
@@ -136,7 +137,7 @@ class MarketRegimeService:
 
         return data
 
-    async def _fetch_macro_indicators(self) -> dict:
+    async def _fetch_macro_indicators(self) -> dict[str, Any]:
         """Fetch macro economic indicators from FRED + yfinance treasury yields."""
         # Get FRED indicators via MacroService
         if self.macro_svc:
@@ -181,7 +182,7 @@ class MarketRegimeService:
     def _fallback_regime(self) -> MarketRegime:
         """Return conservative default when classification fails."""
         return MarketRegime(
-            regime="sideways",
+            regime=RegimeType("sideways"),
             confidence=0.5,
             timestamp=datetime.now(UTC).isoformat(),
             trigger="fallback",

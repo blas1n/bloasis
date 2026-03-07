@@ -10,7 +10,7 @@ import logging
 import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from tenacity import retry, stop_after_attempt, wait_exponential
 
@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from .market_data import MarketDataService
 
 from ..config import settings
-from ..core.models import Portfolio, Position, Trade
+from ..core.models import OrderSide, Portfolio, Position, Trade
 from ..repositories.portfolio_repository import PortfolioRepository
 from ..repositories.trade_repository import TradeRepository
 from ..repositories.user_repository import UserRepository
@@ -132,7 +132,7 @@ class PortfolioService:
             Trade(
                 order_id=row.order_id,
                 symbol=row.symbol,
-                side=row.action.lower(),
+                side=OrderSide(row.action.lower()),
                 qty=Decimal(row.quantity),
                 price=row.price,
                 commission=row.commission or Decimal("0"),
@@ -169,7 +169,7 @@ class PortfolioService:
         )
         await self.redis.delete(f"user:{user_id}:portfolio")
 
-    async def sync_with_alpaca(self, user_id: uuid.UUID) -> dict:
+    async def sync_with_alpaca(self, user_id: uuid.UUID) -> dict[str, Any]:
         """Sync positions from Alpaca broker.
 
         Reconciles local DB with Alpaca as source of truth:
@@ -187,7 +187,7 @@ class PortfolioService:
         headers = {"APCA-API-KEY-ID": api_key, "APCA-API-SECRET-KEY": secret_key}
 
         @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1, max=10))
-        async def _fetch_alpaca_data() -> tuple[dict, list]:
+        async def _fetch_alpaca_data() -> tuple[dict[str, Any], list[dict[str, Any]]]:
             async with httpx.AsyncClient(base_url=settings.alpaca_base_url) as client:
                 acct_resp = await client.get("/v2/account", headers=headers, timeout=30)
                 acct_resp.raise_for_status()

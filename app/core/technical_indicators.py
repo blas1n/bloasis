@@ -7,6 +7,7 @@ Source: services/strategy/src/technical_indicators.py (moved as-is, already pure
 """
 
 from dataclasses import dataclass, field
+from typing import Any
 
 import numpy as np
 import talib
@@ -51,7 +52,7 @@ class TechnicalIndicators:
 
 def calculate_indicators(
     symbol: str,
-    bars: list[dict],
+    bars: list[dict[str, Any]],
 ) -> TechnicalIndicators | None:
     """Calculate all technical indicators for a symbol.
 

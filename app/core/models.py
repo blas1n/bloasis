@@ -6,6 +6,7 @@ These represent the core domain concepts shared across the application.
 
 from decimal import Decimal
 from enum import StrEnum
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -177,7 +178,7 @@ class RiskResult(BaseModel):
     action: RiskDecision
     risk_score: float = Field(ge=0, le=1, default=0.0)
     reasoning: str = ""
-    adjustments: list[dict] = Field(default_factory=list)
+    adjustments: list[dict[str, Any]] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     adjusted_size: Decimal | None = None
 

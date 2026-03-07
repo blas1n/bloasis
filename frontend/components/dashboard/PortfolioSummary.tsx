@@ -4,7 +4,7 @@ import { usePortfolio } from "@/hooks/usePortfolio";
 import { Card } from "@/components/ui/Card";
 import { ErrorMessage } from "@/components/ui/ErrorMessage";
 import { formatCurrency, formatPercent } from "@/lib/formatters";
-import type { PortfolioSummary as PortfolioSummaryType } from "@/lib/types";
+import type { PortfolioSummary as PortfolioSummaryType } from "@/lib/api-types";
 
 interface PortfolioSummaryProps {
   userId?: string;
@@ -62,7 +62,7 @@ export function PortfolioSummary({
         </p>
         <div>
           <p className="text-xs text-text-muted mb-1">Daily P&amp;L</p>
-          <p className={`text-lg font-bold font-mono ${summary.dailyPnl >= 0 ? "text-theme-success" : "text-theme-danger"}`}>
+          <p className={`text-lg font-bold font-mono ${Number(summary.dailyPnl) >= 0 ? "text-theme-success" : "text-theme-danger"}`}>
             {formatCurrency(summary.dailyPnl)}
             <span className="text-sm font-normal ml-2">
               ({formatPercent(summary.dailyPnlPct)})
@@ -86,10 +86,10 @@ export function PortfolioSummary({
         </div>
         <div>
           <p className="text-xs text-text-muted mb-1">Total P&amp;L</p>
-          <p className={`text-2xl font-bold font-mono ${summary.unrealizedPnl >= 0 ? "text-theme-success" : "text-theme-danger"}`}>
+          <p className={`text-2xl font-bold font-mono ${Number(summary.unrealizedPnl) >= 0 ? "text-theme-success" : "text-theme-danger"}`}>
             {formatCurrency(summary.unrealizedPnl)}
             <span className="text-sm font-normal ml-2">
-              ({formatPercent(summary.unrealizedPnl / summary.totalEquity * 100)})
+              ({formatPercent(Number(summary.unrealizedPnl) / Number(summary.totalEquity) * 100)})
             </span>
           </p>
         </div>

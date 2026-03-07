@@ -175,6 +175,7 @@ def decode_jwt_user_id(token: str) -> str | None:
         payload = jwt.decode(token, settings.jwt_public_key, algorithms=[settings.jwt_algorithm])
         if payload.get("type") != "access":
             return None
-        return payload.get("sub")
+        sub: str | None = payload.get("sub")
+        return sub
     except jwt.InvalidTokenError:
         return None

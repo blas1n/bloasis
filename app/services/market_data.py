@@ -39,12 +39,14 @@ class MarketDataService:
         key_fn=lambda self, symbol, period, interval: f"ohlcv:{symbol}:{period}:{interval}",
         ttl=settings.cache_ohlcv_ttl,
     )
-    async def get_ohlcv(self, symbol: str, period: str = "3mo", interval: str = "1d") -> list[dict]:
+    async def get_ohlcv(
+        self, symbol: str, period: str = "3mo", interval: str = "1d"
+    ) -> list[dict[str, Any]]:
         """Get OHLCV data for a symbol."""
         _validate_symbol(symbol)
         return await asyncio.to_thread(self._sync_get_ohlcv, symbol, period, interval)
 
-    def _sync_get_ohlcv(self, symbol: str, period: str, interval: str) -> list[dict]:
+    def _sync_get_ohlcv(self, symbol: str, period: str, interval: str) -> list[dict[str, Any]]:
         ticker = yf.Ticker(symbol)
         df = ticker.history(period=period, interval=interval)
 
@@ -134,7 +136,8 @@ class MarketDataService:
     def _sync_get_previous_close(self, symbol: str) -> float | None:
         ticker = yf.Ticker(symbol)
         info = ticker.info
-        return info.get("previousClose")
+        value = info.get("previousClose")
+        return float(value) if value is not None else None
 
     async def get_average_volume(self, symbol: str, days: int = 20) -> float:
         """Get average daily volume for a symbol."""

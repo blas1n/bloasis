@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { api } from "@/lib/api";
-import type { Signal } from "@/lib/types";
+import client from "@/lib/api-client";
+import type { Signal } from "@/lib/api-types";
 
 interface UseSignalsResult {
   signals: Signal[];
@@ -20,12 +20,19 @@ export function useSignals(userId: string): UseSignalsResult {
     setIsLoading(true);
     setError(null);
 
-    const result = await api.getSignals(userId);
+    const { data, error: apiError } = await client.GET(
+      "/v1/users/{user_id}/signals",
+      {
+        params: { path: { user_id: userId } },
+      }
+    );
 
-    if (result.error) {
-      setError(result.error);
+    if (apiError) {
+      setError("Failed to load signals");
     } else {
-      setSignals(result.data?.signals || []);
+      // Runtime data is camelCase (CamelJSONResponse), cast accordingly
+      const rawSignals = data?.signals || [];
+      setSignals(rawSignals as unknown as Signal[]);
     }
 
     setIsLoading(false);
