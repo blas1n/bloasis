@@ -31,6 +31,11 @@ RUN uv pip install --system --no-cache .
 COPY app/ ./app/
 COPY shared/ ./shared/
 
+# Copy migration files
+COPY alembic.ini ./
+COPY deploy/entrypoint.sh ./entrypoint.sh
+RUN chmod +x ./entrypoint.sh
+
 # Set PYTHONPATH
 ENV PYTHONPATH=/app
 
@@ -43,4 +48,5 @@ EXPOSE 8000
 HEALTHCHECK --interval=10s --timeout=5s --retries=3 --start-period=15s \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"
 
+ENTRYPOINT ["./entrypoint.sh"]
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
