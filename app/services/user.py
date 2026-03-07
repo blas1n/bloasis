@@ -7,6 +7,7 @@ import logging
 import uuid
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from typing import Any
 
 import bcrypt
 import jwt
@@ -14,7 +15,7 @@ import jwt
 from shared.utils.redis_client import RedisClient
 
 from ..config import settings
-from ..core.models import UserPreferences
+from ..core.models import RiskProfile, UserPreferences
 from ..repositories.user_repository import UserRepository
 
 logger = logging.getLogger(__name__)
@@ -29,7 +30,7 @@ class UserService:
 
     # --- Authentication ---
 
-    async def login(self, email: str, password: str) -> dict | None:
+    async def login(self, email: str, password: str) -> dict[str, Any] | None:
         """Authenticate user and return tokens."""
         row = await self.user_repo.find_by_email(email)
         if not row:
@@ -55,7 +56,7 @@ class UserService:
             "name": row.name,
         }
 
-    async def refresh_token(self, refresh_token: str) -> dict | None:
+    async def refresh_token(self, refresh_token: str) -> dict[str, Any] | None:
         """Refresh access token using refresh token."""
         user_id = await self.redis.get(f"refresh:{refresh_token}")
         if not user_id:
@@ -68,7 +69,7 @@ class UserService:
         """Invalidate refresh token."""
         await self.redis.delete(f"refresh:{refresh_token}")
 
-    async def get_user_info(self, user_id: uuid.UUID) -> dict | None:
+    async def get_user_info(self, user_id: uuid.UUID) -> dict[str, Any] | None:
         """Get basic user info by ID. Returns None if not found."""
         row = await self.user_repo.find_by_id(user_id)
         if not row:
@@ -112,7 +113,7 @@ class UserService:
         if row:
             prefs = UserPreferences(
                 user_id=uid_str,
-                risk_profile=row.risk_profile,
+                risk_profile=RiskProfile(row.risk_profile),
                 max_portfolio_risk=row.max_portfolio_risk,
                 max_position_size=row.max_position_size,
                 preferred_sectors=list(row.preferred_sectors) if row.preferred_sectors else [],
@@ -145,7 +146,7 @@ class UserService:
 
     # --- Broker ---
 
-    async def get_broker_status(self, user_id: uuid.UUID) -> dict:
+    async def get_broker_status(self, user_id: uuid.UUID) -> dict[str, Any]:
         """Get broker connection status by testing Alpaca API connectivity."""
         configs = await self.user_repo.get_broker_config(user_id)
         configured = len(configs) > 0
@@ -203,7 +204,7 @@ class UserService:
             }
 
     @staticmethod
-    def _decrypt_broker_credentials(configs: list) -> tuple[str, str]:
+    def _decrypt_broker_credentials(configs: list[Any]) -> tuple[str, str]:
         """Decrypt broker credentials from stored config."""
         from ..shared.utils.broker import decrypt_alpaca_credentials
 
@@ -211,7 +212,7 @@ class UserService:
 
     async def update_broker_config(
         self, user_id: uuid.UUID, api_key: str, secret_key: str, paper: bool
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Update broker configuration for a specific user."""
         from cryptography.fernet import Fernet
 

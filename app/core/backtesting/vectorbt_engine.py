@@ -56,7 +56,7 @@ class VectorBTEngine:
     def backtest_ma_crossover(
         self,
         symbol: str,
-        ohlcv: list[dict],
+        ohlcv: list[dict[str, Any]],
         backtest_config: BacktestConfig,
         fast_window: int = 10,
         slow_window: int = 50,
@@ -101,7 +101,7 @@ class VectorBTEngine:
     def backtest_rsi(
         self,
         symbol: str,
-        ohlcv: list[dict],
+        ohlcv: list[dict[str, Any]],
         backtest_config: BacktestConfig,
         rsi_window: int = 14,
         oversold: int = 30,
@@ -217,7 +217,7 @@ class VectorBTEngine:
             passed=passed,
         )
 
-    def _safe_get(self, stats: dict, key: str, default: float) -> float:
+    def _safe_get(self, stats: dict[str, Any], key: str, default: float) -> float:
         """Safely get value from stats dict.
 
         Args:
@@ -233,7 +233,7 @@ class VectorBTEngine:
             return default
         return float(value)
 
-    def _calc_avg_duration(self, stats: dict) -> float:
+    def _calc_avg_duration(self, stats: dict[str, Any]) -> float:
         """Calculate average trade duration in days.
 
         Args:
@@ -287,7 +287,7 @@ class VectorBTEngine:
             passed=False,
         )
 
-    def _to_dataframe(self, ohlcv: list[dict]) -> pd.DataFrame:
+    def _to_dataframe(self, ohlcv: list[dict[str, Any]]) -> pd.DataFrame:
         """Convert OHLCV data to DataFrame.
 
         Converts Decimal values to float for numpy/vectorbt compatibility.

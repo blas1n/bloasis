@@ -2,7 +2,7 @@
 
 import { useRiskProfile } from "@/hooks/useRiskProfile";
 import { Card } from "@/components/ui/Card";
-import type { RiskProfile } from "@/lib/types";
+import type { RiskProfile } from "@/lib/api-types";
 
 export function RiskProfileCard({ userId }: { userId: string }) {
   const { riskProfile, isLoading, error, updateRiskProfile } = useRiskProfile(userId);

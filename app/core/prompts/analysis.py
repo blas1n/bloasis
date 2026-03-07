@@ -60,7 +60,7 @@ Output JSON array:
 
 
 def format_analysis_prompt(
-    stock_data: list[dict],
+    stock_data: list[dict[str, Any]],
     ohlcv_summary: str,
     market_context: dict[str, Any],
     user_preferences: dict[str, Any],

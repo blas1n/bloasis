@@ -1,9 +1,9 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { api } from "@/lib/api";
+import client from "@/lib/api-client";
 import { useAuth } from "@/lib/auth-context";
-import type { BrokerStatus } from "@/lib/types";
+import type { BrokerStatus } from "@/lib/api-types";
 
 export default function SettingsPage() {
   const { user } = useAuth();
@@ -19,9 +19,11 @@ export default function SettingsPage() {
   } | null>(null);
 
   const checkStatus = useCallback(async () => {
-    const res = await api.getBrokerStatus(userId);
-    if (!res.error) {
-      setStatus(res.data);
+    const { data } = await client.GET("/v1/users/{user_id}/broker", {
+      params: { path: { user_id: userId } },
+    });
+    if (data) {
+      setStatus(data as unknown as BrokerStatus);
     }
   }, [userId]);
 
@@ -39,29 +41,35 @@ export default function SettingsPage() {
     setMessage(null);
 
     // 1. Save credentials
-    const saveRes = await api.updateBrokerConfig(userId, { apiKey, secretKey, paper });
+    const saveRes = await client.PUT("/v1/users/{user_id}/broker", {
+      params: { path: { user_id: userId } },
+      body: { apiKey, secretKey, paper },
+    });
     if (saveRes.error) {
-      setMessage({ type: "error", text: saveRes.error });
+      setMessage({ type: "error", text: "Failed to save broker config" });
       setSaving(false);
       return;
     }
 
     // 2. Test connection with saved credentials
-    const testRes = await api.getBrokerStatus(userId);
+    const testRes = await client.GET("/v1/users/{user_id}/broker", {
+      params: { path: { user_id: userId } },
+    });
+    const testData = testRes.data as unknown as BrokerStatus | undefined;
     if (testRes.error) {
-      setMessage({ type: "error", text: testRes.error });
-    } else if (!testRes.data.connected) {
+      setMessage({ type: "error", text: "Failed to test connection" });
+    } else if (testData && !testData.connected) {
       setMessage({
         type: "error",
-        text: testRes.data.errorMessage || "Connection failed. Check your credentials.",
+        text: testData.errorMessage || "Connection failed. Check your credentials.",
       });
-      setStatus(testRes.data);
-    } else {
+      setStatus(testData);
+    } else if (testData) {
       setMessage({
         type: "success",
-        text: `Connected! Equity: $${testRes.data.equity.toLocaleString()} | Cash: $${testRes.data.cash.toLocaleString()}`,
+        text: `Connected! Equity: $${testData.equity.toLocaleString()} | Cash: $${testData.cash.toLocaleString()}`,
       });
-      setStatus(testRes.data);
+      setStatus(testData);
       setApiKey("");
       setSecretKey("");
     }

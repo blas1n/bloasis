@@ -1,18 +1,18 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { api } from "@/lib/api";
-import type { MarketRegimeResponse } from "@/lib/types";
+import client from "@/lib/api-client";
+import type { MarketRegime } from "@/lib/api-types";
 
 interface UseMarketRegimeResult {
-  regime: MarketRegimeResponse | null;
+  regime: MarketRegime | null;
   isLoading: boolean;
   error: string | null;
   refetch: () => void;
 }
 
 export function useMarketRegime(): UseMarketRegimeResult {
-  const [regime, setRegime] = useState<MarketRegimeResponse | null>(null);
+  const [regime, setRegime] = useState<MarketRegime | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -20,12 +20,15 @@ export function useMarketRegime(): UseMarketRegimeResult {
     setIsLoading(true);
     setError(null);
 
-    const result = await api.getCurrentRegime();
+    const { data, error: apiError } = await client.GET(
+      "/v1/market/regimes/current"
+    );
 
-    if (result.error) {
-      setError(result.error);
-    } else {
-      setRegime(result.data);
+    if (apiError) {
+      setError("Failed to load market regime");
+    } else if (data) {
+      // Runtime data is camelCase (CamelJSONResponse), cast accordingly
+      setRegime(data as unknown as MarketRegime);
     }
 
     setIsLoading(false);

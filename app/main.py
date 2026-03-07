@@ -5,6 +5,7 @@ Infrastructure: PostgreSQL + Redis only.
 """
 
 import logging
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -21,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan — initialize and cleanup shared resources."""
     from shared.ai_clients.llm_client import LLMClient
     from shared.utils.postgres_client import PostgresClient
@@ -78,7 +79,7 @@ async def lifespan(app: FastAPI):
     logger.info("Infrastructure disconnected")
 
 
-def _rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded):
+def _rate_limit_exceeded_handler(request: Request, exc: Exception) -> JSONResponse:
     return JSONResponse(
         status_code=429,
         content={"error": "Rate limit exceeded. Please try again later."},
@@ -129,11 +130,11 @@ def create_app() -> FastAPI:
     app.include_router(backtesting.router, prefix="/v1/backtesting", tags=["backtesting"])
 
     @app.get("/health")
-    async def health():
+    async def health() -> dict[str, str]:
         return {"status": "healthy"}
 
     @app.get("/metrics")
-    async def metrics():
+    async def metrics() -> str:
         """Stub metrics endpoint for Prometheus scraping. TODO: add real instrumentation."""
         return ""
 

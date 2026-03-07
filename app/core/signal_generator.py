@@ -10,6 +10,7 @@ Source: services/strategy/src/agents/signal_generator.py
 
 import math
 from decimal import Decimal
+from typing import Any
 
 from .models import ProfitTier, RiskLevel, SignalAction, TradingSignal
 from .technical_indicators import calculate_indicators
@@ -44,7 +45,7 @@ def generate_signal(
     entry_price: Decimal,
     risk_level: str,
     risk_profile: str,
-    ohlcv_bars: list[dict] | None = None,
+    ohlcv_bars: list[dict[str, Any]] | None = None,
     rationale: str = "",
     risk_approved: bool = True,
     position_adjustment: float = 1.0,
@@ -104,7 +105,7 @@ def generate_signal(
     )
 
 
-def _get_atr(symbol: str, bars: list[dict] | None) -> float:
+def _get_atr(symbol: str, bars: list[dict[str, Any]] | None) -> float:
     """Get ATR from OHLCV bars."""
     if not bars or len(bars) < 26:
         return 0.0

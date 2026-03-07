@@ -64,7 +64,7 @@ class RedisClient:
                 password=self.password,
                 decode_responses=True,
             )
-            await self.client.ping()  # type: ignore[misc]
+            await self.client.ping()
             logger.info(
                 "Connected to Redis",
                 extra={"host": self.host, "port": self.port},
@@ -83,7 +83,7 @@ class RedisClient:
         Close the Redis connection.
         """
         if self.client is not None:
-            await self.client.aclose()
+            await self.client.close()
             self.client = None
             logger.info(
                 "Disconnected from Redis",

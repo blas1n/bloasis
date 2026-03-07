@@ -2,9 +2,11 @@
 
 import logging
 import uuid
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
+from ..core.models import AnalysisResult
 from ..dependencies import get_strategy_service, get_user_service, verify_user_access
 from ..rate_limit import limiter
 from ..services.strategy import StrategyService
@@ -14,14 +16,14 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-@router.get("/{user_id}/signals")
+@router.get("/{user_id}/signals", response_model=AnalysisResult)
 @limiter.limit("30/minute")
 async def get_signals(
     request: Request,
     user_id: uuid.UUID = Depends(verify_user_access),
     strategy_svc: StrategyService = Depends(get_strategy_service),
     user_svc: UserService = Depends(get_user_service),
-):
+) -> dict[str, Any]:
     """Get latest analysis signals (from cache or fresh)."""
     prefs = await user_svc.get_preferences(user_id)
     try:
@@ -36,14 +38,14 @@ async def get_signals(
     return result.model_dump()
 
 
-@router.post("/{user_id}/signals")
+@router.post("/{user_id}/signals", response_model=AnalysisResult)
 @limiter.limit("5/minute")
 async def trigger_analysis(
     request: Request,
     user_id: uuid.UUID = Depends(verify_user_access),
     strategy_svc: StrategyService = Depends(get_strategy_service),
     user_svc: UserService = Depends(get_user_service),
-):
+) -> dict[str, Any]:
     """Trigger fresh analysis (bypass cache)."""
     await strategy_svc.invalidate_user_cache(user_id)
 

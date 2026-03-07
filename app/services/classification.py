@@ -6,6 +6,7 @@ Stage 2: Theme ranking → candidate symbols
 """
 
 import logging
+from typing import Any
 
 from shared.ai_clients.llm_client import LLMClient
 from shared.utils.redis_client import RedisClient
@@ -66,7 +67,7 @@ class ClassificationService:
             logger.error("Classification failed", exc_info=True)
             return self._fallback_candidates()
 
-    def _parse_candidates(self, data: dict, regime: str) -> list[CandidateSymbol]:
+    def _parse_candidates(self, data: dict[str, Any], regime: str) -> list[CandidateSymbol]:
         """Parse LLM response into candidate symbols."""
         candidates = []
         if isinstance(data, dict) and "candidates" in data:

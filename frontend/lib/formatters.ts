@@ -1,11 +1,14 @@
 /**
  * Formatting utilities for BLOASIS frontend.
+ *
+ * Note: Python Decimal values are serialized as JSON strings by the backend.
+ * All formatting functions accept both string and number to handle this.
  */
 
 /**
- * Format a number as currency (USD).
+ * Format a value as currency (USD).
  */
-export function formatCurrency(value: number | null | undefined): string {
+export function formatCurrency(value: number | string | null | undefined): string {
   if (value === null || value === undefined) {
     return "$0.00";
   }
@@ -14,28 +17,29 @@ export function formatCurrency(value: number | null | undefined): string {
     currency: "USD",
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
-  }).format(value);
+  }).format(Number(value));
 }
 
 /**
- * Format a number as a percentage.
+ * Format a value as a percentage.
  */
-export function formatPercent(value: number | null | undefined): string {
+export function formatPercent(value: number | string | null | undefined): string {
   if (value === null || value === undefined) {
     return "0.00%";
   }
-  const sign = value >= 0 ? "+" : "";
-  return `${sign}${value.toFixed(2)}%`;
+  const num = Number(value);
+  const sign = num >= 0 ? "+" : "";
+  return `${sign}${num.toFixed(2)}%`;
 }
 
 /**
  * Format a number with commas.
  */
-export function formatNumber(value: number | null | undefined): string {
+export function formatNumber(value: number | string | null | undefined): string {
   if (value === null || value === undefined) {
     return "0";
   }
-  return new Intl.NumberFormat("en-US").format(value);
+  return new Intl.NumberFormat("en-US").format(Number(value));
 }
 
 /**

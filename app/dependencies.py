@@ -34,15 +34,18 @@ if TYPE_CHECKING:
 
 
 def get_redis(request: Request) -> RedisClient:
-    return request.app.state.redis
+    result: RedisClient = request.app.state.redis
+    return result
 
 
 def get_postgres(request: Request) -> PostgresClient:
-    return request.app.state.postgres
+    result: PostgresClient = request.app.state.postgres
+    return result
 
 
 def get_llm(request: Request) -> LLMClient:
-    return request.app.state.llm
+    result: LLMClient = request.app.state.llm
+    return result
 
 
 # --- Repository dependencies ---

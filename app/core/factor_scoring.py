@@ -135,12 +135,15 @@ def calculate_final_score(
         "sentiment": factor_scores.sentiment,
     }
 
-    score = sum(Decimal(str(scores[k])) * Decimal(str(weights[k])) for k in weights)
+    score = sum(
+        (Decimal(str(scores[k])) * Decimal(str(weights[k])) for k in weights),
+        Decimal("0"),
+    )
 
     return score.quantize(Decimal("0.01"))
 
 
-def calculate_momentum(bars: list[dict]) -> float:
+def calculate_momentum(bars: list[dict[str, float]]) -> float:
     """Calculate momentum score (0-100).
 
     Based on price position relative to 20-day MA.
@@ -162,10 +165,10 @@ def calculate_momentum(bars: list[dict]) -> float:
         return 50.0
 
     momentum_pct = ((recent_close - ma20) / ma20) * 100
-    return max(0.0, min(100.0, 50.0 + (momentum_pct * 5)))
+    return float(max(0.0, min(100.0, 50.0 + (momentum_pct * 5))))
 
 
-def calculate_volatility(bars: list[dict]) -> float:
+def calculate_volatility(bars: list[dict[str, float]]) -> float:
     """Calculate volatility score (0-100, inverse).
 
     Lower volatility = higher score.
@@ -190,10 +193,10 @@ def calculate_volatility(bars: list[dict]) -> float:
         return 50.0
 
     std_dev = statistics.stdev(returns) * (252**0.5)
-    return max(0.0, 100.0 - (std_dev * 500))
+    return float(max(0.0, 100.0 - (std_dev * 500)))
 
 
-def calculate_liquidity(bars: list[dict]) -> float:
+def calculate_liquidity(bars: list[dict[str, float]]) -> float:
     """Calculate liquidity score (0-100).
 
     Based on 20-day average volume. 1M+ volume = 100.
@@ -208,7 +211,7 @@ def calculate_liquidity(bars: list[dict]) -> float:
         return 50.0
 
     avg_volume = sum(bar["volume"] for bar in bars[-20:]) / 20
-    return min(100.0, (avg_volume / 1_000_000) * 100)
+    return float(min(100.0, (avg_volume / 1_000_000) * 100))
 
 
 def calculate_value(

@@ -61,7 +61,9 @@ deploy/             # Docker Compose configs
 ```bash
 ruff check app/ shared/          # Lint
 ruff format app/ shared/         # Format
+mypy app/ shared/                # Type check
 pytest app/ --cov=app            # Test with coverage
+python scripts/export_openapi.py # Export OpenAPI schema
 uvicorn app.main:app --reload    # Dev server
 ```
 

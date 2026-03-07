@@ -153,5 +153,8 @@ kafka-logs/
 postgres-data/
 timescale-data/
 
+# Generated files
+openapi.json
+
 # Internal Docs
 docs/internal

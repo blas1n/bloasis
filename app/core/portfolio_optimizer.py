@@ -44,7 +44,7 @@ class PortfolioOptimizer:
     def optimize(
         self,
         symbols: list[str],
-        ohlcv_data: dict[str, list[dict]],
+        ohlcv_data: dict[str, list[dict[str, Any]]],
         risk_profile: str = "MODERATE",
     ) -> dict[str, Decimal]:
         """Compute optimal portfolio weights for given symbols.
@@ -108,7 +108,7 @@ class PortfolioOptimizer:
     def _build_returns(
         self,
         symbols: list[str],
-        ohlcv_data: dict[str, list[dict]],
+        ohlcv_data: dict[str, list[dict[str, Any]]],
     ) -> pd.DataFrame | None:
         """Build daily returns DataFrame from OHLCV data.
 

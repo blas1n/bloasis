@@ -4,7 +4,7 @@ import { useMarketRegime } from "@/hooks/useMarketRegime";
 import { Card } from "@/components/ui/Card";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import { ErrorMessage } from "@/components/ui/ErrorMessage";
-import type { RegimeType } from "@/lib/types";
+import type { RegimeType } from "@/lib/api-types";
 
 const regimeLabels: Record<RegimeType, string> = {
   bull: "BULL MARKET",

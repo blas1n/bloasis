@@ -46,7 +46,8 @@ class MacroService:
         """
         cached = await self.redis.get(CACHE_KEY)
         if cached and isinstance(cached, dict):
-            return cached
+            result: dict[str, float] = cached
+            return result
 
         indicators = await self._fetch_from_fred()
 
