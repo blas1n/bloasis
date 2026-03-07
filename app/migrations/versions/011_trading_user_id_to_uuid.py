@@ -1,4 +1,4 @@
-"""Change positions and portfolios user_id from VARCHAR back to UUID
+"""Change trading schema user_id columns from VARCHAR back to UUID
 
 Revision ID: 011
 Revises: 010
@@ -30,6 +30,12 @@ def upgrade() -> None:
             ALTER COLUMN user_id TYPE UUID USING user_id::uuid;
         """
     )
+    op.execute(
+        """
+        ALTER TABLE trading.trades
+            ALTER COLUMN user_id TYPE UUID USING user_id::uuid;
+        """
+    )
 
 
 def downgrade() -> None:
@@ -43,6 +49,12 @@ def downgrade() -> None:
     op.execute(
         """
         ALTER TABLE trading.portfolios
+            ALTER COLUMN user_id TYPE VARCHAR(255) USING user_id::text;
+        """
+    )
+    op.execute(
+        """
+        ALTER TABLE trading.trades
             ALTER COLUMN user_id TYPE VARCHAR(255) USING user_id::text;
         """
     )

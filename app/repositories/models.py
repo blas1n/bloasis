@@ -42,7 +42,7 @@ class UserRecord(Base):
         DateTime(timezone=True), server_default=func.now()
     )
     updated_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), onupdate=func.now()
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
 
@@ -59,7 +59,7 @@ class UserPreferenceRecord(Base):
     enable_notifications: Mapped[bool] = mapped_column(Boolean, default=True)
     trading_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     updated_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), onupdate=func.now()
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
 
@@ -70,7 +70,7 @@ class BrokerConfigRecord(Base):
     config_key: Mapped[str] = mapped_column(String, primary_key=True)
     encrypted_value: Mapped[str] = mapped_column(Text, nullable=False)
     updated_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), onupdate=func.now()
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
 
@@ -93,7 +93,7 @@ class PortfolioRecord(Base):
         DateTime(timezone=True), server_default=func.now()
     )
     updated_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), onupdate=func.now()
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
 
@@ -118,7 +118,7 @@ class PositionRecord(Base):
         DateTime(timezone=True), server_default=func.now()
     )
     updated_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), onupdate=func.now()
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
 

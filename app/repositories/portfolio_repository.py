@@ -60,7 +60,6 @@ class PortfolioRepository:
                 select(PositionRecord).where(
                     PositionRecord.user_id == user_id,
                     PositionRecord.symbol == symbol,
-                    PositionRecord.quantity > 0,
                 )
             )
             record = result.scalar_one_or_none()
