@@ -95,7 +95,11 @@ class TestUpsertPosition:
         postgres = _make_mock_postgres(mock_session)
         repo = PortfolioRepository(postgres=postgres)
         await repo.upsert_position(
-            TEST_USER_ID, "AAPL", Decimal("10"), Decimal("150"), Decimal("155"),
+            TEST_USER_ID,
+            "AAPL",
+            Decimal("10"),
+            Decimal("150"),
+            Decimal("155"),
         )
 
         mock_session.add.assert_called_once()
@@ -110,7 +114,11 @@ class TestUpsertPosition:
         postgres = _make_mock_postgres(mock_session)
         repo = PortfolioRepository(postgres=postgres)
         await repo.upsert_position(
-            TEST_USER_ID, "AAPL", Decimal("15"), Decimal("148"), Decimal("155"),
+            TEST_USER_ID,
+            "AAPL",
+            Decimal("15"),
+            Decimal("148"),
+            Decimal("155"),
         )
 
         assert existing.quantity == Decimal("15")

@@ -54,6 +54,16 @@ if ! grep -q "source /workspace/.venv/bin/activate" ~/.bashrc; then
     echo "[OK] Auto-activation added to bashrc"
 fi
 
+# 6. Run database migrations
+echo ""
+echo "Running database migrations..."
+if [ -f "alembic.ini" ]; then
+    alembic upgrade head
+    echo "[OK] Database migrations applied"
+else
+    echo "[SKIP] alembic.ini not found"
+fi
+
 echo ""
 echo "======================================"
 echo "[DONE] DevContainer setup complete!"
