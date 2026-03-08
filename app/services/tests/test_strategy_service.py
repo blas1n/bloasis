@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from app.core.models import CandidateSymbol, MarketRegime, MarketRegimeIndicators
+from app.core.models import CandidateSymbol, MarketRegime, MarketRegimeIndicators, RiskProfile
 from app.services.strategy import StrategyService
 
 
@@ -125,7 +125,7 @@ class TestRunAnalysis:
             },
         ]
 
-        result = await strategy_svc.run_analysis("user-1", risk_profile="aggressive")
+        result = await strategy_svc.run_analysis("user-1", risk_profile=RiskProfile.AGGRESSIVE)
         assert result.user_id == "user-1"
         assert len(result.stock_picks) > 0
         assert len(result.signals) > 0

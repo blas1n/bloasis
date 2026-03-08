@@ -11,6 +11,7 @@ import uuid
 from fastapi import FastAPI
 
 from .config import settings
+from .core.models import RiskProfile
 from .repositories.user_repository import UserRepository
 from .services.classification import ClassificationService
 from .services.macro import MacroService
@@ -52,7 +53,7 @@ async def _run_analysis_cycle(app: FastAPI) -> None:
     for user_id in active_users:
         try:
             prefs = await user_repo.get_preferences(user_id)
-            risk_profile = prefs.risk_profile if prefs else "moderate"
+            risk_profile = RiskProfile(prefs.risk_profile) if prefs else RiskProfile.MODERATE
             excluded = list(prefs.excluded_sectors) if prefs and prefs.excluded_sectors else []
 
             await strategy_svc.run_analysis(

@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from app.core.models import AnalysisResult
+from app.core.models import AnalysisResult, RiskProfile
 from app.services.classification import ClassificationService
 from app.services.market_data import MarketDataService
 from app.services.market_regime import MarketRegimeService
@@ -137,7 +137,7 @@ class TestFullPipeline:
 
         result = await strategy_svc.run_analysis(
             user_id="test-user",
-            risk_profile="moderate",
+            risk_profile=RiskProfile.MODERATE,
         )
 
         assert isinstance(result, AnalysisResult)
@@ -167,7 +167,7 @@ class TestFullPipeline:
 
         result = await strategy_svc.run_analysis(
             user_id="test-user",
-            risk_profile="moderate",
+            risk_profile=RiskProfile.MODERATE,
             excluded_sectors=["Technology"],
         )
 
@@ -209,7 +209,7 @@ class TestFullPipeline:
 
         result = await strategy_svc.run_analysis(
             user_id="test-user",
-            risk_profile="conservative",
+            risk_profile=RiskProfile.CONSERVATIVE,
         )
 
         assert isinstance(result, AnalysisResult)

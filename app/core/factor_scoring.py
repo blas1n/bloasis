@@ -94,7 +94,7 @@ REGIME_MULTIPLIERS: dict[str, dict[str, float]] = {
 
 def calculate_final_score(
     factor_scores: FactorScores,
-    risk_profile: str,
+    risk_profile: RiskProfile,
     regime: str = "bull",
 ) -> Decimal:
     """Calculate weighted final score based on risk profile and market regime.

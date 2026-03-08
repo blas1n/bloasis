@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from app.core.models import RiskProfile
 from app.repositories.user_repository import UserRepository
 
 TEST_USER_ID = "00000000-0000-0000-0000-000000000001"
@@ -73,13 +74,13 @@ class TestFindById:
 
 class TestGetPreferences:
     async def test_returns_preferences(self, mock_session):
-        prefs = MagicMock(risk_profile="aggressive")
+        prefs = MagicMock(risk_profile=RiskProfile.AGGRESSIVE)
         mock_session.execute.return_value.scalar_one_or_none.return_value = prefs
 
         postgres = _make_mock_postgres(mock_session)
         repo = UserRepository(postgres=postgres)
         result = await repo.get_preferences(TEST_USER_ID)
-        assert result.risk_profile == "aggressive"
+        assert result.risk_profile == RiskProfile.AGGRESSIVE
 
     async def test_returns_none(self, mock_session):
         postgres = _make_mock_postgres(mock_session)
@@ -94,7 +95,7 @@ class TestUpsertPreferences:
         repo = UserRepository(postgres=postgres)
         await repo.upsert_preferences(
             user_id=TEST_USER_ID,
-            risk_profile="aggressive",
+            risk_profile=RiskProfile.AGGRESSIVE,
             max_portfolio_risk=Decimal("0.20"),
             max_position_size=Decimal("0.10"),
             preferred_sectors=["Technology"],
@@ -112,7 +113,7 @@ class TestUpsertPreferences:
         repo = UserRepository(postgres=postgres)
         await repo.upsert_preferences(
             user_id=TEST_USER_ID,
-            risk_profile="conservative",
+            risk_profile=RiskProfile.CONSERVATIVE,
             max_portfolio_risk=Decimal("0.10"),
             max_position_size=Decimal("0.05"),
             preferred_sectors=["Healthcare"],
@@ -120,7 +121,7 @@ class TestUpsertPreferences:
             enable_notifications=False,
             trading_enabled=False,
         )
-        assert existing.risk_profile == "conservative"
+        assert existing.risk_profile == RiskProfile.CONSERVATIVE
         assert existing.max_portfolio_risk == Decimal("0.10")
         mock_session.add.assert_not_called()
 

@@ -7,6 +7,7 @@ from sqlalchemy import select
 
 from shared.utils.postgres_client import PostgresClient
 
+from ..core.models import RiskProfile
 from .models import BrokerConfigRecord, UserPreferenceRecord, UserRecord
 
 
@@ -36,7 +37,7 @@ class UserRepository:
     async def upsert_preferences(
         self,
         user_id: uuid_mod.UUID,
-        risk_profile: str,
+        risk_profile: RiskProfile,
         max_portfolio_risk: Decimal,
         max_position_size: Decimal,
         preferred_sectors: list[str],

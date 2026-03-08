@@ -14,6 +14,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from .models import RiskProfile
+
 logger = logging.getLogger(__name__)
 
 # Lazy import: riskfolio-lib is a heavy optional dependency.
@@ -45,7 +47,7 @@ class PortfolioOptimizer:
         self,
         symbols: list[str],
         ohlcv_data: dict[str, list[dict[str, Any]]],
-        risk_profile: str = "MODERATE",
+        risk_profile: RiskProfile = RiskProfile.MODERATE,
     ) -> dict[str, Decimal]:
         """Compute optimal portfolio weights for given symbols.
 
@@ -83,7 +85,11 @@ class PortfolioOptimizer:
                 return self._equal_weight(symbols)
 
             # Apply risk profile scaling
-            scale = {"CONSERVATIVE": 0.5, "MODERATE": 0.75, "AGGRESSIVE": 1.0}
+            scale = {
+                RiskProfile.CONSERVATIVE: 0.5,
+                RiskProfile.MODERATE: 0.75,
+                RiskProfile.AGGRESSIVE: 1.0,
+            }
             factor = scale.get(risk_profile, 0.75)
 
             result: dict[str, Decimal] = {}

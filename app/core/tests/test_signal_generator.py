@@ -2,6 +2,7 @@
 
 from decimal import Decimal
 
+from app.core.models import RiskProfile
 from app.core.signal_generator import generate_signal
 
 
@@ -30,7 +31,7 @@ class TestBasicSignalGeneration:
             strength=0.8,
             entry_price=Decimal("150"),
             risk_level="medium",
-            risk_profile="moderate",
+            risk_profile=RiskProfile.MODERATE,
             ohlcv_bars=_make_ohlcv(),
         )
         assert signal.action == "buy"
@@ -45,7 +46,7 @@ class TestBasicSignalGeneration:
             strength=0.6,
             entry_price=Decimal("200"),
             risk_level="high",
-            risk_profile="moderate",
+            risk_profile=RiskProfile.MODERATE,
             ohlcv_bars=_make_ohlcv(base=200.0),
         )
         assert signal.action == "sell"
@@ -59,7 +60,7 @@ class TestBasicSignalGeneration:
             strength=0.3,
             entry_price=Decimal("130"),
             risk_level="medium",
-            risk_profile="moderate",
+            risk_profile=RiskProfile.MODERATE,
         )
         assert signal.action == "hold"
 
@@ -72,7 +73,7 @@ class TestATRLevels:
             strength=0.7,
             entry_price=Decimal("100"),
             risk_level="medium",
-            risk_profile="moderate",
+            risk_profile=RiskProfile.MODERATE,
             ohlcv_bars=_make_ohlcv(atr_approx=1.0),
         )
         wide = generate_signal(
@@ -81,7 +82,7 @@ class TestATRLevels:
             strength=0.7,
             entry_price=Decimal("100"),
             risk_level="medium",
-            risk_profile="moderate",
+            risk_profile=RiskProfile.MODERATE,
             ohlcv_bars=_make_ohlcv(atr_approx=5.0),
         )
         # Wider ATR → wider SL distance
@@ -96,7 +97,7 @@ class TestATRLevels:
             strength=0.5,
             entry_price=Decimal("100"),
             risk_level="medium",
-            risk_profile="moderate",
+            risk_profile=RiskProfile.MODERATE,
             ohlcv_bars=None,
         )
         # Should still have SL/TP via fallback percentages
@@ -112,7 +113,7 @@ class TestProfitTiers:
             strength=0.8,
             entry_price=Decimal("150"),
             risk_level="medium",
-            risk_profile="moderate",
+            risk_profile=RiskProfile.MODERATE,
             ohlcv_bars=_make_ohlcv(),
         )
         assert len(signal.profit_tiers) == 3
@@ -127,7 +128,7 @@ class TestProfitTiers:
             strength=0.8,
             entry_price=Decimal("150"),
             risk_level="medium",
-            risk_profile="moderate",
+            risk_profile=RiskProfile.MODERATE,
             ohlcv_bars=_make_ohlcv(),
         )
         assert signal.trailing_stop_pct > 0
@@ -141,7 +142,7 @@ class TestPositionSizing:
             strength=0.8,
             entry_price=Decimal("100"),
             risk_level="medium",
-            risk_profile="conservative",
+            risk_profile=RiskProfile.CONSERVATIVE,
             ohlcv_bars=_make_ohlcv(),
         )
         aggr = generate_signal(
@@ -150,7 +151,7 @@ class TestPositionSizing:
             strength=0.8,
             entry_price=Decimal("100"),
             risk_level="medium",
-            risk_profile="aggressive",
+            risk_profile=RiskProfile.AGGRESSIVE,
             ohlcv_bars=_make_ohlcv(),
         )
         assert cons.size_recommendation < aggr.size_recommendation
@@ -162,7 +163,7 @@ class TestPositionSizing:
             strength=0.8,
             entry_price=Decimal("100"),
             risk_level="medium",
-            risk_profile="moderate",
+            risk_profile=RiskProfile.MODERATE,
             ohlcv_bars=_make_ohlcv(),
             position_adjustment=1.0,
         )
@@ -172,7 +173,7 @@ class TestPositionSizing:
             strength=0.8,
             entry_price=Decimal("100"),
             risk_level="medium",
-            risk_profile="moderate",
+            risk_profile=RiskProfile.MODERATE,
             ohlcv_bars=_make_ohlcv(),
             position_adjustment=0.5,
         )
@@ -187,7 +188,7 @@ class TestRiskLevelEffect:
             strength=0.7,
             entry_price=Decimal("100"),
             risk_level="medium",
-            risk_profile="moderate",
+            risk_profile=RiskProfile.MODERATE,
             ohlcv_bars=_make_ohlcv(),
         )
         extreme = generate_signal(
@@ -196,7 +197,7 @@ class TestRiskLevelEffect:
             strength=0.7,
             entry_price=Decimal("100"),
             risk_level="extreme",
-            risk_profile="moderate",
+            risk_profile=RiskProfile.MODERATE,
             ohlcv_bars=_make_ohlcv(),
         )
         # Extreme risk → smaller ATR multiplier → tighter SL

@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi.testclient import TestClient
 
-from app.core.models import UserPreferences
+from app.core.models import RiskProfile, UserPreferences
 from app.dependencies import get_current_user, get_user_service
 from app.main import create_app
 
@@ -39,7 +39,7 @@ class TestGetPreferences:
     def test_success(self, client, mock_user_svc):
         mock_user_svc.get_preferences.return_value = UserPreferences(
             user_id=USER_ID,
-            risk_profile="aggressive",
+            risk_profile=RiskProfile.AGGRESSIVE,
             preferred_sectors=["Technology", "Healthcare"],
             excluded_sectors=["Energy"],
         )
@@ -61,7 +61,7 @@ class TestUpdatePreferences:
     def test_success(self, client, mock_user_svc):
         mock_user_svc.update_preferences.return_value = UserPreferences(
             user_id=USER_ID,
-            risk_profile="conservative",
+            risk_profile=RiskProfile.CONSERVATIVE,
             preferred_sectors=["Healthcare"],
         )
         resp = client.put(

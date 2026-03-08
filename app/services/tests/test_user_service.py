@@ -9,7 +9,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 
 from app.config import settings
-from app.core.models import UserPreferences
+from app.core.models import RiskProfile, UserPreferences
 from app.services.user import UserService
 
 
@@ -113,12 +113,12 @@ class TestPreferences:
             "risk_profile": "aggressive",
         }
         prefs = await user_svc.get_preferences("user-1")
-        assert prefs.risk_profile == "aggressive"
+        assert prefs.risk_profile == RiskProfile.AGGRESSIVE
 
     async def test_get_preferences_from_db(self, user_svc, mock_redis, mock_user_repo):
         mock_redis.get.return_value = None
         mock_user_repo.get_preferences.return_value = MagicMock(
-            risk_profile="conservative",
+            risk_profile=RiskProfile.CONSERVATIVE,
             max_portfolio_risk=0.15,
             max_position_size=0.05,
             preferred_sectors=["Technology"],
@@ -126,19 +126,19 @@ class TestPreferences:
             trading_enabled=False,
         )
         prefs = await user_svc.get_preferences("user-1")
-        assert prefs.risk_profile == "conservative"
+        assert prefs.risk_profile == RiskProfile.CONSERVATIVE
         mock_redis.setex.assert_called_once()
 
     async def test_get_preferences_defaults(self, user_svc, mock_redis, mock_user_repo):
         mock_redis.get.return_value = None
         mock_user_repo.get_preferences.return_value = None
         prefs = await user_svc.get_preferences("user-1")
-        assert prefs.risk_profile == "moderate"
+        assert prefs.risk_profile == RiskProfile.MODERATE
 
     async def test_update_preferences(self, user_svc, mock_redis, mock_user_repo):
-        prefs = UserPreferences(user_id="user-1", risk_profile="aggressive")
+        prefs = UserPreferences(user_id="user-1", risk_profile=RiskProfile.AGGRESSIVE)
         result = await user_svc.update_preferences("user-1", prefs)
-        assert result.risk_profile == "aggressive"
+        assert result.risk_profile == RiskProfile.AGGRESSIVE
         mock_user_repo.upsert_preferences.assert_called_once()
         mock_redis.delete.assert_called_once()
 

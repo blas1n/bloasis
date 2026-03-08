@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from app.core.models import RiskProfile
 from app.scheduler import (
     _run_analysis_cycle,
     scheduler_loop,
@@ -28,7 +29,7 @@ class TestRunAnalysisCycle:
         mock_get_active.return_value = ["user-1", "user-2"]
 
         mock_prefs = MagicMock()
-        mock_prefs.risk_profile = "moderate"
+        mock_prefs.risk_profile = RiskProfile.MODERATE
         mock_prefs.excluded_sectors = []
 
         mock_user_repo = MagicMock()
@@ -66,7 +67,7 @@ class TestRunAnalysisCycle:
         mock_get_active.return_value = ["user-fail", "user-ok"]
 
         mock_prefs = MagicMock()
-        mock_prefs.risk_profile = "moderate"
+        mock_prefs.risk_profile = RiskProfile.MODERATE
         mock_prefs.excluded_sectors = []
 
         mock_user_repo = MagicMock()
@@ -112,7 +113,7 @@ class TestRunAnalysisCycle:
             await _run_analysis_cycle(mock_app)
 
         call_kwargs = mock_strategy_svc.run_analysis.call_args.kwargs
-        assert call_kwargs["risk_profile"] == "moderate"
+        assert call_kwargs["risk_profile"] == RiskProfile.MODERATE
 
 
 class TestSchedulerLifecycle:

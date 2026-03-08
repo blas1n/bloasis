@@ -26,6 +26,7 @@ from ..core.models import (
     CandidateSymbol,
     FactorScores,
     MarketRegime,
+    RiskProfile,
     StockPick,
     TradingSignal,
 )
@@ -63,7 +64,7 @@ class StrategyService:
     async def run_analysis(
         self,
         user_id: uuid.UUID,
-        risk_profile: str = "moderate",
+        risk_profile: RiskProfile = RiskProfile.MODERATE,
         preferred_sectors: list[str] | None = None,
         excluded_sectors: list[str] | None = None,
     ) -> AnalysisResult:
@@ -158,7 +159,7 @@ class StrategyService:
         self,
         candidates: list[CandidateSymbol],
         regime: str,
-        risk_profile: str,
+        risk_profile: RiskProfile,
     ) -> list[StockPick]:
         """Score candidates using 6-factor engine."""
         picks: list[StockPick] = []
@@ -216,7 +217,7 @@ class StrategyService:
         stock_data: list[dict[str, Any]],
         ohlcv_summary: str,
         regime: MarketRegime,
-        risk_profile: str,
+        risk_profile: RiskProfile,
         excluded_sectors: list[str],
     ) -> list[dict[str, Any]]:
         """Run unified AI analysis (Technical + Risk in one call)."""
@@ -254,7 +255,7 @@ class StrategyService:
         analysis_results: list[dict[str, Any]],
         ohlcv_data: dict[str, list[dict[str, Any]]],
         risk_level: str,
-        risk_profile: str,
+        risk_profile: RiskProfile,
     ) -> list[TradingSignal]:
         """Generate trading signals from AI analysis results."""
         signals = []

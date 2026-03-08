@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi.testclient import TestClient
 
-from app.core.models import AnalysisResult, MarketRegime, UserPreferences
+from app.core.models import AnalysisResult, MarketRegime, RiskProfile, UserPreferences
 from app.dependencies import get_current_user, get_strategy_service, get_user_service
 from app.main import create_app
 
@@ -60,7 +60,7 @@ class TestGetSignals:
     def test_success(self, client, mock_strategy_svc, mock_user_svc):
         mock_user_svc.get_preferences.return_value = UserPreferences(
             user_id=USER_ID,
-            risk_profile="moderate",
+            risk_profile=RiskProfile.MODERATE,
             preferred_sectors=["Technology"],
             excluded_sectors=["Energy"],
         )
@@ -82,7 +82,7 @@ class TestTriggerAnalysis:
     def test_success(self, client, mock_strategy_svc, mock_user_svc):
         mock_user_svc.get_preferences.return_value = UserPreferences(
             user_id=USER_ID,
-            risk_profile="aggressive",
+            risk_profile=RiskProfile.AGGRESSIVE,
         )
         mock_strategy_svc.invalidate_user_cache = AsyncMock()
         mock_strategy_svc.run_analysis.return_value = _make_analysis_result()

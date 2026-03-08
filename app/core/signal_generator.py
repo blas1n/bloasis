@@ -12,7 +12,7 @@ import math
 from decimal import Decimal
 from typing import Any
 
-from .models import ProfitTier, RiskLevel, SignalAction, TradingSignal
+from .models import ProfitTier, RiskLevel, RiskProfile, SignalAction, TradingSignal
 from .technical_indicators import calculate_indicators
 
 # Risk multiplier by market risk level — scales ATR distances
@@ -24,17 +24,17 @@ RISK_MULTIPLIERS: dict[str, Decimal] = {
 }
 
 # Target annualized volatility by risk profile (for position sizing)
-TARGET_VOLATILITY: dict[str, float] = {
-    "conservative": 0.10,
-    "moderate": 0.15,
-    "aggressive": 0.25,
+TARGET_VOLATILITY: dict[RiskProfile, float] = {
+    RiskProfile.CONSERVATIVE: 0.10,
+    RiskProfile.MODERATE: 0.15,
+    RiskProfile.AGGRESSIVE: 0.25,
 }
 
 # Max position sizes by risk profile (hard cap)
-MAX_POSITION_SIZE: dict[str, Decimal] = {
-    "conservative": Decimal("0.05"),
-    "moderate": Decimal("0.10"),
-    "aggressive": Decimal("0.15"),
+MAX_POSITION_SIZE: dict[RiskProfile, Decimal] = {
+    RiskProfile.CONSERVATIVE: Decimal("0.05"),
+    RiskProfile.MODERATE: Decimal("0.10"),
+    RiskProfile.AGGRESSIVE: Decimal("0.15"),
 }
 
 
@@ -44,7 +44,7 @@ def generate_signal(
     strength: float,
     entry_price: Decimal,
     risk_level: str,
-    risk_profile: str,
+    risk_profile: RiskProfile,
     ohlcv_bars: list[dict[str, Any]] | None = None,
     rationale: str = "",
     risk_approved: bool = True,
@@ -115,7 +115,7 @@ def _get_atr(symbol: str, bars: list[dict[str, Any]] | None) -> float:
 
 def _calculate_position_size(
     strength: float,
-    risk_profile: str,
+    risk_profile: RiskProfile,
     atr: float,
     entry_price: float,
 ) -> Decimal:
@@ -123,9 +123,8 @@ def _calculate_position_size(
 
     Uses inverse-volatility weighting capped at max_size per risk profile.
     """
-    profile = risk_profile.lower()
-    max_size = MAX_POSITION_SIZE.get(profile, Decimal("0.10"))
-    target_vol = TARGET_VOLATILITY.get(profile, 0.15)
+    max_size = MAX_POSITION_SIZE.get(risk_profile, Decimal("0.10"))
+    target_vol = TARGET_VOLATILITY.get(risk_profile, 0.15)
 
     base = Decimal(str(strength)) * max_size
 
