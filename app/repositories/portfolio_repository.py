@@ -57,10 +57,12 @@ class PortfolioRepository:
         """Create or update a position."""
         async with self.postgres.get_session() as session:
             result = await session.execute(
-                select(PositionRecord).where(
+                select(PositionRecord)
+                .where(
                     PositionRecord.user_id == user_id,
                     PositionRecord.symbol == symbol,
                 )
+                .with_for_update()
             )
             record = result.scalar_one_or_none()
 

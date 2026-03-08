@@ -10,6 +10,7 @@ from decimal import Decimal
 
 from .models import (
     OrderRequest,
+    OrderSide,
     Portfolio,
     RiskDecision,
     RiskLimits,
@@ -58,8 +59,27 @@ def evaluate_risk(
     order_pct = order_value / portfolio_value
     vix_d = Decimal(str(vix))
 
+    # Sell-specific validation: ensure position exists with sufficient quantity
+    if order.side == OrderSide.SELL:
+        position = next((p for p in portfolio.positions if p.symbol == order.symbol), None)
+        if not position or position.quantity <= 0:
+            return RiskResult(
+                action=RiskDecision.REJECT,
+                risk_score=1.0,
+                reasoning=f"Cannot sell {order.symbol}: no open position",
+            )
+        if order.qty > position.quantity:
+            return RiskResult(
+                action=RiskDecision.REJECT,
+                risk_score=0.8,
+                reasoning=(
+                    f"Cannot sell {order.qty} shares of {order.symbol}: "
+                    f"only {position.quantity} held"
+                ),
+            )
+
     # 1. Extreme VIX — reject new buys
-    if vix_d > limits.vix_extreme_threshold and order.side == "buy":
+    if vix_d > limits.vix_extreme_threshold and order.side == OrderSide.BUY:
         return RiskResult(
             action=RiskDecision.REJECT,
             risk_score=0.9,

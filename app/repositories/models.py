@@ -8,10 +8,12 @@ Maps to existing PostgreSQL schemas:
 import uuid as uuid_mod
 from datetime import datetime
 from decimal import Decimal
+from typing import Any
 
 from sqlalchemy import (
     Boolean,
     DateTime,
+    Integer,
     Numeric,
     String,
     Text,
@@ -19,7 +21,7 @@ from sqlalchemy import (
     Uuid,
     func,
 )
-from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -67,6 +69,8 @@ class BrokerConfigRecord(Base):
     __tablename__ = "broker_config"
     __table_args__ = {"schema": "user_data"}
 
+    user_id: Mapped[uuid_mod.UUID] = mapped_column(Uuid, primary_key=True)
+    broker_type: Mapped[str] = mapped_column(String(50), primary_key=True, default="alpaca")
     config_key: Mapped[str] = mapped_column(String, primary_key=True)
     encrypted_value: Mapped[str] = mapped_column(Text, nullable=False)
     updated_at: Mapped[datetime | None] = mapped_column(
@@ -140,3 +144,37 @@ class TradeRecord(Base):
         DateTime(timezone=True), server_default=func.now()
     )
     ai_reason: Mapped[str | None] = mapped_column(String)
+
+
+class OrderRecord(Base):
+    """Order outbox table — records order intent before broker submission (Saga pattern)."""
+
+    __tablename__ = "orders"
+    __table_args__ = {"schema": "trading"}
+
+    id: Mapped[uuid_mod.UUID] = mapped_column(Uuid, primary_key=True, default=uuid_mod.uuid4)
+    user_id: Mapped[uuid_mod.UUID] = mapped_column(Uuid, nullable=False)
+    client_order_id: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    broker_order_id: Mapped[str | None] = mapped_column(String(100))
+    broker_type: Mapped[str] = mapped_column(String(50), default="alpaca")
+    symbol: Mapped[str] = mapped_column(String(20), nullable=False)
+    side: Mapped[str] = mapped_column(String(10), nullable=False)
+    qty: Mapped[Decimal] = mapped_column(Numeric(18, 8), nullable=False)
+    price: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
+    order_type: Mapped[str] = mapped_column(String(20), default="market")
+    status: Mapped[str] = mapped_column(String(30), default="pending")  # OrderStatus enum values
+    filled_qty: Mapped[Decimal] = mapped_column(Numeric(18, 8), default=Decimal("0"))
+    filled_avg_price: Mapped[Decimal | None] = mapped_column(Numeric(15, 2))
+    error_message: Mapped[str | None] = mapped_column(Text)
+    ai_reason: Mapped[str | None] = mapped_column(Text)
+    risk_limits_snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    retry_count: Mapped[int] = mapped_column(Integer, default=0)
+    max_retries: Mapped[int] = mapped_column(Integer, default=3)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    filled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )

@@ -12,18 +12,16 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
-from tenacity import retry, stop_after_attempt, wait_exponential
-
 from shared.utils.redis_client import RedisClient
 
 if TYPE_CHECKING:
+    from ..core.broker import BrokerAdapter
     from .market_data import MarketDataService
 
 from ..config import settings
 from ..core.models import OrderSide, Portfolio, Position, Trade
 from ..repositories.portfolio_repository import PortfolioRepository
 from ..repositories.trade_repository import TradeRepository
-from ..repositories.user_repository import UserRepository
 
 logger = logging.getLogger(__name__)
 
@@ -37,13 +35,11 @@ class PortfolioService:
         portfolio_repo: PortfolioRepository,
         trade_repo: TradeRepository,
         market_data_svc: MarketDataService | None = None,
-        user_repo: UserRepository | None = None,
     ) -> None:
         self.redis = redis
         self.portfolio_repo = portfolio_repo
         self.trade_repo = trade_repo
         self.market_data_svc = market_data_svc
-        self.user_repo = user_repo
 
     async def get_portfolio(self, user_id: uuid.UUID) -> Portfolio:
         """Get portfolio summary for a user."""
@@ -59,9 +55,15 @@ class PortfolioService:
         total_value = cash + invested
         cost_basis = sum((p.avg_cost * p.quantity for p in positions), Decimal("0"))
         pnl = sum((p.unrealized_pnl for p in positions), Decimal("0"))
-        pnl_pct = float((pnl / cost_basis) * 100) if cost_basis > 0 else 0.0
+        pnl_pct = (
+            (pnl / cost_basis * 100).quantize(Decimal("0.01")) if cost_basis > 0 else Decimal("0")
+        )
         daily_pnl = sum((p.daily_pnl for p in positions), Decimal("0"))
-        daily_pnl_pct = float(daily_pnl / total_value * 100) if total_value > 0 else 0.0
+        daily_pnl_pct = (
+            (daily_pnl / total_value * 100).quantize(Decimal("0.01"))
+            if total_value > 0
+            else Decimal("0")
+        )
 
         portfolio = Portfolio(
             user_id=str(user_id),
@@ -169,70 +171,50 @@ class PortfolioService:
         )
         await self.redis.delete(f"user:{user_id}:portfolio")
 
-    async def sync_with_alpaca(self, user_id: uuid.UUID) -> dict[str, Any]:
-        """Sync positions from Alpaca broker.
+    async def sync_with_broker(self, user_id: uuid.UUID, broker: BrokerAdapter) -> dict[str, Any]:
+        """Sync positions from broker via adapter.
 
-        Reconciles local DB with Alpaca as source of truth:
-        1. Fetch credentials (user broker_config → global env fallback)
-        2. GET /v2/account → update cash balance
-        3. GET /v2/positions → create/update/delete positions
+        BLOASIS DB is the source of truth. Broker sync updates DB to match
+        current broker state (account balance + positions).
+
+        Steps:
+        1. Fetch account → update cash balance
+        2. Fetch positions → create/update DB positions
+        3. Delete stale positions (in DB but not at broker)
         4. Invalidate cache
         """
-        api_key, secret_key = await self._get_alpaca_credentials(user_id)
-        if not api_key or not secret_key:
-            return {"success": False, "errorMessage": "Alpaca credentials not configured"}
-
-        import httpx
-
-        headers = {"APCA-API-KEY-ID": api_key, "APCA-API-SECRET-KEY": secret_key}
-
-        @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1, max=10))
-        async def _fetch_alpaca_data() -> tuple[dict[str, Any], list[dict[str, Any]]]:
-            async with httpx.AsyncClient(base_url=settings.alpaca_base_url) as client:
-                acct_resp = await client.get("/v2/account", headers=headers, timeout=30)
-                acct_resp.raise_for_status()
-                pos_resp = await client.get("/v2/positions", headers=headers, timeout=30)
-                pos_resp.raise_for_status()
-                return acct_resp.json(), pos_resp.json()
+        try:
+            account = await broker.get_account()
+            await self.portfolio_repo.update_cash_balance(user_id, account.cash)
+        except Exception as e:
+            logger.error("Broker API error during sync", extra={"error": str(e)})
+            return {"success": False, "errorMessage": "Broker API connection failed"}
 
         try:
-            acct, alpaca_positions = await _fetch_alpaca_data()
-            await self.portfolio_repo.update_cash_balance(user_id, Decimal(acct["cash"]))
-        except (httpx.HTTPError, Exception) as e:
-            logger.error("Alpaca API error during sync", extra={"error": str(e)})
-            return {"success": False, "errorMessage": "Alpaca API connection failed"}
+            broker_positions = await broker.get_positions()
+        except Exception as e:
+            logger.error("Failed to fetch broker positions", extra={"error": str(e)})
+            return {"success": False, "errorMessage": "Failed to fetch broker positions"}
 
         # Reconcile positions
-        alpaca_symbols: set[str] = set()
-        for pos in alpaca_positions:
-            symbol = pos["symbol"]
-            alpaca_symbols.add(symbol)
+        broker_symbols: set[str] = set()
+        for pos in broker_positions:
+            broker_symbols.add(pos.symbol)
             await self.portfolio_repo.upsert_position(
                 user_id=user_id,
-                symbol=symbol,
-                quantity=Decimal(pos["qty"]),
-                avg_cost=Decimal(pos["avg_entry_price"]),
-                current_price=Decimal(pos["current_price"]),
+                symbol=pos.symbol,
+                quantity=pos.quantity,
+                avg_cost=pos.avg_entry_price,
+                current_price=pos.current_price,
             )
 
-        # Delete stale positions (in DB but not in Alpaca)
+        # Delete stale positions (in DB but not at broker)
         db_positions = await self.portfolio_repo.get_positions(user_id)
         for db_pos in db_positions:
-            if db_pos.symbol not in alpaca_symbols:
+            if db_pos.symbol not in broker_symbols:
                 await self.portfolio_repo.delete_position(user_id, db_pos.symbol)
 
         # Invalidate cache
         await self.redis.delete(f"user:{user_id}:portfolio")
 
-        return {"success": True, "positionsSynced": len(alpaca_symbols)}
-
-    async def _get_alpaca_credentials(self, user_id: uuid.UUID) -> tuple[str, str]:
-        """Get Alpaca API credentials (user-specific or global fallback)."""
-        if self.user_repo:
-            configs = await self.user_repo.get_broker_config(user_id)
-            if configs:
-                from ..shared.utils.broker import decrypt_alpaca_credentials
-
-                return decrypt_alpaca_credentials(configs)
-
-        return settings.alpaca_api_key, settings.alpaca_secret_key
+        return {"success": True, "positionsSynced": len(broker_symbols)}

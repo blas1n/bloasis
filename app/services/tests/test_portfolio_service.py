@@ -1,11 +1,12 @@
-"""Tests for PortfolioService — positions, P&L, trade history, Alpaca sync."""
+"""Tests for PortfolioService — positions, P&L, trade history, broker sync."""
 
 from datetime import UTC, datetime
 from decimal import Decimal
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from app.core.models import BrokerAccountInfo, BrokerPosition
 from app.services.portfolio import PortfolioService
 
 
@@ -27,19 +28,21 @@ def mock_market_data_svc():
 
 
 @pytest.fixture
-def portfolio_svc(
-    mock_redis, mock_portfolio_repo, mock_trade_repo, mock_market_data_svc, mock_user_repo
-):
+def portfolio_svc(mock_redis, mock_portfolio_repo, mock_trade_repo, mock_market_data_svc):
     return PortfolioService(
         redis=mock_redis,
         portfolio_repo=mock_portfolio_repo,
         trade_repo=mock_trade_repo,
         market_data_svc=mock_market_data_svc,
-        user_repo=mock_user_repo,
     )
 
 
-def _make_position_row(symbol="AAPL", qty=10, avg_cost=150.0, current_price=160.0):
+def _make_position_row(
+    symbol: str = "AAPL",
+    qty: int = 10,
+    avg_cost: float = 150.0,
+    current_price: float = 160.0,
+) -> MagicMock:
     row = MagicMock()
     row.symbol = symbol
     row.quantity = qty
@@ -110,7 +113,6 @@ class TestGetPositions:
         ]
         mock_portfolio_repo.get_cash_balance.return_value = Decimal("5000")
         portfolio = await portfolio_svc.get_portfolio("user-1")
-        # AAPL: (160-155)*10=50, MSFT: (310-155)*5=775
         assert portfolio.daily_pnl > Decimal("0")
 
     async def test_daily_pnl_pct_zero_total_value(
@@ -194,44 +196,36 @@ class TestRecordTrade:
         mock_redis.delete.assert_called_once_with("user:user-1:portfolio")
 
 
-class TestSyncWithAlpaca:
-    async def test_no_credentials_returns_error(self, portfolio_svc):
-        with patch.object(portfolio_svc, "_get_alpaca_credentials", return_value=("", "")):
-            result = await portfolio_svc.sync_with_alpaca("user-1")
-        assert result["success"] is False
-        assert "not configured" in result["errorMessage"]
-
-    async def test_syncs_positions_from_alpaca(
-        self, portfolio_svc, mock_portfolio_repo, mock_redis
-    ):
+class TestSyncWithBroker:
+    async def test_syncs_positions(self, portfolio_svc, mock_portfolio_repo, mock_redis):
         mock_portfolio_repo.get_positions.return_value = []
 
-        mock_acct_resp = MagicMock()
-        mock_acct_resp.status_code = 200
-        mock_acct_resp.json.return_value = {"cash": "10000.00"}
-
-        mock_pos_resp = MagicMock()
-        mock_pos_resp.status_code = 200
-        mock_pos_resp.json.return_value = [
-            {"symbol": "AAPL", "qty": "10", "avg_entry_price": "150.00", "current_price": "160.00"},
-            {"symbol": "MSFT", "qty": "5", "avg_entry_price": "300.00", "current_price": "310.00"},
+        mock_broker = AsyncMock()
+        mock_broker.get_account.return_value = BrokerAccountInfo(
+            equity=Decimal("15000"), cash=Decimal("10000"), buying_power=Decimal("10000")
+        )
+        mock_broker.get_positions.return_value = [
+            BrokerPosition(
+                symbol="AAPL",
+                quantity=Decimal("10"),
+                avg_entry_price=Decimal("150"),
+                current_price=Decimal("160"),
+                market_value=Decimal("1600"),
+            ),
+            BrokerPosition(
+                symbol="MSFT",
+                quantity=Decimal("5"),
+                avg_entry_price=Decimal("300"),
+                current_price=Decimal("310"),
+                market_value=Decimal("1550"),
+            ),
         ]
 
-        mock_client = AsyncMock()
-        mock_client.get = AsyncMock(side_effect=[mock_acct_resp, mock_pos_resp])
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=None)
-
-        with patch.object(portfolio_svc, "_get_alpaca_credentials", return_value=("key", "secret")):
-            with patch("httpx.AsyncClient", return_value=mock_client):
-                result = await portfolio_svc.sync_with_alpaca("user-1")
-
+        result = await portfolio_svc.sync_with_broker("user-1", mock_broker)
         assert result["success"] is True
         assert result["positionsSynced"] == 2
         assert mock_portfolio_repo.upsert_position.call_count == 2
-        mock_portfolio_repo.update_cash_balance.assert_called_once_with(
-            "user-1", Decimal("10000.00")
-        )
+        mock_portfolio_repo.update_cash_balance.assert_called_once_with("user-1", Decimal("10000"))
         mock_redis.delete.assert_called_with("user:user-1:portfolio")
 
     async def test_deletes_stale_positions(self, portfolio_svc, mock_portfolio_repo):
@@ -239,82 +233,28 @@ class TestSyncWithAlpaca:
         stale_pos.symbol = "GOOG"
         mock_portfolio_repo.get_positions.return_value = [stale_pos]
 
-        mock_acct_resp = MagicMock()
-        mock_acct_resp.status_code = 200
-        mock_acct_resp.json.return_value = {"cash": "5000.00"}
-
-        mock_pos_resp = MagicMock()
-        mock_pos_resp.status_code = 200
-        mock_pos_resp.json.return_value = [
-            {"symbol": "AAPL", "qty": "10", "avg_entry_price": "150.00", "current_price": "160.00"},
+        mock_broker = AsyncMock()
+        mock_broker.get_account.return_value = BrokerAccountInfo(
+            equity=Decimal("5000"), cash=Decimal("5000"), buying_power=Decimal("5000")
+        )
+        mock_broker.get_positions.return_value = [
+            BrokerPosition(
+                symbol="AAPL",
+                quantity=Decimal("10"),
+                avg_entry_price=Decimal("150"),
+                current_price=Decimal("160"),
+                market_value=Decimal("1600"),
+            ),
         ]
 
-        mock_client = AsyncMock()
-        mock_client.get = AsyncMock(side_effect=[mock_acct_resp, mock_pos_resp])
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=None)
-
-        with patch.object(portfolio_svc, "_get_alpaca_credentials", return_value=("key", "secret")):
-            with patch("httpx.AsyncClient", return_value=mock_client):
-                result = await portfolio_svc.sync_with_alpaca("user-1")
-
+        result = await portfolio_svc.sync_with_broker("user-1", mock_broker)
         assert result["success"] is True
         mock_portfolio_repo.delete_position.assert_called_once_with("user-1", "GOOG")
 
-    async def test_alpaca_api_error(self, portfolio_svc):
-        import httpx
+    async def test_broker_api_error(self, portfolio_svc):
+        mock_broker = AsyncMock()
+        mock_broker.get_account.side_effect = Exception("Connection failed")
 
-        mock_acct_resp = MagicMock()
-        mock_acct_resp.status_code = 401
-        mock_acct_resp.raise_for_status.side_effect = httpx.HTTPStatusError(
-            "401 Unauthorized", request=MagicMock(), response=mock_acct_resp
-        )
-
-        mock_client = AsyncMock()
-        mock_client.get = AsyncMock(return_value=mock_acct_resp)
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=None)
-
-        with patch.object(portfolio_svc, "_get_alpaca_credentials", return_value=("key", "secret")):
-            with patch("httpx.AsyncClient", return_value=mock_client):
-                result = await portfolio_svc.sync_with_alpaca("user-1")
-
+        result = await portfolio_svc.sync_with_broker("user-1", mock_broker)
         assert result["success"] is False
-
-
-class TestGetAlpacaCredentials:
-    async def test_uses_user_broker_config(self, portfolio_svc, mock_user_repo):
-        from cryptography.fernet import Fernet
-
-        key = Fernet.generate_key()
-        f = Fernet(key)
-
-        cfg_api = MagicMock()
-        cfg_api.config_key = "api_key"
-        cfg_api.encrypted_value = f.encrypt(b"user-api-key").decode()
-
-        cfg_secret = MagicMock()
-        cfg_secret.config_key = "secret_key"
-        cfg_secret.encrypted_value = f.encrypt(b"user-secret").decode()
-
-        mock_user_repo.get_broker_config.return_value = [cfg_api, cfg_secret]
-
-        with patch("app.shared.utils.broker.settings") as mock_settings:
-            mock_settings.fernet_key = key.decode()
-            mock_settings.alpaca_api_key = "global-key"
-            mock_settings.alpaca_secret_key = "global-secret"
-            api_key, secret_key = await portfolio_svc._get_alpaca_credentials("user-1")
-
-        assert api_key == "user-api-key"
-        assert secret_key == "user-secret"
-
-    async def test_falls_back_to_global(self, portfolio_svc, mock_user_repo):
-        mock_user_repo.get_broker_config.return_value = []
-
-        with patch("app.services.portfolio.settings") as mock_settings:
-            mock_settings.alpaca_api_key = "global-key"
-            mock_settings.alpaca_secret_key = "global-secret"
-            api_key, secret_key = await portfolio_svc._get_alpaca_credentials("user-1")
-
-        assert api_key == "global-key"
-        assert secret_key == "global-secret"
+        assert "connection" in result["errorMessage"].lower()

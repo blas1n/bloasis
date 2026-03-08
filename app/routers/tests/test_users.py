@@ -7,7 +7,12 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.core.models import RiskProfile, UserPreferences
-from app.dependencies import get_current_user, get_user_service
+from app.dependencies import (
+    get_broker_adapter,
+    get_current_user,
+    get_portfolio_service,
+    get_user_service,
+)
 from app.main import create_app
 
 USER_ID = "00000000-0000-0000-0000-000000000001"
@@ -22,10 +27,22 @@ def mock_user_svc():
 
 
 @pytest.fixture
-def app(mock_user_svc):
+def mock_broker():
+    return AsyncMock()
+
+
+@pytest.fixture
+def mock_portfolio_svc():
+    return AsyncMock()
+
+
+@pytest.fixture
+def app(mock_user_svc, mock_broker, mock_portfolio_svc):
     application = create_app()
     application.dependency_overrides[get_current_user] = lambda: USER_UUID
     application.dependency_overrides[get_user_service] = lambda: mock_user_svc
+    application.dependency_overrides[get_broker_adapter] = lambda: mock_broker
+    application.dependency_overrides[get_portfolio_service] = lambda: mock_portfolio_svc
     yield application
     application.dependency_overrides.clear()
 
@@ -110,10 +127,11 @@ class TestGetBrokerStatus:
 
 
 class TestUpdateBrokerConfig:
-    def test_success(self, client, mock_user_svc):
+    def test_success(self, client, mock_user_svc, mock_portfolio_svc):
         mock_user_svc.update_broker_config.return_value = {
             "configured": True,
             "connected": True,
+            "positionsSynced": 3,
         }
         resp = client.put(
             f"/v1/users/{USER_ID}/broker",
@@ -126,8 +144,9 @@ class TestUpdateBrokerConfig:
         assert resp.status_code == 200
         data = resp.json()
         assert data["configured"] is True
+        assert data["positionsSynced"] == 3
         mock_user_svc.update_broker_config.assert_awaited_once_with(
-            USER_UUID, "PKTEST123", "secret456", True
+            USER_UUID, "PKTEST123", "secret456", True, portfolio_svc=mock_portfolio_svc
         )
 
     def test_access_denied(self, client):

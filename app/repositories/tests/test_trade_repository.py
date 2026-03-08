@@ -73,12 +73,9 @@ class TestRecordTradeAndUpdatePosition:
             price=Decimal("160"),
         )
 
-        # Weighted average: (10*140 + 5*160) / 15
+        # Weighted average: (10*140 + 5*160) / 15 = 146.67 (quantized)
         assert existing_position.quantity == Decimal("15")
-        expected_avg = (Decimal("10") * Decimal("140") + Decimal("5") * Decimal("160")) / Decimal(
-            "15"
-        )
-        assert existing_position.avg_cost == expected_avg
+        assert existing_position.avg_cost == Decimal("146.67")
         assert existing_position.current_price == Decimal("160")
 
     async def test_sell_reduces_position(self, mock_session):
@@ -104,7 +101,7 @@ class TestRecordTradeAndUpdatePosition:
 
         assert existing_position.quantity == Decimal("7")
 
-    async def test_sell_does_not_go_negative(self, mock_session):
+    async def test_sell_rejects_insufficient_quantity(self, mock_session):
         existing_position = MagicMock()
         existing_position.quantity = Decimal("5")
 
@@ -115,13 +112,12 @@ class TestRecordTradeAndUpdatePosition:
         postgres = _make_mock_postgres(mock_session)
         repo = TradeRepository(postgres=postgres)
 
-        await repo.record_trade_and_update_position(
-            user_id=TEST_USER_ID,
-            order_id="order-4",
-            symbol="AAPL",
-            side="sell",
-            qty=Decimal("10"),
-            price=Decimal("160"),
-        )
-
-        assert existing_position.quantity == Decimal("0")
+        with pytest.raises(ValueError, match="only 5 held"):
+            await repo.record_trade_and_update_position(
+                user_id=TEST_USER_ID,
+                order_id="order-4",
+                symbol="AAPL",
+                side="sell",
+                qty=Decimal("10"),
+                price=Decimal("160"),
+            )

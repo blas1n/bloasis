@@ -63,6 +63,8 @@ class RedisClient:
                 port=self.port,
                 password=self.password,
                 decode_responses=True,
+                socket_timeout=5,
+                socket_connect_timeout=5,
             )
             await self.client.ping()
             logger.info(

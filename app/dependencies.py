@@ -15,11 +15,13 @@ from shared.ai_clients.llm_client import LLMClient
 from shared.utils.postgres_client import PostgresClient
 from shared.utils.redis_client import RedisClient
 
+from .repositories.order_repository import OrderRepository
 from .repositories.portfolio_repository import PortfolioRepository
 from .repositories.trade_repository import TradeRepository
 from .repositories.user_repository import UserRepository
 
 if TYPE_CHECKING:
+    from .core.broker import BrokerAdapter
     from .services.backtesting import BacktestingService
     from .services.classification import ClassificationService
     from .services.executor import ExecutorService
@@ -63,6 +65,64 @@ def get_trade_repo(postgres: PostgresClient = Depends(get_postgres)) -> TradeRep
     return TradeRepository(postgres=postgres)
 
 
+def get_order_repo(postgres: PostgresClient = Depends(get_postgres)) -> OrderRepository:
+    return OrderRepository(postgres=postgres)
+
+
+# --- Authentication dependencies ---
+
+
+def get_user_service(
+    redis: RedisClient = Depends(get_redis),
+    user_repo: UserRepository = Depends(get_user_repo),
+) -> UserService:
+    from .services.user import UserService
+
+    return UserService(redis=redis, user_repo=user_repo)
+
+
+async def get_current_user(
+    request: Request,
+    user_svc: UserService = Depends(get_user_service),
+) -> uuid.UUID:
+    """Extract and validate JWT from Authorization header. Returns user_id as UUID."""
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing authorization token")
+
+    token = auth_header.removeprefix("Bearer ")
+    user_id_str = user_svc.validate_token(token)
+
+    if not user_id_str:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+    try:
+        return uuid.UUID(user_id_str)
+    except ValueError:
+        raise HTTPException(status_code=401, detail="Invalid user ID in token")
+
+
+def verify_user_access(
+    user_id: uuid.UUID, current_user: uuid.UUID = Depends(get_current_user)
+) -> uuid.UUID:
+    """Verify the authenticated user matches the requested user_id."""
+    if user_id != current_user:
+        raise HTTPException(status_code=403, detail="Access denied")
+    return user_id
+
+
+# --- Broker adapter dependency ---
+
+
+async def get_broker_adapter(
+    current_user: uuid.UUID = Depends(get_current_user),
+    user_repo: UserRepository = Depends(get_user_repo),
+) -> BrokerAdapter:
+    from .services.brokers.factory import create_broker_adapter
+
+    return await create_broker_adapter(current_user, user_repo)
+
+
 # --- Service dependencies ---
 
 
@@ -103,21 +163,11 @@ def get_classification_service(
     return ClassificationService(redis=redis, llm=llm)
 
 
-def get_user_service(
-    redis: RedisClient = Depends(get_redis),
-    user_repo: UserRepository = Depends(get_user_repo),
-) -> UserService:
-    from .services.user import UserService
-
-    return UserService(redis=redis, user_repo=user_repo)
-
-
 def get_portfolio_service(
     redis: RedisClient = Depends(get_redis),
     portfolio_repo: PortfolioRepository = Depends(get_portfolio_repo),
     trade_repo: TradeRepository = Depends(get_trade_repo),
     market_data_svc: MarketDataService = Depends(get_market_data_service),
-    user_repo: UserRepository = Depends(get_user_repo),
 ) -> PortfolioService:
     from .services.portfolio import PortfolioService
 
@@ -126,7 +176,6 @@ def get_portfolio_service(
         portfolio_repo=portfolio_repo,
         trade_repo=trade_repo,
         market_data_svc=market_data_svc,
-        user_repo=user_repo,
     )
 
 
@@ -134,6 +183,8 @@ def get_executor_service(
     redis: RedisClient = Depends(get_redis),
     portfolio_svc: PortfolioService = Depends(get_portfolio_service),
     market_data_svc: MarketDataService = Depends(get_market_data_service),
+    broker: BrokerAdapter = Depends(get_broker_adapter),
+    order_repo: OrderRepository = Depends(get_order_repo),
     user_repo: UserRepository = Depends(get_user_repo),
 ) -> ExecutorService:
     from .services.executor import ExecutorService
@@ -142,6 +193,8 @@ def get_executor_service(
         redis=redis,
         portfolio_svc=portfolio_svc,
         market_data_svc=market_data_svc,
+        broker=broker,
+        order_repo=order_repo,
         user_repo=user_repo,
     )
 
@@ -171,36 +224,3 @@ def get_strategy_service(
         market_regime=market_regime,
         classification=classification,
     )
-
-
-# --- Authentication dependency ---
-
-
-async def get_current_user(
-    request: Request,
-    user_svc: UserService = Depends(get_user_service),
-) -> uuid.UUID:
-    """Extract and validate JWT from Authorization header. Returns user_id as UUID."""
-    auth_header = request.headers.get("Authorization", "")
-    if not auth_header.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing authorization token")
-
-    token = auth_header.removeprefix("Bearer ")
-    user_id_str = user_svc.validate_token(token)
-
-    if not user_id_str:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
-
-    try:
-        return uuid.UUID(user_id_str)
-    except ValueError:
-        raise HTTPException(status_code=401, detail="Invalid user ID in token")
-
-
-def verify_user_access(
-    user_id: uuid.UUID, current_user: uuid.UUID = Depends(get_current_user)
-) -> uuid.UUID:
-    """Verify the authenticated user matches the requested user_id."""
-    if user_id != current_user:
-        raise HTTPException(status_code=403, detail="Access denied")
-    return user_id

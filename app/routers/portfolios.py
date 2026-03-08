@@ -6,13 +6,14 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Query
 
+from ..core.broker import BrokerAdapter
 from ..core.responses import (
     PortfolioSummaryResponse,
     PositionsResponse,
     SyncResponse,
     TradeHistoryResponse,
 )
-from ..dependencies import get_portfolio_service, verify_user_access
+from ..dependencies import get_broker_adapter, get_portfolio_service, verify_user_access
 from ..services.portfolio import PortfolioService
 
 router = APIRouter()
@@ -71,6 +72,7 @@ async def get_trades(
 async def sync_portfolio(
     user_id: uuid.UUID = Depends(verify_user_access),
     portfolio_svc: PortfolioService = Depends(get_portfolio_service),
+    broker: BrokerAdapter = Depends(get_broker_adapter),
 ) -> dict[str, Any]:
-    """Sync positions from Alpaca broker."""
-    return await portfolio_svc.sync_with_alpaca(user_id)
+    """Sync positions from broker."""
+    return await portfolio_svc.sync_with_broker(user_id, broker)

@@ -1,11 +1,12 @@
-"""Tests for ExecutorService — order execution with risk checks."""
+"""Tests for ExecutorService — order execution with Saga pattern."""
 
+import uuid
 from decimal import Decimal
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from app.core.models import Portfolio, Position
+from app.core.models import OrderResult, OrderSide, OrderStatus, Portfolio, Position
 from app.services.executor import ExecutorService
 
 
@@ -20,7 +21,7 @@ def mock_portfolio_svc():
         positions=[
             Position(
                 symbol="AAPL",
-                quantity=100,
+                quantity=Decimal("100"),
                 avg_cost=Decimal("150"),
                 current_price=Decimal("155"),
                 current_value=Decimal("15500"),
@@ -49,27 +50,61 @@ def mock_user_repo():
 
 
 @pytest.fixture
-def executor_svc(mock_redis, mock_portfolio_svc, mock_market_data_svc, mock_user_repo):
+def mock_broker():
+    broker = AsyncMock()
+    broker.submit_order.return_value = OrderResult(
+        order_id="broker-order-1",
+        client_order_id="",
+        symbol="MSFT",
+        side=OrderSide.BUY,
+        qty=Decimal("10"),
+        status=OrderStatus.FILLED,
+        filled_qty=Decimal("10"),
+        filled_avg_price=Decimal("350"),
+    )
+    broker.cancel_order.return_value = True
+    return broker
+
+
+@pytest.fixture
+def mock_order_repo():
+    repo = AsyncMock()
+    record = AsyncMock()
+    record.id = uuid.uuid4()
+    repo.create_pending_order.return_value = record
+    return repo
+
+
+@pytest.fixture
+def executor_svc(
+    mock_redis,
+    mock_portfolio_svc,
+    mock_market_data_svc,
+    mock_broker,
+    mock_order_repo,
+    mock_user_repo,
+):
     return ExecutorService(
         redis=mock_redis,
         portfolio_svc=mock_portfolio_svc,
         market_data_svc=mock_market_data_svc,
+        broker=mock_broker,
+        order_repo=mock_order_repo,
         user_repo=mock_user_repo,
     )
 
 
 class TestExecuteOrder:
     @patch("app.services.executor.settings")
-    async def test_order_approved(self, mock_settings, executor_svc, mock_portfolio_svc):
-        mock_settings.mock_broker_enabled = True
-        mock_settings.alpaca_api_key = ""
-        mock_settings.alpaca_secret_key = ""
-        mock_settings.alpaca_base_url = "https://paper-api.alpaca.markets"
+    async def test_order_approved_saga_flow(
+        self, mock_settings, executor_svc, mock_portfolio_svc, mock_broker, mock_order_repo
+    ):
         mock_settings.max_position_size = Decimal("0.10")
         mock_settings.max_single_order = Decimal("0.05")
         mock_settings.max_sector_concentration = Decimal("0.30")
         mock_settings.vix_high_threshold = Decimal("30")
         mock_settings.vix_extreme_threshold = Decimal("40")
+
         result = await executor_svc.execute_order(
             user_id="user-1",
             symbol="MSFT",
@@ -78,8 +113,13 @@ class TestExecuteOrder:
             price=Decimal("350"),
             sector="Technology",
         )
-        assert result.status == "filled"
+        assert result.status == OrderStatus.FILLED
+        # Verify Saga steps
+        mock_order_repo.create_pending_order.assert_called_once()
+        mock_broker.submit_order.assert_called_once()
         mock_portfolio_svc.record_trade.assert_called_once()
+        # Order status updated to filled
+        assert mock_order_repo.update_status.call_count == 2  # after submit + after record
 
     async def test_order_rejected_extreme_vix(self, executor_svc, mock_market_data_svc):
         mock_market_data_svc.get_vix.return_value = 45.0
@@ -90,32 +130,56 @@ class TestExecuteOrder:
             qty=Decimal("10"),
             price=Decimal("350"),
         )
-        assert result.status == "rejected"
-        assert "VIX" in result.error_message
+        assert result.status == OrderStatus.FAILED
+        assert "VIX" in (result.error_message or "")
 
     @patch("app.services.executor.settings")
-    async def test_order_no_price_fetches_market(
-        self, mock_settings, executor_svc, mock_market_data_svc
+    async def test_broker_failure_marks_order_failed(
+        self, mock_settings, executor_svc, mock_broker, mock_order_repo
     ):
-        mock_settings.mock_broker_enabled = True
-        mock_settings.alpaca_api_key = ""
-        mock_settings.alpaca_secret_key = ""
-        mock_settings.alpaca_base_url = "https://paper-api.alpaca.markets"
         mock_settings.max_position_size = Decimal("0.10")
         mock_settings.max_single_order = Decimal("0.05")
         mock_settings.max_sector_concentration = Decimal("0.30")
         mock_settings.vix_high_threshold = Decimal("30")
         mock_settings.vix_extreme_threshold = Decimal("40")
+        mock_broker.submit_order.side_effect = Exception("Connection error")
+
         result = await executor_svc.execute_order(
             user_id="user-1",
             symbol="MSFT",
             side="buy",
             qty=Decimal("10"),
+            price=Decimal("350"),
         )
-        mock_market_data_svc.get_ohlcv.assert_called()
-        assert result.status == "filled"
+        assert result.status == OrderStatus.FAILED
+        # Order marked as failed in DB
+        mock_order_repo.update_status.assert_called_once()
+        call_args = mock_order_repo.update_status.call_args
+        assert call_args[0][1] == OrderStatus.FAILED
 
-    async def test_order_no_price_no_data(self, executor_svc, mock_market_data_svc):
+    @patch("app.services.executor.settings")
+    async def test_trade_recording_failure_triggers_compensation(
+        self, mock_settings, executor_svc, mock_portfolio_svc, mock_broker, mock_order_repo
+    ):
+        mock_settings.max_position_size = Decimal("0.10")
+        mock_settings.max_single_order = Decimal("0.05")
+        mock_settings.max_sector_concentration = Decimal("0.30")
+        mock_settings.vix_high_threshold = Decimal("30")
+        mock_settings.vix_extreme_threshold = Decimal("40")
+        mock_portfolio_svc.record_trade.side_effect = Exception("DB error")
+
+        result = await executor_svc.execute_order(
+            user_id="user-1",
+            symbol="MSFT",
+            side="buy",
+            qty=Decimal("10"),
+            price=Decimal("350"),
+        )
+        assert result.status == OrderStatus.COMPENSATION_NEEDED
+        # Broker cancel_order called for compensation
+        mock_broker.cancel_order.assert_called_once_with("broker-order-1")
+
+    async def test_order_no_price_fetches_market(self, executor_svc, mock_market_data_svc):
         mock_market_data_svc.get_ohlcv.return_value = []
         result = await executor_svc.execute_order(
             user_id="user-1",
@@ -123,8 +187,8 @@ class TestExecuteOrder:
             side="buy",
             qty=Decimal("10"),
         )
-        assert result.status == "rejected"
-        assert "price" in result.error_message.lower()
+        assert result.status == OrderStatus.FAILED
+        assert "price" in (result.error_message or "").lower()
 
     async def test_empty_portfolio_rejected(self, executor_svc, mock_portfolio_svc):
         mock_portfolio_svc.get_portfolio.return_value = Portfolio(
@@ -137,8 +201,8 @@ class TestExecuteOrder:
             qty=Decimal("5"),
             price=Decimal("150"),
         )
-        assert result.status == "rejected"
-        assert "Insufficient funds" in result.error_message
+        assert result.status == OrderStatus.FAILED
+        assert "Insufficient funds" in (result.error_message or "")
 
 
 class TestTradingStatus:
@@ -156,12 +220,6 @@ class TestTradingStatus:
         status = await executor_svc.get_trading_status("user-1")
         assert status["tradingEnabled"] is True
         mock_user_repo.get_trading_enabled.assert_called_once_with("user-1")
-        mock_redis.setex.assert_called()
-
-    async def test_get_trading_status_inactive(self, executor_svc, mock_redis):
-        mock_redis.get.return_value = None
-        status = await executor_svc.get_trading_status("user-1")
-        assert status["tradingEnabled"] is False
 
     async def test_start_trading_persists_to_db(self, executor_svc, mock_redis, mock_user_repo):
         result = await executor_svc.start_trading("user-1")
@@ -175,19 +233,15 @@ class TestTradingStatus:
         assert result["status"] == "hard_stopped"
         mock_user_repo.update_trading_enabled.assert_called_once_with("user-1", False)
 
-    async def test_get_trading_status_redis_inactive(self, executor_svc, mock_redis):
-        mock_redis.get.return_value = "soft_stopped"
-        status = await executor_svc.get_trading_status("user-1")
-        assert status["tradingEnabled"] is False
-        assert status["status"] == "soft_stopped"
-
     async def test_get_trading_status_no_user_repo(
-        self, mock_redis, mock_portfolio_svc, mock_market_data_svc
+        self, mock_redis, mock_portfolio_svc, mock_market_data_svc, mock_broker, mock_order_repo
     ):
         svc = ExecutorService(
             redis=mock_redis,
             portfolio_svc=mock_portfolio_svc,
             market_data_svc=mock_market_data_svc,
+            broker=mock_broker,
+            order_repo=mock_order_repo,
             user_repo=None,
         )
         mock_redis.get.return_value = None
@@ -196,119 +250,18 @@ class TestTradingStatus:
         assert status["status"] == "inactive"
 
 
-class TestSubmitToAlpaca:
-    @patch("app.services.executor.settings")
-    async def test_no_keys_non_mock_rejected(self, mock_settings, executor_svc):
-        mock_settings.alpaca_api_key = ""
-        mock_settings.alpaca_secret_key = ""
-        mock_settings.mock_broker_enabled = False
-        result = await executor_svc._submit_to_alpaca(
-            "AAPL", "buy", Decimal("10"), Decimal("150"), "market"
-        )
-        assert result.status == "rejected"
-        assert "not configured" in result.error_message
-
-    @patch("app.services.executor.httpx.AsyncClient")
-    @patch("app.services.executor.settings")
-    async def test_alpaca_success(self, mock_settings, mock_client_cls, executor_svc):
-        mock_settings.alpaca_api_key = "key"
-        mock_settings.alpaca_secret_key = "secret"
-        mock_settings.alpaca_base_url = "https://paper-api.alpaca.markets"
-
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {
-            "id": "order-abc",
-            "client_order_id": "cli-abc",
-            "symbol": "AAPL",
-            "side": "buy",
-            "qty": "10",
-            "status": "filled",
-            "filled_qty": "10",
-            "filled_avg_price": "150.50",
-            "submitted_at": "2025-01-01T00:00:00Z",
-        }
-
-        mock_client = AsyncMock()
-        mock_client.post = AsyncMock(return_value=mock_response)
-        mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
-
-        result = await executor_svc._submit_to_alpaca(
-            "AAPL", "buy", Decimal("10"), Decimal("150"), "market"
-        )
-        assert result.status == "filled"
-        assert result.order_id == "order-abc"
-        assert result.filled_avg_price == Decimal("150.50")
-
-    @patch("app.services.executor.httpx.AsyncClient")
-    @patch("app.services.executor.settings")
-    async def test_alpaca_limit_order_includes_price(
-        self, mock_settings, mock_client_cls, executor_svc
-    ):
-        mock_settings.alpaca_api_key = "key"
-        mock_settings.alpaca_secret_key = "secret"
-        mock_settings.alpaca_base_url = "https://paper-api.alpaca.markets"
-
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {
-            "id": "order-lim",
-            "symbol": "AAPL",
-            "side": "buy",
-            "qty": "5",
-            "status": "submitted",
-        }
-
-        mock_client = AsyncMock()
-        mock_client.post = AsyncMock(return_value=mock_response)
-        mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
-
-        await executor_svc._submit_to_alpaca("AAPL", "buy", Decimal("5"), Decimal("150"), "limit")
-
-        call_kwargs = mock_client.post.call_args.kwargs
-        payload = call_kwargs["json"]
-        assert payload["limit_price"] == "150"
-
-    @patch("app.services.executor.httpx.AsyncClient")
-    @patch("app.services.executor.settings")
-    async def test_alpaca_error_status(self, mock_settings, mock_client_cls, executor_svc):
-        mock_settings.alpaca_api_key = "key"
-        mock_settings.alpaca_secret_key = "secret"
-        mock_settings.alpaca_base_url = "https://paper-api.alpaca.markets"
-
-        mock_response = MagicMock()
-        mock_response.status_code = 400
-        mock_response.text = "Bad Request"
-
-        mock_client = AsyncMock()
-        mock_client.post = AsyncMock(return_value=mock_response)
-        mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
-
-        result = await executor_svc._submit_to_alpaca(
-            "AAPL", "buy", Decimal("10"), Decimal("150"), "market"
-        )
-        assert result.status == "rejected"
-        assert "400" in result.error_message
-
-
 class TestRiskAdjustment:
     @patch("app.services.executor.settings")
-    async def test_risk_adjusted_size(self, mock_settings, executor_svc, mock_portfolio_svc):
-        """When VIX is high, risk rules reduce order size."""
-        mock_settings.mock_broker_enabled = True
-        mock_settings.alpaca_api_key = ""
-        mock_settings.alpaca_secret_key = ""
-        mock_settings.alpaca_base_url = "https://paper-api.alpaca.markets"
+    async def test_risk_adjusted_size_high_vix(
+        self, mock_settings, executor_svc, mock_portfolio_svc, mock_broker, mock_order_repo
+    ):
+        """When VIX is high (30-40), risk rules reduce order size by 50%."""
         mock_settings.max_position_size = Decimal("0.10")
         mock_settings.max_single_order = Decimal("0.05")
         mock_settings.max_sector_concentration = Decimal("0.30")
         mock_settings.vix_high_threshold = Decimal("30")
         mock_settings.vix_extreme_threshold = Decimal("40")
 
-        executor_svc._market_data_svc = executor_svc.market_data_svc
         executor_svc.market_data_svc.get_vix.return_value = 35.0  # High VIX
 
         result = await executor_svc.execute_order(
@@ -319,7 +272,7 @@ class TestRiskAdjustment:
             price=Decimal("100"),
             sector="Other",
         )
-        # High VIX should reduce order size by 50% (or reject), either way trade records
+        # High VIX should reduce order size by 50%
         if result.status == "filled":
             call_kwargs = mock_portfolio_svc.record_trade.call_args.kwargs
             assert call_kwargs["qty"] <= Decimal("10")

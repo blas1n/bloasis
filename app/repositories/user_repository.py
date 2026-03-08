@@ -87,24 +87,37 @@ class UserRepository:
             value = result.scalar_one_or_none()
             return bool(value) if value is not None else False
 
-    # --- Broker Config (global key-value, no user_id column) ---
+    # --- Broker Config (per-user, per-broker key-value) ---
 
-    async def get_broker_config(self, user_id: uuid_mod.UUID) -> list[BrokerConfigRecord]:
-        """Get broker config entries for a user (keys prefixed with user_id or global)."""
+    async def get_broker_config(
+        self, user_id: uuid_mod.UUID, broker_type: str = "alpaca"
+    ) -> list[BrokerConfigRecord]:
+        """Get broker config entries for a specific user and broker type."""
         async with self.postgres.get_session() as session:
-            result = await session.execute(select(BrokerConfigRecord))
+            result = await session.execute(
+                select(BrokerConfigRecord).where(
+                    BrokerConfigRecord.user_id == user_id,
+                    BrokerConfigRecord.broker_type == broker_type,
+                )
+            )
             return list(result.scalars().all())
 
     async def upsert_broker_config(
-        self, user_id: uuid_mod.UUID, config_key: str, encrypted_value: str
+        self,
+        user_id: uuid_mod.UUID,
+        config_key: str,
+        encrypted_value: str,
+        broker_type: str = "alpaca",
     ) -> None:
         async with self.postgres.get_session() as session:
-            existing = await session.get(BrokerConfigRecord, config_key)
+            existing = await session.get(BrokerConfigRecord, (user_id, broker_type, config_key))
             if existing:
                 existing.encrypted_value = encrypted_value
             else:
                 session.add(
                     BrokerConfigRecord(
+                        user_id=user_id,
+                        broker_type=broker_type,
                         config_key=config_key,
                         encrypted_value=encrypted_value,
                     )

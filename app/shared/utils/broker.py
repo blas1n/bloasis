@@ -1,6 +1,6 @@
 """Broker credential helpers.
 
-Centralizes Alpaca API credential decryption used by UserService and PortfolioService.
+Centralizes broker API credential decryption used by adapter factory.
 Falls back to global env settings when per-user credentials are not configured.
 """
 
@@ -12,17 +12,21 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 
-def decrypt_alpaca_credentials(configs: list[Any]) -> tuple[str, str]:
-    """Decrypt Alpaca API credentials from broker config records.
+def decrypt_broker_credentials(configs: list[Any]) -> dict[str, str]:
+    """Decrypt broker API credentials from broker config records.
 
     Args:
         configs: List of BrokerConfigRecord with config_key and encrypted_value.
 
     Returns:
-        Tuple of (api_key, secret_key). Falls back to global env settings.
+        Dict mapping config_key to decrypted value (e.g. {"api_key": "...", "secret_key": "..."}).
+        Falls back to global env settings for Alpaca keys if decryption fails.
     """
     if not settings.fernet_key:
-        return settings.alpaca_api_key, settings.alpaca_secret_key
+        return {
+            "api_key": settings.alpaca_api_key,
+            "secret_key": settings.alpaca_secret_key,
+        }
 
     from cryptography.fernet import Fernet, InvalidToken
 
@@ -35,6 +39,19 @@ def decrypt_alpaca_credentials(configs: list[Any]) -> tuple[str, str]:
             logger.warning("Failed to decrypt broker config key: %s", cfg.config_key)
 
     if "api_key" in creds and "secret_key" in creds:
-        return creds["api_key"], creds["secret_key"]
+        return creds
 
-    return settings.alpaca_api_key, settings.alpaca_secret_key
+    return {
+        "api_key": settings.alpaca_api_key,
+        "secret_key": settings.alpaca_secret_key,
+    }
+
+
+def decrypt_alpaca_credentials(configs: list[Any]) -> tuple[str, str]:
+    """Decrypt Alpaca API credentials (backward-compatible wrapper).
+
+    Returns:
+        Tuple of (api_key, secret_key).
+    """
+    creds = decrypt_broker_credentials(configs)
+    return creds.get("api_key", ""), creds.get("secret_key", "")

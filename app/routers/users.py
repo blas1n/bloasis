@@ -7,9 +7,16 @@ from typing import Any
 from fastapi import APIRouter, Body, Depends
 from pydantic import BaseModel, Field
 
+from ..core.broker import BrokerAdapter
 from ..core.models import RiskProfile, UserPreferences
 from ..core.responses import BrokerStatusResponse, BrokerUpdateResponse
-from ..dependencies import get_user_service, verify_user_access
+from ..dependencies import (
+    get_broker_adapter,
+    get_portfolio_service,
+    get_user_service,
+    verify_user_access,
+)
+from ..services.portfolio import PortfolioService
 from ..services.user import UserService
 
 router = APIRouter()
@@ -68,9 +75,10 @@ async def update_preferences(
 async def get_broker_status(
     user_id: uuid.UUID = Depends(verify_user_access),
     user_svc: UserService = Depends(get_user_service),
+    broker: BrokerAdapter = Depends(get_broker_adapter),
 ) -> dict[str, Any]:
     """Get broker connection status."""
-    return await user_svc.get_broker_status(user_id)
+    return await user_svc.get_broker_status(user_id, broker)
 
 
 @router.put("/{user_id}/broker", response_model=BrokerUpdateResponse)
@@ -78,11 +86,13 @@ async def update_broker_config(
     user_id: uuid.UUID = Depends(verify_user_access),
     body: BrokerConfigUpdate = Body(),
     user_svc: UserService = Depends(get_user_service),
+    portfolio_svc: PortfolioService = Depends(get_portfolio_service),
 ) -> dict[str, Any]:
-    """Save broker API credentials."""
+    """Save broker API credentials and sync positions."""
     return await user_svc.update_broker_config(
         user_id,
         body.apiKey,
         body.secretKey,
         body.paper,
+        portfolio_svc=portfolio_svc,
     )
