@@ -4,6 +4,7 @@ from decimal import Decimal
 
 from app.core.models import (
     OrderRequest,
+    OrderSide,
     Portfolio,
     Position,
     RiskDecision,
@@ -26,7 +27,7 @@ def _make_portfolio(
 
 def _make_order(
     symbol: str = "AAPL",
-    side: str = "buy",
+    side: OrderSide = OrderSide.BUY,
     qty: Decimal = Decimal("10"),
     price: Decimal = Decimal("150"),
     sector: str = "Technology",
@@ -56,7 +57,7 @@ class TestEmptyPortfolio:
 class TestVIXRules:
     def test_extreme_vix_rejects_buy(self):
         result = evaluate_risk(
-            order=_make_order(side="buy"),
+            order=_make_order(side=OrderSide.BUY),
             portfolio=_make_portfolio(),
             vix=45.0,
         )
@@ -64,9 +65,19 @@ class TestVIXRules:
         assert "extreme volatility" in result.reasoning.lower()
 
     def test_extreme_vix_allows_sell(self):
+        positions = [
+            Position(
+                symbol="AAPL",
+                quantity=Decimal("100"),
+                avg_cost=Decimal("140"),
+                current_price=Decimal("150"),
+                current_value=Decimal("15000"),
+                sector="Technology",
+            ),
+        ]
         result = evaluate_risk(
-            order=_make_order(side="sell"),
-            portfolio=_make_portfolio(),
+            order=_make_order(side=OrderSide.SELL),
+            portfolio=_make_portfolio(positions=positions),
             vix=45.0,
         )
         assert result.action != RiskDecision.REJECT
@@ -120,7 +131,7 @@ class TestSectorConcentration:
         positions = [
             Position(
                 symbol="MSFT",
-                quantity=100,
+                quantity=Decimal("100"),
                 avg_cost=Decimal("280"),
                 current_price=Decimal("280"),
                 current_value=Decimal("28000"),
@@ -144,7 +155,7 @@ class TestSectorConcentration:
         positions = [
             Position(
                 symbol="MSFT",
-                quantity=100,
+                quantity=Decimal("100"),
                 avg_cost=Decimal("250"),
                 current_price=Decimal("250"),
                 current_value=Decimal("25000"),
@@ -164,11 +175,59 @@ class TestSectorConcentration:
         assert result.action == RiskDecision.APPROVE
 
 
+class TestSellValidation:
+    def test_sell_no_position_rejected(self):
+        result = evaluate_risk(
+            order=_make_order(side=OrderSide.SELL),
+            portfolio=_make_portfolio(),
+            vix=15.0,
+        )
+        assert result.action == RiskDecision.REJECT
+        assert "no open position" in result.reasoning
+
+    def test_sell_insufficient_quantity_rejected(self):
+        positions = [
+            Position(
+                symbol="AAPL",
+                quantity=Decimal("5"),
+                avg_cost=Decimal("140"),
+                current_price=Decimal("150"),
+                current_value=Decimal("750"),
+                sector="Technology",
+            ),
+        ]
+        result = evaluate_risk(
+            order=_make_order(side=OrderSide.SELL, qty=Decimal("10")),
+            portfolio=_make_portfolio(positions=positions),
+            vix=15.0,
+        )
+        assert result.action == RiskDecision.REJECT
+        assert "only" in result.reasoning
+
+    def test_sell_valid_quantity_approved(self):
+        positions = [
+            Position(
+                symbol="AAPL",
+                quantity=Decimal("20"),
+                avg_cost=Decimal("140"),
+                current_price=Decimal("150"),
+                current_value=Decimal("3000"),
+                sector="Technology",
+            ),
+        ]
+        result = evaluate_risk(
+            order=_make_order(side=OrderSide.SELL, qty=Decimal("10")),
+            portfolio=_make_portfolio(positions=positions),
+            vix=15.0,
+        )
+        assert result.action == RiskDecision.APPROVE
+
+
 class TestCustomLimits:
     def test_custom_vix_threshold(self):
         limits = RiskLimits(vix_extreme_threshold=Decimal("50.0"))
         result = evaluate_risk(
-            order=_make_order(side="buy"),
+            order=_make_order(side=OrderSide.BUY),
             portfolio=_make_portfolio(),
             vix=45.0,
             limits=limits,

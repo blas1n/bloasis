@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.core.models import Portfolio, Position, Trade
-from app.dependencies import get_current_user, get_portfolio_service
+from app.dependencies import get_broker_adapter, get_current_user, get_portfolio_service
 from app.main import create_app
 
 USER_ID = "00000000-0000-0000-0000-000000000001"
@@ -22,10 +22,16 @@ def mock_portfolio_svc():
 
 
 @pytest.fixture
-def app(mock_portfolio_svc):
+def mock_broker():
+    return AsyncMock()
+
+
+@pytest.fixture
+def app(mock_portfolio_svc, mock_broker):
     application = create_app()
     application.dependency_overrides[get_current_user] = lambda: uuid.UUID(USER_ID)
     application.dependency_overrides[get_portfolio_service] = lambda: mock_portfolio_svc
+    application.dependency_overrides[get_broker_adapter] = lambda: mock_broker
     yield application
     application.dependency_overrides.clear()
 
@@ -134,7 +140,7 @@ class TestGetTrades:
 
 class TestSyncPortfolio:
     def test_success(self, client, mock_portfolio_svc):
-        mock_portfolio_svc.sync_with_alpaca.return_value = {
+        mock_portfolio_svc.sync_with_broker.return_value = {
             "success": True,
             "positionsSynced": 3,
         }

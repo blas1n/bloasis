@@ -62,7 +62,7 @@ class TradeRepository:
                     new_total = old_total + qty * price
                     new_qty = position.quantity + qty
                     position.quantity = new_qty
-                    position.avg_cost = new_total / new_qty
+                    position.avg_cost = (new_total / new_qty).quantize(Decimal("0.01"))
                     position.current_price = price
                 else:
                     session.add(
@@ -75,11 +75,16 @@ class TradeRepository:
                         )
                     )
             else:
-                # Sell — validate, clamp, compute realized P&L
+                # Sell — validate and compute realized P&L
                 if not position or position.quantity <= 0:
                     raise ValueError(f"Cannot sell {symbol}: no open position")
 
-                actual_qty = min(qty, position.quantity)
+                if qty > position.quantity:
+                    raise ValueError(
+                        f"Cannot sell {qty} shares of {symbol}: only {position.quantity} held"
+                    )
+
+                actual_qty = qty
                 realized_pnl = (price - position.avg_cost) * actual_qty
                 position.quantity = position.quantity - actual_qty
                 position.current_price = price

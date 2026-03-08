@@ -3,13 +3,12 @@
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import httpx
 import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 
 from app.config import settings
-from app.core.models import RiskProfile, UserPreferences
+from app.core.models import BrokerAccountInfo, RiskProfile, UserPreferences
 from app.services.user import UserService
 
 
@@ -144,163 +143,45 @@ class TestPreferences:
 
 
 class TestBrokerConfig:
-    async def test_get_broker_status_configured(self, user_svc, mock_user_repo):
-        mock_user_repo.get_broker_config.return_value = [
-            MagicMock(config_key="api_key", encrypted_value="junk"),
-            MagicMock(config_key="secret_key", encrypted_value="junk"),
-        ]
-        result = await user_svc.get_broker_status("user-1")
-        assert result["configured"] is True
-
-    async def test_get_broker_status_not_configured(self, user_svc, mock_user_repo):
+    async def test_get_broker_status_not_configured_no_broker(self, user_svc, mock_user_repo):
         mock_user_repo.get_broker_config.return_value = []
         result = await user_svc.get_broker_status("user-1")
         assert result["configured"] is False
 
-    @patch("app.shared.utils.broker.settings")
-    @patch("app.services.user.settings")
-    async def test_get_broker_status_decrypt_failure(
-        self, mock_svc_settings, mock_broker_settings, user_svc, mock_user_repo
-    ):
-        from cryptography.fernet import Fernet
-
-        key = Fernet.generate_key()
-        for s in (mock_svc_settings, mock_broker_settings):
-            s.fernet_key = key.decode()
-            s.alpaca_api_key = ""
-            s.alpaca_secret_key = ""
-            s.alpaca_base_url = "https://paper-api.alpaca.markets"
-        mock_user_repo.get_broker_config.return_value = [
-            MagicMock(config_key="api_key", encrypted_value="junk"),
-            MagicMock(config_key="secret_key", encrypted_value="junk"),
-        ]
-        result = await user_svc.get_broker_status("user-1")
-        assert result["configured"] is True
-        assert result["connected"] is False
-
-    @patch("app.shared.utils.broker.settings")
-    @patch("app.services.user.settings")
-    async def test_get_broker_status_alpaca_success(
-        self, mock_svc_settings, mock_broker_settings, user_svc, mock_user_repo
-    ):
-        for s in (mock_svc_settings, mock_broker_settings):
-            s.fernet_key = ""
-            s.alpaca_api_key = "key"
-            s.alpaca_secret_key = "secret"
-            s.alpaca_base_url = "https://paper-api.alpaca.markets"
+    async def test_get_broker_status_with_adapter_success(self, user_svc, mock_user_repo):
         mock_user_repo.get_broker_config.return_value = [MagicMock()]
 
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = {"equity": "100000", "cash": "50000"}
+        mock_broker = AsyncMock()
+        mock_broker.test_connection.return_value = True
+        mock_broker.get_account.return_value = BrokerAccountInfo(
+            equity=Decimal("100000"), cash=Decimal("50000"), buying_power=Decimal("50000")
+        )
 
-        with patch("httpx.AsyncClient") as MockClient:
-            instance = AsyncMock()
-            instance.get = AsyncMock(return_value=mock_resp)
-            instance.__aenter__ = AsyncMock(return_value=instance)
-            instance.__aexit__ = AsyncMock(return_value=False)
-            MockClient.return_value = instance
-
-            result = await user_svc.get_broker_status("user-1")
-
+        result = await user_svc.get_broker_status("user-1", broker=mock_broker)
         assert result["configured"] is True
         assert result["connected"] is True
         assert result["equity"] == Decimal("100000")
 
-    @patch("app.shared.utils.broker.settings")
-    @patch("app.services.user.settings")
-    async def test_get_broker_status_alpaca_auth_failure(
-        self, mock_svc_settings, mock_broker_settings, user_svc, mock_user_repo
+    async def test_get_broker_status_with_adapter_connection_failure(
+        self, user_svc, mock_user_repo
     ):
-        for s in (mock_svc_settings, mock_broker_settings):
-            s.fernet_key = ""
-            s.alpaca_api_key = "key"
-            s.alpaca_secret_key = "secret"
-            s.alpaca_base_url = "https://paper-api.alpaca.markets"
         mock_user_repo.get_broker_config.return_value = [MagicMock()]
 
-        mock_resp = MagicMock()
-        mock_resp.status_code = 401
+        mock_broker = AsyncMock()
+        mock_broker.test_connection.return_value = False
 
-        with patch("httpx.AsyncClient") as MockClient:
-            instance = AsyncMock()
-            instance.get = AsyncMock(return_value=mock_resp)
-            instance.__aenter__ = AsyncMock(return_value=instance)
-            instance.__aexit__ = AsyncMock(return_value=False)
-            MockClient.return_value = instance
-
-            result = await user_svc.get_broker_status("user-1")
-
+        result = await user_svc.get_broker_status("user-1", broker=mock_broker)
         assert result["connected"] is False
-        assert "401" in result["errorMessage"]
 
-    @patch("app.shared.utils.broker.settings")
-    @patch("app.services.user.settings")
-    async def test_get_broker_status_connection_error(
-        self, mock_svc_settings, mock_broker_settings, user_svc, mock_user_repo
-    ):
-        for s in (mock_svc_settings, mock_broker_settings):
-            s.fernet_key = ""
-            s.alpaca_api_key = "key"
-            s.alpaca_secret_key = "secret"
-            s.alpaca_base_url = "https://paper-api.alpaca.markets"
+    async def test_get_broker_status_with_adapter_exception(self, user_svc, mock_user_repo):
         mock_user_repo.get_broker_config.return_value = [MagicMock()]
 
-        with patch("httpx.AsyncClient") as MockClient:
-            instance = AsyncMock()
-            instance.get = AsyncMock(side_effect=httpx.HTTPError("Connection refused"))
-            instance.__aenter__ = AsyncMock(return_value=instance)
-            instance.__aexit__ = AsyncMock(return_value=False)
-            MockClient.return_value = instance
+        mock_broker = AsyncMock()
+        mock_broker.test_connection.side_effect = Exception("Connection refused")
 
-            result = await user_svc.get_broker_status("user-1")
-
+        result = await user_svc.get_broker_status("user-1", broker=mock_broker)
         assert result["connected"] is False
         assert "connection failed" in result["errorMessage"].lower()
-
-
-class TestDecryptBrokerCredentials:
-    @patch("app.shared.utils.broker.settings")
-    def test_no_fernet_key_returns_global(self, mock_settings, user_svc):
-        mock_settings.fernet_key = ""
-        mock_settings.alpaca_api_key = "global-key"
-        mock_settings.alpaca_secret_key = "global-secret"
-        api_key, secret_key = user_svc._decrypt_broker_credentials([])
-        assert api_key == "global-key"
-        assert secret_key == "global-secret"
-
-    @patch("app.shared.utils.broker.settings")
-    def test_decrypt_success(self, mock_settings, user_svc):
-        from cryptography.fernet import Fernet
-
-        key = Fernet.generate_key()
-        mock_settings.fernet_key = key.decode()
-        f = Fernet(key)
-
-        configs = [
-            MagicMock(config_key="api_key", encrypted_value=f.encrypt(b"my-api-key").decode()),
-            MagicMock(config_key="secret_key", encrypted_value=f.encrypt(b"my-secret").decode()),
-        ]
-        api_key, secret_key = user_svc._decrypt_broker_credentials(configs)
-        assert api_key == "my-api-key"
-        assert secret_key == "my-secret"
-
-    @patch("app.shared.utils.broker.settings")
-    def test_decrypt_failure_returns_global(self, mock_settings, user_svc):
-        from cryptography.fernet import Fernet
-
-        key = Fernet.generate_key()
-        mock_settings.fernet_key = key.decode()
-        mock_settings.alpaca_api_key = "fallback-key"
-        mock_settings.alpaca_secret_key = "fallback-secret"
-
-        configs = [
-            MagicMock(config_key="api_key", encrypted_value="invalid-encrypted-data"),
-            MagicMock(config_key="secret_key", encrypted_value="invalid-encrypted-data"),
-        ]
-        api_key, secret_key = user_svc._decrypt_broker_credentials(configs)
-        assert api_key == "fallback-key"
-        assert secret_key == "fallback-secret"
 
 
 class TestUpdateBrokerConfig:
@@ -321,6 +202,32 @@ class TestUpdateBrokerConfig:
         mock_settings.fernet_key = ""
         result = await user_svc.update_broker_config("user-1", "key", "secret", True)
         assert result["configured"] is False
+
+    @patch("app.services.user.settings")
+    async def test_update_with_portfolio_sync(self, mock_settings, user_svc, mock_user_repo):
+        from cryptography.fernet import Fernet
+
+        key = Fernet.generate_key()
+        mock_settings.fernet_key = key.decode()
+        mock_user_repo.upsert_broker_config = AsyncMock()
+
+        mock_portfolio_svc = AsyncMock()
+        mock_portfolio_svc.sync_with_broker.return_value = {
+            "success": True,
+            "positionsSynced": 5,
+        }
+
+        with patch(
+            "app.services.brokers.factory.create_broker_adapter", new_callable=AsyncMock
+        ) as mock_factory:
+            mock_factory.return_value = AsyncMock()
+            result = await user_svc.update_broker_config(
+                "user-1", "api-key", "secret-key", True, portfolio_svc=mock_portfolio_svc
+            )
+
+        assert result["configured"] is True
+        assert result["positionsSynced"] == 5
+        mock_portfolio_svc.sync_with_broker.assert_awaited_once()
 
 
 class TestGetUserInfo:

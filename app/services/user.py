@@ -3,16 +3,21 @@
 Replaces: services/user/ + services/auth/ (794 + 341 = 1135 lines → ~130 lines)
 """
 
+from __future__ import annotations
+
 import logging
 import uuid
 from datetime import UTC, datetime, timedelta
-from decimal import Decimal
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import bcrypt
 import jwt
 
 from shared.utils.redis_client import RedisClient
+
+if TYPE_CHECKING:
+    from ..core.broker import BrokerAdapter
+    from .portfolio import PortfolioService
 
 from ..config import settings
 from ..core.models import RiskProfile, UserPreferences
@@ -146,12 +151,18 @@ class UserService:
 
     # --- Broker ---
 
-    async def get_broker_status(self, user_id: uuid.UUID) -> dict[str, Any]:
-        """Get broker connection status by testing Alpaca API connectivity."""
+    async def get_broker_status(
+        self, user_id: uuid.UUID, broker: BrokerAdapter | None = None
+    ) -> dict[str, Any]:
+        """Get broker connection status using adapter.
+
+        If broker adapter is provided, uses it to test connection and get account info.
+        Otherwise, checks if credentials are configured.
+        """
         configs = await self.user_repo.get_broker_config(user_id)
         configured = len(configs) > 0
 
-        if not configured:
+        if not configured and not broker:
             return {
                 "configured": False,
                 "connected": False,
@@ -160,60 +171,56 @@ class UserService:
                 "errorMessage": "",
             }
 
-        api_key, secret_key = self._decrypt_broker_credentials(configs)
-        if not api_key or not secret_key:
-            return {
-                "configured": True,
-                "connected": False,
-                "equity": 0,
-                "cash": 0,
-                "errorMessage": "Failed to decrypt credentials",
-            }
-
-        import httpx
-
-        try:
-            headers = {"APCA-API-KEY-ID": api_key, "APCA-API-SECRET-KEY": secret_key}
-            async with httpx.AsyncClient(base_url=settings.alpaca_base_url) as client:
-                resp = await client.get("/v2/account", headers=headers, timeout=10)
-
-            if resp.status_code != 200:
+        if broker:
+            try:
+                connected = await broker.test_connection()
+                if not connected:
+                    return {
+                        "configured": configured,
+                        "connected": False,
+                        "equity": 0,
+                        "cash": 0,
+                        "errorMessage": "Broker authentication failed",
+                    }
+                account = await broker.get_account()
                 return {
                     "configured": True,
+                    "connected": True,
+                    "equity": account.equity,
+                    "cash": account.cash,
+                    "errorMessage": "",
+                }
+            except Exception:
+                return {
+                    "configured": configured,
                     "connected": False,
                     "equity": 0,
                     "cash": 0,
-                    "errorMessage": f"Alpaca authentication failed ({resp.status_code})",
+                    "errorMessage": "Broker API connection failed",
                 }
 
-            acct = resp.json()
-            return {
-                "configured": True,
-                "connected": True,
-                "equity": Decimal(acct.get("equity", "0")),
-                "cash": Decimal(acct.get("cash", "0")),
-                "errorMessage": "",
-            }
-        except httpx.HTTPError:
-            return {
-                "configured": True,
-                "connected": False,
-                "equity": 0,
-                "cash": 0,
-                "errorMessage": "Alpaca API connection failed",
-            }
-
-    @staticmethod
-    def _decrypt_broker_credentials(configs: list[Any]) -> tuple[str, str]:
-        """Decrypt broker credentials from stored config."""
-        from ..shared.utils.broker import decrypt_alpaca_credentials
-
-        return decrypt_alpaca_credentials(configs)
+        return {
+            "configured": configured,
+            "connected": False,
+            "equity": 0,
+            "cash": 0,
+            "errorMessage": "Broker adapter not available",
+        }
 
     async def update_broker_config(
-        self, user_id: uuid.UUID, api_key: str, secret_key: str, paper: bool
+        self,
+        user_id: uuid.UUID,
+        api_key: str,
+        secret_key: str,
+        paper: bool,
+        broker_type: str = "alpaca",
+        portfolio_svc: PortfolioService | None = None,
     ) -> dict[str, Any]:
-        """Update broker configuration for a specific user."""
+        """Update broker configuration and optionally sync positions.
+
+        If portfolio_svc is provided, creates a fresh broker adapter with the
+        new credentials and syncs positions from the broker.
+        """
         from cryptography.fernet import Fernet
 
         if not settings.fernet_key:
@@ -227,6 +234,18 @@ class UserService:
             ("paper", str(paper)),
         ]:
             encrypted = f.encrypt(value.encode()).decode()
-            await self.user_repo.upsert_broker_config(user_id, key, encrypted)
+            await self.user_repo.upsert_broker_config(user_id, key, encrypted, broker_type)
 
-        return {"configured": True, "connected": True}
+        result: dict[str, Any] = {"configured": True, "connected": True}
+
+        if portfolio_svc:
+            try:
+                from .brokers.factory import create_broker_adapter
+
+                broker = await create_broker_adapter(user_id, self.user_repo)
+                sync_result = await portfolio_svc.sync_with_broker(user_id, broker)
+                result["positionsSynced"] = sync_result.get("positionsSynced", 0)
+            except ValueError:
+                result["positionsSynced"] = 0
+
+        return result

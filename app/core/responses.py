@@ -107,6 +107,7 @@ class BrokerStatusResponse(CamelModel):
 class BrokerUpdateResponse(CamelModel):
     configured: bool
     connected: bool = False
+    positions_synced: int = 0
     error_message: str = ""
 
 

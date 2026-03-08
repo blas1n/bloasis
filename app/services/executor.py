@@ -1,9 +1,14 @@
-"""Executor Service — Order execution with risk checks.
+"""Executor Service — Order execution with Saga pattern.
 
-Replaces: services/executor/ (1072 lines gRPC + Redpanda → ~100 lines direct)
-Key simplifications:
-- Risk check via core/risk_rules.py (no gRPC call to Risk Committee)
-- Portfolio update via portfolio.record_trade() (no Redpanda event)
+Saga flow:
+  Step 1: Risk check (fresh portfolio data)
+  Step 2: Create pending order in outbox (DB)
+  Step 3: Submit to broker via adapter (with idempotency key)
+  Step 4: Record trade + update order status
+
+Compensation:
+  Step 3 failure → mark order as "failed"
+  Step 4 failure → cancel broker order → mark "compensation_needed"
 """
 
 import logging
@@ -11,14 +16,13 @@ import uuid
 from decimal import Decimal
 from typing import Any
 
-import httpx
-from tenacity import retry, stop_after_attempt, wait_exponential
-
 from shared.utils.redis_client import RedisClient
 
 from ..config import settings
-from ..core.models import OrderRequest, OrderResult, OrderSide, RiskLimits
+from ..core.broker import BrokerAdapter
+from ..core.models import OrderRequest, OrderResult, OrderSide, OrderStatus, RiskLimits
 from ..core.risk_rules import evaluate_risk
+from ..repositories.order_repository import OrderRepository
 from ..repositories.user_repository import UserRepository
 from .market_data import MarketDataService
 from .portfolio import PortfolioService
@@ -27,18 +31,22 @@ logger = logging.getLogger(__name__)
 
 
 class ExecutorService:
-    """Order execution with integrated risk checks."""
+    """Order execution with integrated risk checks and Saga pattern."""
 
     def __init__(
         self,
         redis: RedisClient,
         portfolio_svc: PortfolioService,
         market_data_svc: MarketDataService,
+        broker: BrokerAdapter,
+        order_repo: OrderRepository,
         user_repo: UserRepository | None = None,
     ) -> None:
         self.redis = redis
         self.portfolio_svc = portfolio_svc
         self.market_data_svc = market_data_svc
+        self.broker = broker
+        self.order_repo = order_repo
         self.user_repo = user_repo
 
     async def execute_order(
@@ -52,7 +60,7 @@ class ExecutorService:
         sector: str = "Unknown",
         ai_reason: str = "",
     ) -> OrderResult:
-        """Execute an order with risk checks."""
+        """Execute an order with risk checks and Saga pattern protection."""
         # Get current price if not provided
         if price is None or price == 0:
             bars = await self.market_data_svc.get_ohlcv(symbol, period="1d", interval="1d")
@@ -64,11 +72,11 @@ class ExecutorService:
                     symbol=symbol,
                     side=OrderSide(side),
                     qty=qty,
-                    status="rejected",
+                    status=OrderStatus.FAILED,
                     error_message="Cannot determine price",
                 )
 
-        # Risk check (pure function — no gRPC call)
+        # Step 1: Risk check (fresh portfolio — no cache)
         portfolio = await self.portfolio_svc.get_portfolio(user_id)
         vix = await self.market_data_svc.get_vix()
 
@@ -97,7 +105,7 @@ class ExecutorService:
                 symbol=symbol,
                 side=OrderSide(side),
                 qty=qty,
-                status="rejected",
+                status=OrderStatus.FAILED,
                 error_message=risk_result.reasoning,
             )
 
@@ -106,17 +114,64 @@ class ExecutorService:
         if risk_result.adjusted_size is not None:
             effective_qty = risk_result.adjusted_size
 
-        # Submit to Alpaca
-        result = await self._submit_to_alpaca(
+        # Step 2: Outbox — create pending order in DB (survives crashes)
+        client_order_id = str(uuid.uuid4())
+        order_record = await self.order_repo.create_pending_order(
+            user_id=user_id,
+            client_order_id=client_order_id,
+            broker_type=self.broker.broker_type,
             symbol=symbol,
             side=side,
             qty=effective_qty,
             price=price,
             order_type=order_type,
+            ai_reason=ai_reason,
+            risk_limits_snapshot=limits.model_dump(mode="json"),
         )
 
-        # Record trade in portfolio (direct call — no Redpanda)
-        if result.status == "filled":
+        # Step 3: Submit to broker (with idempotency key)
+        try:
+            result = await self.broker.submit_order(
+                symbol=symbol,
+                side=side,
+                qty=effective_qty,
+                price=price,
+                order_type=order_type,
+                client_order_id=client_order_id,
+            )
+            await self.order_repo.update_status(
+                order_record.id,
+                result.status,
+                broker_order_id=result.order_id,
+                filled_qty=result.filled_qty,
+                filled_avg_price=result.filled_avg_price,
+            )
+        except Exception:
+            # Saga compensation: mark order as failed
+            await self.order_repo.update_status(
+                order_record.id, OrderStatus.FAILED, error_message="Broker submission failed"
+            )
+            logger.error("Broker submission failed for order %s", client_order_id, exc_info=True)
+            return OrderResult(
+                order_id="",
+                symbol=symbol,
+                side=OrderSide(side),
+                qty=effective_qty,
+                status=OrderStatus.FAILED,
+                error_message="Broker submission failed",
+            )
+
+        # Handle rejected orders (broker returned rejection without exception)
+        if result.status == OrderStatus.FAILED:
+            await self.order_repo.update_status(
+                order_record.id,
+                OrderStatus.FAILED,
+                error_message=result.error_message or "Broker rejected order",
+            )
+            return result
+
+        # Step 4: Record trade if filled
+        if result.status == OrderStatus.FILLED:
             fill_price = result.filled_avg_price or price
             try:
                 await self.portfolio_svc.record_trade(
@@ -124,124 +179,39 @@ class ExecutorService:
                     order_id=result.order_id,
                     symbol=symbol,
                     side=side,
-                    qty=effective_qty,
+                    qty=result.filled_qty or effective_qty,
                     price=fill_price,
                     ai_reason=ai_reason,
                 )
-            except ValueError as e:
-                logger.error("Trade recording failed: %s", e)
+                await self.order_repo.update_status(order_record.id, OrderStatus.FILLED)
+            except Exception:
+                # Saga compensation: cancel broker order + mark compensation_needed
+                logger.error(
+                    "Trade recording failed, attempting broker cancellation",
+                    exc_info=True,
+                )
+                cancelled = await self.broker.cancel_order(result.order_id)
+                comp_status = (
+                    OrderStatus.COMPENSATION_NEEDED if not cancelled else OrderStatus.CANCELLED
+                )
+                await self.order_repo.update_status(
+                    order_record.id,
+                    comp_status,
+                    error_message="Trade recording failed after broker fill",
+                )
                 return OrderResult(
                     order_id=result.order_id,
                     symbol=symbol,
                     side=OrderSide(side),
                     qty=effective_qty,
-                    status="error",
-                    error_message=str(e),
+                    status=OrderStatus.COMPENSATION_NEEDED,
+                    error_message="Trade recording failed — compensation initiated",
                 )
 
         return result
 
-    async def _submit_to_alpaca(
-        self,
-        symbol: str,
-        side: str,
-        qty: Decimal,
-        price: Decimal,
-        order_type: str,
-    ) -> OrderResult:
-        """Submit order to Alpaca paper trading API.
-
-        Falls back to mock mode if API keys not configured.
-        """
-        if not settings.alpaca_api_key or not settings.alpaca_secret_key:
-            if not settings.mock_broker_enabled:
-                return OrderResult(
-                    order_id="",
-                    symbol=symbol,
-                    side=OrderSide(side),
-                    qty=qty,
-                    status="rejected",
-                    error_message="Alpaca API keys not configured",
-                )
-            return self._mock_order(symbol, side, qty, price)
-
-        @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1, max=10))
-        async def _call_alpaca() -> OrderResult:
-            headers = {
-                "APCA-API-KEY-ID": settings.alpaca_api_key,
-                "APCA-API-SECRET-KEY": settings.alpaca_secret_key,
-            }
-            payload: dict[str, str] = {
-                "symbol": symbol,
-                "qty": str(qty),
-                "side": side,
-                "type": order_type,
-                "time_in_force": "day",
-            }
-            if order_type == "limit":
-                payload["limit_price"] = str(price)
-
-            async with httpx.AsyncClient(base_url=settings.alpaca_base_url, timeout=30) as client:
-                resp = await client.post("/v2/orders", json=payload, headers=headers)
-
-            if resp.status_code not in (200, 201):
-                logger.error("Alpaca order failed", extra={"status": resp.status_code})
-                logger.debug("Alpaca error detail", extra={"body": resp.text[:200]})
-                return OrderResult(
-                    order_id="",
-                    symbol=symbol,
-                    side=OrderSide(side),
-                    qty=qty,
-                    status="rejected",
-                    error_message=f"Alpaca error: {resp.status_code}",
-                )
-
-            data = resp.json()
-            return OrderResult(
-                order_id=data["id"],
-                client_order_id=data.get("client_order_id", ""),
-                symbol=data["symbol"],
-                side=OrderSide(data["side"]),
-                qty=Decimal(data["qty"]),
-                status=data["status"],
-                filled_qty=Decimal(data.get("filled_qty") or "0"),
-                filled_avg_price=Decimal(data["filled_avg_price"])
-                if data.get("filled_avg_price")
-                else None,
-                submitted_at=data.get("submitted_at", ""),
-            )
-
-        return await _call_alpaca()
-
-    @staticmethod
-    def _mock_order(symbol: str, side: str, qty: Decimal, price: Decimal) -> OrderResult:
-        """Mock order for development when Alpaca keys are not configured.
-
-        Note: The trade will be recorded in the portfolio DB by execute_order(),
-        allowing full end-to-end testing without a live broker connection.
-        """
-        order_id = str(uuid.uuid4())
-        logger.info(
-            "Mock order submitted (MOCK_BROKER_ENABLED=true) — trade will be recorded in DB",
-            extra={"symbol": symbol, "side": side, "qty": str(qty)},
-        )
-
-        return OrderResult(
-            order_id=order_id,
-            client_order_id=order_id,
-            symbol=symbol,
-            side=OrderSide(side),
-            qty=qty,
-            status="filled",
-            filled_qty=qty,
-            filled_avg_price=price,
-        )
-
     async def get_trading_status(self, user_id: uuid.UUID) -> dict[str, Any]:
-        """Get automated trading status for a user.
-
-        Checks Redis first (fast path), falls back to DB for durability.
-        """
+        """Get automated trading status for a user."""
         status = await self.redis.get(f"trading:{user_id}:status")
         if status is not None:
             return {
@@ -250,7 +220,6 @@ class ExecutorService:
                 "lastChanged": "",
             }
 
-        # Fallback to DB when Redis has no data (e.g., after restart)
         if self.user_repo:
             enabled = await self.user_repo.get_trading_enabled(user_id)
             db_status = "active" if enabled else "inactive"
