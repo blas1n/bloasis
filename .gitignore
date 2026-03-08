@@ -37,6 +37,9 @@ env/
 .vscode/
 *.code-workspace
 
+# Stoneforge
+.stoneforge/
+
 # Vim
 *.swp
 *.swo
