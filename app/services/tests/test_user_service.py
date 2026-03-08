@@ -5,9 +5,34 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
 
+from app.config import settings
 from app.core.models import UserPreferences
 from app.services.user import UserService
+
+
+def _generate_rsa_keypair() -> tuple[str, str]:
+    """Generate an RSA key pair for testing JWT signing/verification."""
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    private_pem = key.private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.PKCS8,
+        serialization.NoEncryption(),
+    ).decode()
+    public_pem = (
+        key.public_key()
+        .public_bytes(
+            serialization.Encoding.PEM,
+            serialization.PublicFormat.SubjectPublicKeyInfo,
+        )
+        .decode()
+    )
+    return private_pem, public_pem
+
+
+_TEST_PRIVATE_KEY, _TEST_PUBLIC_KEY = _generate_rsa_keypair()
 
 
 @pytest.fixture
@@ -22,7 +47,10 @@ class TestLogin:
             password_hash="$2b$12$hashed",
             name="Test User",
         )
-        with patch("bcrypt.checkpw", return_value=True):
+        with (
+            patch("bcrypt.checkpw", return_value=True),
+            patch.object(type(settings), "jwt_private_key", new=_TEST_PRIVATE_KEY),
+        ):
             result = await user_svc.login("test@example.com", "password")
 
         assert result is not None
@@ -48,17 +76,23 @@ class TestLogin:
 
 class TestTokenValidation:
     def test_validate_valid_token(self, user_svc):
-        token = user_svc._create_access_token("user-1")
-        user_id = user_svc.validate_token(token)
+        with (
+            patch.object(type(settings), "jwt_private_key", new=_TEST_PRIVATE_KEY),
+            patch.object(type(settings), "jwt_public_key", new=_TEST_PUBLIC_KEY),
+        ):
+            token = user_svc._create_access_token("user-1")
+            user_id = user_svc.validate_token(token)
         assert user_id == "user-1"
 
     def test_validate_invalid_token(self, user_svc):
-        user_id = user_svc.validate_token("invalid-token")
+        with patch.object(type(settings), "jwt_public_key", new=_TEST_PUBLIC_KEY):
+            user_id = user_svc.validate_token("invalid-token")
         assert user_id is None
 
     async def test_refresh_token_flow(self, user_svc, mock_redis):
         mock_redis.get.return_value = "user-1"
-        result = await user_svc.refresh_token("valid-refresh-token")
+        with patch.object(type(settings), "jwt_private_key", new=_TEST_PRIVATE_KEY):
+            result = await user_svc.refresh_token("valid-refresh-token")
         assert result is not None
         assert "accessToken" in result
 
