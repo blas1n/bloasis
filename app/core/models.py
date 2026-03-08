@@ -246,10 +246,10 @@ class Portfolio(BaseModel):
     total_value: Decimal = Decimal("0")
     cash_balance: Decimal = Decimal("0")
     invested_value: Decimal = Decimal("0")
-    total_return: float = 0.0
+    total_return: Decimal = Decimal("0")
     total_return_amount: Decimal = Decimal("0")
     daily_pnl: Decimal = Decimal("0")
-    daily_pnl_pct: float = 0.0
+    daily_pnl_pct: Decimal = Decimal("0")
     positions: list[Position] = Field(default_factory=list)
     currency: str = "USD"
     timestamp: str = ""

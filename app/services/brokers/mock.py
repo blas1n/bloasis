@@ -59,7 +59,7 @@ class MockBrokerAdapter(BrokerAdapter):
         # Update in-memory positions and cash
         order_side = OrderSide(side)
         if order_side == OrderSide.BUY:
-            self._cash -= qty * price
+            self._cash = (self._cash - qty * price).quantize(Decimal("0.01"))
             existing = self._positions.get(symbol)
             if existing:
                 new_qty = existing.quantity + qty
@@ -80,7 +80,7 @@ class MockBrokerAdapter(BrokerAdapter):
                     market_value=qty * price,
                 )
         else:
-            self._cash += qty * price
+            self._cash = (self._cash + qty * price).quantize(Decimal("0.01"))
             existing = self._positions.get(symbol)
             if existing:
                 remaining = existing.quantity - qty

@@ -55,9 +55,15 @@ class PortfolioService:
         total_value = cash + invested
         cost_basis = sum((p.avg_cost * p.quantity for p in positions), Decimal("0"))
         pnl = sum((p.unrealized_pnl for p in positions), Decimal("0"))
-        pnl_pct = float((pnl / cost_basis) * 100) if cost_basis > 0 else 0.0
+        pnl_pct = (
+            (pnl / cost_basis * 100).quantize(Decimal("0.01")) if cost_basis > 0 else Decimal("0")
+        )
         daily_pnl = sum((p.daily_pnl for p in positions), Decimal("0"))
-        daily_pnl_pct = float(daily_pnl / total_value * 100) if total_value > 0 else 0.0
+        daily_pnl_pct = (
+            (daily_pnl / total_value * 100).quantize(Decimal("0.01"))
+            if total_value > 0
+            else Decimal("0")
+        )
 
         portfolio = Portfolio(
             user_id=str(user_id),

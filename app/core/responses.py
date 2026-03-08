@@ -62,13 +62,13 @@ class PortfolioSummaryResponse(CamelModel):
     buying_power: Decimal
     invested_value: Decimal
     market_value: Decimal
-    total_return: float
+    total_return: Decimal
     total_return_amount: Decimal
     unrealized_pnl: Decimal
     unrealized_pnl_pct: Decimal
     realized_pnl: Decimal
     daily_pnl: Decimal
-    daily_pnl_pct: float
+    daily_pnl_pct: Decimal
     position_count: int
     currency: str
 

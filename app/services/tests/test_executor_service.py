@@ -113,7 +113,7 @@ class TestExecuteOrder:
             price=Decimal("350"),
             sector="Technology",
         )
-        assert result.status == "filled"
+        assert result.status == OrderStatus.FILLED
         # Verify Saga steps
         mock_order_repo.create_pending_order.assert_called_once()
         mock_broker.submit_order.assert_called_once()

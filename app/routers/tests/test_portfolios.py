@@ -47,7 +47,7 @@ def _make_portfolio() -> Portfolio:
         total_value=Decimal("50000"),
         cash_balance=Decimal("20000"),
         invested_value=Decimal("30000"),
-        total_return=5.0,
+        total_return=Decimal("5.00"),
         total_return_amount=Decimal("1500"),
         daily_pnl=Decimal("200"),
         daily_pnl_pct=Decimal("0.40"),
@@ -82,6 +82,11 @@ class TestGetPortfolio:
         resp = client.get(f"/v1/portfolios/{OTHER_USER_ID}")
         assert resp.status_code == 403
         assert resp.json()["detail"] == "Access denied"
+
+    def test_service_error_returns_500(self, client, mock_portfolio_svc):
+        mock_portfolio_svc.get_portfolio.side_effect = RuntimeError("DB connection lost")
+        resp = client.get(f"/v1/portfolios/{USER_ID}")
+        assert resp.status_code == 500
 
 
 class TestGetPositions:
@@ -153,3 +158,8 @@ class TestSyncPortfolio:
     def test_access_denied(self, client):
         resp = client.post(f"/v1/portfolios/{OTHER_USER_ID}/sync")
         assert resp.status_code == 403
+
+    def test_broker_error_returns_500(self, client, mock_portfolio_svc):
+        mock_portfolio_svc.sync_with_broker.side_effect = RuntimeError("Broker timeout")
+        resp = client.post(f"/v1/portfolios/{USER_ID}/sync")
+        assert resp.status_code == 500

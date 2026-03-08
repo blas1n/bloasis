@@ -20,7 +20,14 @@ from shared.utils.redis_client import RedisClient
 
 from ..config import settings
 from ..core.broker import BrokerAdapter
-from ..core.models import OrderRequest, OrderResult, OrderSide, OrderStatus, RiskLimits
+from ..core.models import (
+    OrderRequest,
+    OrderResult,
+    OrderSide,
+    OrderStatus,
+    RiskDecision,
+    RiskLimits,
+)
 from ..core.risk_rules import evaluate_risk
 from ..repositories.order_repository import OrderRepository
 from ..repositories.user_repository import UserRepository
@@ -99,7 +106,7 @@ class ExecutorService:
 
         risk_result = evaluate_risk(order, portfolio, vix, limits)
 
-        if risk_result.action == "reject":
+        if risk_result.action == RiskDecision.REJECT:
             return OrderResult(
                 order_id="",
                 symbol=symbol,
