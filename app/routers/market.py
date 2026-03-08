@@ -13,7 +13,7 @@ router = APIRouter()
 
 @router.get("/regimes/current", response_model=MarketRegime)
 async def get_current_regime(
-    current_user: str = Depends(get_current_user),
+    _current_user: str = Depends(get_current_user),
     regime_svc: MarketRegimeService = Depends(get_market_regime_service),
 ) -> dict[str, Any]:
     """Get current market regime classification."""

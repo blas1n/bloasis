@@ -107,7 +107,7 @@ class PortfolioOptimizer:
             )
             return result
 
-        except Exception as e:
+        except (ValueError, RuntimeError) as e:
             logger.warning("Portfolio optimization failed, using equal-weight: %s", e)
             return self._equal_weight(symbols)
 

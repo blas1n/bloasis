@@ -153,7 +153,7 @@ class TestScoreCandidates:
         assert picks[0].final_score >= picks[1].final_score
 
     async def test_handles_scoring_errors(self, strategy_svc, mock_market_data):
-        mock_market_data.get_ohlcv.side_effect = Exception("API error")
+        mock_market_data.get_ohlcv.side_effect = ValueError("API error")
         candidates = [
             CandidateSymbol(symbol="AAPL", sector="Technology", theme="AI", preliminary_score=80.0),
         ]
@@ -168,7 +168,7 @@ class TestRunAIAnalysis:
         assert len(result) == 1
 
     async def test_raises_on_error(self, strategy_svc, mock_llm):
-        mock_llm.analyze.side_effect = Exception("LLM error")
+        mock_llm.analyze.side_effect = RuntimeError("LLM error")
         with pytest.raises(RuntimeError, match="AI analysis unavailable"):
             await strategy_svc._run_ai_analysis([], "", _regime(), "moderate", [])
 

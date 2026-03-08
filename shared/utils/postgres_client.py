@@ -12,6 +12,7 @@ from typing import Any
 
 from sqlalchemy import text
 from sqlalchemy.engine import Result
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -102,7 +103,7 @@ class PostgresClient:
                 extra={"host": host_info},
             )
 
-        except Exception as e:
+        except (SQLAlchemyError, OSError) as e:
             host_info = self._extract_host_info()
             logger.error(
                 "PostgreSQL connection failed",
@@ -194,7 +195,7 @@ class PostgresClient:
                     extra={"query_length": len(query), "row_count": len(rows)},
                 )
                 return rows
-        except Exception as e:
+        except SQLAlchemyError as e:
             logger.error(
                 "Query execution failed",
                 extra={"error": str(e)},
@@ -220,5 +221,5 @@ class PostgresClient:
                     host_port = after_at
                 return host_port
             return "unknown"
-        except Exception:
+        except (IndexError, AttributeError, ValueError):
             return "unknown"

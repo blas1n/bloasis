@@ -78,7 +78,7 @@ class MacroService:
             series = fred.get_series(FRED_SERIES["fed_funds_rate"])
             if not series.empty:
                 result["fed_funds_rate"] = float(series.iloc[-1])
-        except Exception as e:
+        except (ValueError, KeyError) as e:
             logger.warning("Failed to fetch fed_funds_rate", extra={"error": str(e)})
 
         # Unemployment Rate
@@ -86,7 +86,7 @@ class MacroService:
             series = fred.get_series(FRED_SERIES["unemployment_rate"])
             if not series.empty:
                 result["unemployment_rate"] = float(series.iloc[-1])
-        except Exception as e:
+        except (ValueError, KeyError) as e:
             logger.warning("Failed to fetch unemployment_rate", extra={"error": str(e)})
 
         # CPI Year-over-Year (calculate from 12-month change)
@@ -97,7 +97,7 @@ class MacroService:
                 year_ago = float(series.iloc[-13])
                 if year_ago > 0:
                     result["cpi_yoy"] = round((current - year_ago) / year_ago * 100, 1)
-        except Exception as e:
+        except (ValueError, KeyError) as e:
             logger.warning("Failed to fetch cpi_yoy", extra={"error": str(e)})
 
         # Credit Spread (High Yield - Investment Grade)
@@ -105,7 +105,7 @@ class MacroService:
             series = fred.get_series(FRED_SERIES["credit_spread"])
             if not series.empty:
                 result["credit_spread"] = round(float(series.iloc[-1]) * 100, 0)
-        except Exception as e:
+        except (ValueError, KeyError) as e:
             logger.warning("Failed to fetch credit_spread", extra={"error": str(e)})
 
         return result

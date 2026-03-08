@@ -145,7 +145,10 @@ class TestPreferences:
 
 class TestBrokerConfig:
     async def test_get_broker_status_configured(self, user_svc, mock_user_repo):
-        mock_user_repo.get_broker_config.return_value = [MagicMock()]
+        mock_user_repo.get_broker_config.return_value = [
+            MagicMock(config_key="api_key", encrypted_value="junk"),
+            MagicMock(config_key="secret_key", encrypted_value="junk"),
+        ]
         result = await user_svc.get_broker_status("user-1")
         assert result["configured"] is True
 

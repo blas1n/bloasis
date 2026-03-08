@@ -88,9 +88,9 @@ class TestSyncFetch:
         mock_fred = MagicMock()
         mock_fred.get_series.side_effect = [
             pd.Series([5.33], index=[pd.Timestamp("2024-01-01")]),  # FEDFUNDS ok
-            Exception("FRED error"),  # UNRATE fails
-            Exception("FRED error"),  # CPIAUCSL fails
-            Exception("FRED error"),  # BAMLH0A0HYM2 fails
+            ValueError("FRED error"),  # UNRATE fails
+            ValueError("FRED error"),  # CPIAUCSL fails
+            ValueError("FRED error"),  # BAMLH0A0HYM2 fails
         ]
 
         with patch("app.services.macro.settings") as mock_settings:

@@ -10,11 +10,14 @@ Pipeline:
 5. Signal Generation (pure computation)
 """
 
+import json
 import logging
 import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
+
+from pydantic import ValidationError
 
 from shared.ai_clients.llm_client import LLMClient
 from shared.utils.redis_client import RedisClient
@@ -85,7 +88,7 @@ class StrategyService:
         if cached and isinstance(cached, dict):
             try:
                 return AnalysisResult(**cached)
-            except Exception:
+            except (ValidationError, TypeError):
                 await self.redis.delete(cache_key)
 
         logger.info("Running analysis", extra={"user_id": user_id})
@@ -200,7 +203,7 @@ class StrategyService:
                     )
                 )
 
-            except Exception as e:
+            except (ValueError, RuntimeError) as e:
                 logger.warning(
                     "Failed to score candidate", extra={"symbol": candidate.symbol, "error": str(e)}
                 )
@@ -246,7 +249,7 @@ class StrategyService:
             result_type = type(result).__name__
             logger.warning("AI analysis returned non-list", extra={"type": result_type})
             return []
-        except Exception as e:
+        except (RuntimeError, json.JSONDecodeError, ValueError) as e:
             logger.error("AI analysis failed", extra={"error": str(e)})
             raise RuntimeError(f"AI analysis unavailable: {e}") from e
 

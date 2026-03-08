@@ -19,7 +19,7 @@ def _rate_limit_key(request: Request) -> str:
             user_id = decode_jwt_user_id(token)
             if user_id:
                 return user_id
-        except Exception:
+        except (ValueError, KeyError):
             pass
     result: str = get_remote_address(request)
     return result

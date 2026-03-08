@@ -44,7 +44,7 @@ class TestGetVIX:
         mock_redis.setex.assert_called_once()
 
     async def test_returns_default_on_error(self, market_data_svc, mock_redis):
-        mock_redis.get.side_effect = Exception("Redis down")
+        mock_redis.get.side_effect = ValueError("Redis down")
         vix = await market_data_svc.get_vix()
         assert vix == 20.0
 

@@ -103,7 +103,7 @@ class MarketDataService:
             vix = await asyncio.to_thread(self._sync_get_vix)
             await self.redis.setex("market:vix", 300, str(vix))
             return vix
-        except Exception as e:
+        except (TimeoutError, ValueError) as e:
             logger.warning(f"Failed to get VIX: {e}")
 
         return 20.0  # Default
@@ -128,7 +128,7 @@ class MarketDataService:
                 result = Decimal(str(prev_close))
                 await self.redis.setex(cache_key, settings.cache_ohlcv_ttl, str(result))
                 return result
-        except Exception as e:
+        except (TimeoutError, ValueError, KeyError) as e:
             logger.warning(f"Failed to get previous close for {symbol}: {e}")
 
         return Decimal("0")

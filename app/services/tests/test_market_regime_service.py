@@ -94,7 +94,7 @@ class TestClassify:
         assert result.risk_level == "extreme"
 
     async def test_fallback_on_llm_error(self, regime_svc, mock_llm):
-        mock_llm.analyze.side_effect = Exception("LLM down")
+        mock_llm.analyze.side_effect = RuntimeError("LLM down")
         with patch.object(regime_svc, "_fetch_market_data", return_value={"vix": 20.0}):
             with patch.object(regime_svc, "_fetch_macro_indicators", return_value={}):
                 result = await regime_svc._classify("auto")
@@ -127,7 +127,7 @@ class TestFetchMarketData:
         assert data["sp500_trend"] == "up"
 
     async def test_returns_defaults_on_error(self, regime_svc):
-        with patch("yfinance.Ticker", side_effect=Exception("Network error")):
+        with patch("yfinance.Ticker", side_effect=ValueError("Network error")):
             data = await regime_svc._fetch_market_data()
         assert data["vix"] == 20.0
         assert data["sp500_trend"] == "neutral"
@@ -170,7 +170,7 @@ class TestFetchYieldSpread:
         assert spread == -0.5
 
     async def test_returns_default_on_error(self, regime_svc):
-        with patch("yfinance.Ticker", side_effect=Exception("Error")):
+        with patch("yfinance.Ticker", side_effect=ValueError("Error")):
             spread = await regime_svc._fetch_yield_spread()
         assert spread == 0.5
 

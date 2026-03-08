@@ -202,7 +202,7 @@ class TestFullPipeline:
             nonlocal call_count
             call_count += 1
             if call_count == 1:
-                raise Exception("LLM service unavailable")
+                raise RuntimeError("LLM service unavailable")
             return await original_side_effect(*args, **kwargs)
 
         mock_llm.analyze = AsyncMock(side_effect=failing_regime_then_normal)

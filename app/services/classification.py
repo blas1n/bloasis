@@ -5,6 +5,7 @@ Stage 1: Sector filter (11 GICS → 3-7)
 Stage 2: Theme ranking → candidate symbols
 """
 
+import json
 import logging
 from typing import Any
 
@@ -63,7 +64,7 @@ class ClassificationService:
 
             return self._parse_candidates(result, regime)
 
-        except Exception:
+        except (RuntimeError, json.JSONDecodeError, ValueError):
             logger.error("Classification failed", exc_info=True)
             return self._fallback_candidates()
 

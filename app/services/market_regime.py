@@ -5,9 +5,12 @@ Uses core/regime_classifier.py for pure parsing logic.
 """
 
 import asyncio
+import json
 import logging
 from datetime import UTC, datetime
 from typing import Any
+
+from pydantic import ValidationError
 
 from shared.ai_clients.llm_client import LLMClient
 from shared.utils.postgres_client import PostgresClient
@@ -53,7 +56,7 @@ class MarketRegimeService:
         if cached and isinstance(cached, dict):
             try:
                 return MarketRegime(**cached)
-            except Exception:
+            except (ValidationError, TypeError):
                 await self.redis.delete(CACHE_KEY)
 
         # Classify
@@ -102,7 +105,7 @@ class MarketRegimeService:
                 ),
             )
 
-        except Exception as e:
+        except (RuntimeError, json.JSONDecodeError, ValueError) as e:
             logger.error("Regime classification failed", extra={"error": str(e)})
             return self._fallback_regime()
 
@@ -132,7 +135,7 @@ class MarketRegimeService:
                 )
                 data["sp500_1m_change"] = round(float(change), 2)
                 data["sp500_trend"] = "up" if change > 0 else "down"
-        except Exception as e:
+        except (ValueError, KeyError) as e:
             logger.warning("Market data fetch failed", extra={"error": str(e)})
 
         return data
@@ -174,7 +177,7 @@ class MarketRegimeService:
                 if not irx_hist.empty:
                     yield_2y_proxy = float(irx_hist["Close"].iloc[-1])
                     return round(yield_10y - yield_2y_proxy, 2)
-        except Exception as e:
+        except (ValueError, KeyError) as e:
             logger.warning("Yield spread fetch failed", extra={"error": str(e)})
 
         return 0.5

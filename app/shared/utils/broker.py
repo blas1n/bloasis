@@ -24,14 +24,14 @@ def decrypt_alpaca_credentials(configs: list[Any]) -> tuple[str, str]:
     if not settings.fernet_key:
         return settings.alpaca_api_key, settings.alpaca_secret_key
 
-    from cryptography.fernet import Fernet
+    from cryptography.fernet import Fernet, InvalidToken
 
     f = Fernet(settings.fernet_key.encode())
     creds: dict[str, str] = {}
     for cfg in configs:
         try:
             creds[cfg.config_key] = f.decrypt(cfg.encrypted_value.encode()).decode()
-        except Exception:
+        except (InvalidToken, ValueError):
             logger.warning("Failed to decrypt broker config key: %s", cfg.config_key)
 
     if "api_key" in creds and "secret_key" in creds:

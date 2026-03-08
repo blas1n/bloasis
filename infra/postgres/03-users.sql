@@ -43,7 +43,7 @@ COMMENT ON COLUMN user_data.user_preferences.max_position_size IS 'Maximum singl
 COMMENT ON COLUMN user_data.user_preferences.preferred_sectors IS 'Preferred trading sectors';
 COMMENT ON COLUMN user_data.user_preferences.excluded_sectors IS 'Sectors to exclude from analysis';
 COMMENT ON COLUMN user_data.user_preferences.enable_notifications IS 'Whether to receive trading notifications';
-COMMENT ON COLUMN user_data.user_preferences.trading_enabled IS 'AI 자동 거래 활성화 여부';
+COMMENT ON COLUMN user_data.user_preferences.trading_enabled IS 'Whether AI auto-trading is enabled';
 
 -- Indexes
 CREATE INDEX idx_users_email ON user_data.users(email);

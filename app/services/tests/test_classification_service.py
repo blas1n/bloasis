@@ -45,7 +45,7 @@ class TestClassify:
         assert result[0].symbol == "NVDA"
 
     async def test_fallback_on_error(self, classification_svc, mock_llm):
-        mock_llm.analyze.side_effect = Exception("LLM error")
+        mock_llm.analyze.side_effect = RuntimeError("LLM error")
         result = await classification_svc._classify("crisis")
         assert len(result) == 10  # fallback has 10 defaults
         assert result[0].symbol == "AAPL"

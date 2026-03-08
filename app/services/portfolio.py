@@ -101,7 +101,7 @@ class PortfolioService:
                     if prev_close > 0:
                         daily_pnl = (current_price - prev_close) * qty
                         daily_pnl_pct = float((current_price - prev_close) / prev_close * 100)
-                except Exception as e:
+                except (TimeoutError, ValueError) as e:
                     logger.warning(
                         "Failed to calculate daily P&L",
                         extra={"symbol": row.symbol, "error": str(e)},

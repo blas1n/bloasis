@@ -13,6 +13,8 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
+from pydantic import ValidationError
+
 from shared.utils.redis_client import RedisClient
 
 from ..config import settings
@@ -110,7 +112,7 @@ class BacktestingService:
                         backtest_config=config,
                     )
                 results.append(result)
-            except Exception as e:
+            except (ValueError, RuntimeError, TypeError) as e:
                 logger.error("Backtest failed for %s: %s", symbol, e)
                 continue
 
@@ -159,7 +161,7 @@ class BacktestingService:
         try:
             data = json.loads(cached) if isinstance(cached, str) else cached
             return BacktestResult.model_validate(data)
-        except Exception as e:
+        except (json.JSONDecodeError, ValidationError, TypeError) as e:
             logger.warning("Failed to deserialize cached backtest %s: %s", backtest_id, e)
             return None
 
@@ -229,5 +231,5 @@ class BacktestingService:
         cache_key = f"backtest:result:{user_id}:{backtest_id}"
         try:
             await self.redis.setex(cache_key, _RESULT_CACHE_TTL, result.model_dump_json())
-        except Exception as e:
+        except (OSError, TypeError) as e:
             logger.warning("Failed to cache backtest %s: %s", backtest_id, e)

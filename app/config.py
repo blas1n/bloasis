@@ -89,7 +89,7 @@ class Settings(BaseSettings):
                 decoded = base64.urlsafe_b64decode(v)
                 if len(decoded) != 32:
                     raise ValueError
-            except Exception:
+            except (ValueError, TypeError):
                 raise ValueError(
                     "CREDENTIAL_ENCRYPTION_KEY is not a valid Fernet key. "
                     'Generate with: python -c "from cryptography.fernet import Fernet; '

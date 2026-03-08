@@ -51,7 +51,7 @@ def cache_aside(
                 cached = await redis.get(cache_key)
                 if cached is not None:
                     return cached
-            except Exception as e:
+            except OSError as e:
                 logger.warning("Cache read error for %s: %s", cache_key, e)
 
             # Acquire lock to prevent stampede on concurrent cache misses
@@ -60,7 +60,7 @@ def cache_aside(
             try:
                 if redis.client:
                     acquired = await redis.client.set(lock_key, "1", nx=True, ex=_LOCK_TTL)
-            except Exception:
+            except OSError:
                 pass
 
             if not acquired:
@@ -70,7 +70,7 @@ def cache_aside(
                     cached = await redis.get(cache_key)
                     if cached is not None:
                         return cached
-                except Exception:
+                except OSError:
                     pass
                 # Still no cache — fall through and compute anyway
 
@@ -81,7 +81,7 @@ def cache_aside(
                 if result is not None:
                     try:
                         await redis.setex(cache_key, ttl, result)
-                    except Exception as e:
+                    except OSError as e:
                         logger.warning("Cache write error for %s: %s", cache_key, e)
 
                 return result
@@ -90,7 +90,7 @@ def cache_aside(
                 if acquired:
                     try:
                         await redis.delete(lock_key)
-                    except Exception:
+                    except OSError:
                         pass
 
         return wrapper

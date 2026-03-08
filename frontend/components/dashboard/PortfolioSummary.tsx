@@ -50,7 +50,7 @@ export function PortfolioSummary({
     return null;
   }
 
-  // Dashboard variant: PORTFOLIO SUMMARY — Total Value + Daily P&L (간결)
+  // Dashboard variant: PORTFOLIO SUMMARY — Total Value + Daily P&L (compact)
   if (variant === "dashboard") {
     return (
       <Card>
@@ -73,7 +73,7 @@ export function PortfolioSummary({
     );
   }
 
-  // Portfolio variant: Portfolio Overview — Total Value, Total P&L, Cash (가로 배치)
+  // Portfolio variant: Portfolio Overview — Total Value, Total P&L, Cash (horizontal layout)
   return (
     <Card>
       <h3 className="text-lg font-semibold text-text-primary mb-5">Portfolio Overview</h3>

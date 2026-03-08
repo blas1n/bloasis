@@ -70,7 +70,7 @@ async def _get_active_users(user_repo: UserRepository, limit: int = 200) -> list
     """Get list of user IDs with trading enabled (via repository pattern)."""
     try:
         return await user_repo.get_active_trading_users(limit)
-    except Exception:
+    except (OSError, RuntimeError):
         logger.error("Scheduler: failed to get active users", exc_info=True)
         return []
 
