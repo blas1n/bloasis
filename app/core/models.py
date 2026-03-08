@@ -63,6 +63,25 @@ class OrderSide(StrEnum):
     SELL = "sell"
 
 
+class BrokerType(StrEnum):
+    """Supported broker integrations."""
+
+    ALPACA = "alpaca"
+    MOCK = "mock"
+
+
+class OrderStatus(StrEnum):
+    """Order lifecycle status (Outbox + Saga)."""
+
+    PENDING = "pending"  # Recorded in DB, not yet submitted to broker
+    SUBMITTED = "submitted"  # Submitted to broker, awaiting fill
+    PARTIALLY_FILLED = "partially_filled"
+    FILLED = "filled"
+    CANCELLED = "cancelled"
+    FAILED = "failed"
+    COMPENSATION_NEEDED = "compensation_needed"  # Broker filled but DB failed
+
+
 class TradingStatus(StrEnum):
     """Automated trading session status."""
 
@@ -193,6 +212,13 @@ class RiskLimits(BaseModel):
     vix_extreme_threshold: Decimal = Decimal("40.0")
     min_daily_volume: int = 100_000
 
+    @classmethod
+    def from_snapshot(cls, data: dict[str, Any] | None) -> "RiskLimits | None":
+        """Safely deserialize a stored JSONB snapshot with Pydantic validation."""
+        if data is None:
+            return None
+        return cls.model_validate(data)
+
 
 # --- Portfolio ---
 
@@ -266,7 +292,7 @@ class OrderResult(BaseModel):
     symbol: str
     side: OrderSide
     qty: Decimal
-    status: str
+    status: OrderStatus
     filled_qty: Decimal = Decimal("0")
     filled_avg_price: Decimal | None = None
     submitted_at: str = ""
@@ -288,6 +314,24 @@ class UserPreferences(BaseModel):
     excluded_sectors: list[str] = Field(default_factory=list)
     enable_notifications: bool = True
     trading_enabled: bool = False
+
+
+class BrokerAccountInfo(BaseModel):
+    """Account information returned by broker adapter."""
+
+    equity: Decimal = Decimal("0")
+    cash: Decimal = Decimal("0")
+    buying_power: Decimal = Decimal("0")
+
+
+class BrokerPosition(BaseModel):
+    """Position reported by the broker (for sync/reconciliation)."""
+
+    symbol: str
+    quantity: Decimal
+    avg_entry_price: Decimal
+    current_price: Decimal
+    market_value: Decimal
 
 
 class BrokerStatus(BaseModel):
