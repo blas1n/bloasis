@@ -13,7 +13,7 @@ services:
     volumes:
       - ..:/workspace:cached
       - claude-code-bashhistory:/commandhistory
-      - claude-code-config:/home/vscode/.claude
+      - ~/.claude:/home/vscode/.claude:cached
     ports:
       - "${EXTERNAL_FRONTEND_PORT:-3000}:3000"   # Next.js frontend
     environment:
@@ -73,7 +73,6 @@ services:
 
 volumes:
   claude-code-bashhistory:
-  claude-code-config:
   postgres-data:
   redis-data:
 
