@@ -1,18 +1,21 @@
 FROM python:3.11-slim AS base
 
-# Install TA-Lib C library (required by python TA-Lib)
+# Install TA-Lib C library (latest from GitHub, aarch64-compatible)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
-    wget \
-    && wget -q https://prdownloads.sourceforge.net/ta-lib/ta-lib-0.4.0-src.tar.gz \
-    && tar -xzf ta-lib-0.4.0-src.tar.gz \
-    && cd ta-lib/ \
+    git \
+    autoconf \
+    automake \
+    libtool \
+    && git clone --depth 1 https://github.com/TA-Lib/ta-lib.git \
+    && cd ta-lib \
+    && autoreconf -fiv \
     && ./configure --prefix=/usr \
-    && make \
+    && make -j$(nproc) \
     && make install \
     && cd .. \
-    && rm -rf ta-lib ta-lib-0.4.0-src.tar.gz \
-    && apt-get purge -y build-essential wget \
+    && rm -rf ta-lib \
+    && apt-get purge -y build-essential git autoconf automake libtool \
     && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/*
 
