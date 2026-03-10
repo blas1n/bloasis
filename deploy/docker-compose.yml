@@ -138,8 +138,6 @@ services:
       API_URL: http://app:8000
     depends_on:
       - app
-    profiles:
-      - full
     deploy:
       resources:
         limits:
