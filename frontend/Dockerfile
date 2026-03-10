@@ -14,8 +14,8 @@ WORKDIR /app
 # Copy package files
 COPY package.json package-lock.json* ./
 
-# Install dependencies
-RUN npm ci --only=production
+# Install dependencies (devDependencies needed for build: tailwindcss, postcss, typescript)
+RUN npm ci
 
 # -----------------------------------------------------------------------------
 # Stage 2: Builder
