@@ -3,10 +3,10 @@
 # =============================================================================
 # Build context: monorepo root (..)
 # Multi-stage build:
-#   Stage 0 (schema-gen): Python → generate openapi.json from FastAPI app
-#   Stage 1 (deps):       Node   → npm ci
-#   Stage 2 (builder):    Node   → generate:api + next build
-#   Stage 3 (runner):     Node   → production runtime (standalone)
+#   Stage 0 (schema-gen): Python -> generate openapi.json from FastAPI app
+#   Stage 1 (deps):       Node   -> npm ci
+#   Stage 2 (builder):    Node   -> generate:api + next build
+#   Stage 3 (runner):     Node   -> production runtime (standalone)
 # =============================================================================
 
 # -----------------------------------------------------------------------------
@@ -78,7 +78,6 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 nextjs
 
-COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 
