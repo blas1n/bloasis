@@ -63,7 +63,7 @@ export function MarketRegime() {
           <div className="text-sm text-text-secondary space-y-1">
             {regime.reasoning
               .split(/\. (?=[A-Z])/)
-              .map((sentence, i, arr) => (
+              .map((sentence: string, i: number, arr: string[]) => (
                 <p key={i}>
                   {sentence}
                   {i < arr.length - 1 ? "." : ""}
