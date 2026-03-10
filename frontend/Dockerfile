@@ -1,20 +1,43 @@
 # =============================================================================
 # BLOASIS Frontend - Next.js Production Dockerfile
 # =============================================================================
-# Multi-stage build optimized for production
+# Build context: monorepo root (..)
+# Multi-stage build:
+#   Stage 0 (schema-gen): Python → generate openapi.json from FastAPI app
+#   Stage 1 (deps):       Node   → npm ci
+#   Stage 2 (builder):    Node   → generate:api + next build
+#   Stage 3 (runner):     Node   → production runtime (standalone)
 # =============================================================================
 
 # -----------------------------------------------------------------------------
-# Stage 1: Dependencies
+# Stage 0: Generate OpenAPI schema (Python)
+# -----------------------------------------------------------------------------
+FROM python:3.11-slim AS schema-gen
+
+WORKDIR /app
+
+RUN pip install --no-cache-dir uv
+
+COPY pyproject.toml uv.lock* ./
+RUN uv sync --no-dev --frozen
+
+COPY app/ ./app/
+COPY shared/ ./shared/
+COPY scripts/ ./scripts/
+
+# Generates /app/openapi.json (no DB connection needed)
+RUN PYTHONPATH=/app uv run python scripts/export_openapi.py
+
+# -----------------------------------------------------------------------------
+# Stage 1: Node.js dependencies
 # -----------------------------------------------------------------------------
 FROM node:20-alpine AS deps
 
 WORKDIR /app
 
-# Copy package files
-COPY package.json package-lock.json* ./
+COPY frontend/package.json frontend/package-lock.json* ./
 
-# Install dependencies (devDependencies needed for build: tailwindcss, postcss, typescript)
+# devDependencies required for build: tailwindcss, postcss, typescript
 RUN npm ci
 
 # -----------------------------------------------------------------------------
@@ -24,19 +47,22 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-# Copy dependencies from deps stage
 COPY --from=deps /app/node_modules ./node_modules
 
-# Copy source code
-COPY . .
+# Place openapi.json at /openapi.json so ../openapi.json resolves from /app
+COPY --from=schema-gen /app/openapi.json /openapi.json
 
-# Set environment variables for build
+# Frontend source
+COPY frontend/ .
+
+# Generate TypeScript types from OpenAPI schema
+RUN npm run generate:api
+
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NODE_ENV=production
 ARG NEXT_PUBLIC_API_URL=/api
 ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
 
-# Build the application
 RUN npm run build
 
 # -----------------------------------------------------------------------------
@@ -46,31 +72,23 @@ FROM node:20-alpine AS runner
 
 WORKDIR /app
 
-# Set environment
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 
-# Create non-root user
 RUN addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 nextjs
 
-# Copy built assets
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 
-# Set ownership
 RUN chown -R nextjs:nodejs /app
 
-# Switch to non-root user
 USER nextjs
 
-# Expose port
 EXPOSE 3000
 
-# Set hostname
 ENV HOSTNAME="0.0.0.0"
 ENV PORT=3000
 
-# Start the application
 CMD ["node", "server.js"]
