@@ -26,9 +26,11 @@ export async function POST(request: NextRequest) {
       name: data.name,
     });
 
+    const secure = process.env.COOKIE_SECURE !== "false";
+
     response.cookies.set("access_token", data.accessToken, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
+      secure,
       sameSite: "lax",
       path: "/",
       maxAge: 30 * 60, // 30 minutes
@@ -36,7 +38,7 @@ export async function POST(request: NextRequest) {
 
     response.cookies.set("refresh_token", data.refreshToken, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
+      secure,
       sameSite: "lax",
       path: "/",
       maxAge: 7 * 24 * 60 * 60, // 7 days
