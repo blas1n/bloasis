@@ -5,7 +5,7 @@ import { useTradingControl } from "@/hooks/useTradingControl";
 import client from "@/lib/api-client";
 
 export function AITradingControl({ userId }: { userId: string }) {
-  const { status, isLoading, error, startTrading, stopTrading } =
+  const { status, isLoading, error, brokerNotConfigured, startTrading, stopTrading } =
     useTradingControl(userId);
   const [showStopDialog, setShowStopDialog] = useState(false);
   const [brokerConfigured, setBrokerConfigured] = useState<boolean | null>(null);
@@ -15,10 +15,15 @@ export function AITradingControl({ userId }: { userId: string }) {
       .GET("/v1/users/{user_id}/broker", {
         params: { path: { user_id: userId } },
       })
-      .then(({ data }) => {
-        if (data) {
+      .then(({ data, response }) => {
+        if (response?.status === 400) {
+          setBrokerConfigured(false);
+        } else if (data) {
           setBrokerConfigured(data.configured);
         }
+      })
+      .catch(() => {
+        setBrokerConfigured(false);
       });
   }, [userId]);
 
@@ -36,7 +41,8 @@ export function AITradingControl({ userId }: { userId: string }) {
   };
 
   const isActive = status?.tradingEnabled && status.status === "active";
-  const isDisabled = isLoading || brokerConfigured === false;
+  const noBroker = brokerConfigured === false || brokerNotConfigured;
+  const isDisabled = isLoading || noBroker;
 
   return (
     <div className="bg-bg-elevated p-6 rounded-lg border border-border-custom">
@@ -72,7 +78,7 @@ export function AITradingControl({ userId }: { userId: string }) {
         </span>
       </div>
 
-      {brokerConfigured === false && (
+      {noBroker && (
         <p className="mt-3 text-sm text-yellow-400">
           Configure Alpaca API keys in{" "}
           <a href="/dashboard/settings" className="underline hover:text-yellow-300">
@@ -82,7 +88,7 @@ export function AITradingControl({ userId }: { userId: string }) {
         </p>
       )}
 
-      {error && (
+      {error && !noBroker && (
         <p className="mt-2 text-xs text-red-400">{error}</p>
       )}
 

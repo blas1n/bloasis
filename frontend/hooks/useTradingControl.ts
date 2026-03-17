@@ -10,6 +10,7 @@ export function useTradingControl(userId: string) {
   const [status, setStatus] = useState<TradingStatus | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [brokerNotConfigured, setBrokerNotConfigured] = useState(false);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const scheduleNextPoll = useCallback((ms: number, fn: () => void) => {
@@ -19,7 +20,7 @@ export function useTradingControl(userId: string) {
 
   const fetchStatus = useCallback(async () => {
     setError(null);
-    const { data, error: apiError } = await client.GET(
+    const { data, error: apiError, response } = await client.GET(
       "/v1/users/{user_id}/trading",
       {
         params: { path: { user_id: userId } },
@@ -27,12 +28,18 @@ export function useTradingControl(userId: string) {
     );
 
     if (apiError) {
+      if (response?.status === 400) {
+        setBrokerNotConfigured(true);
+        setIsLoading(false);
+        return;
+      }
       setError("Failed to load trading status");
       setIsLoading(false);
       scheduleNextPoll(DEFAULT_POLL_MS, fetchStatus);
       return;
     }
 
+    setBrokerNotConfigured(false);
     if (data) {
       // Runtime data is camelCase (CamelJSONResponse), cast accordingly
       setStatus(data as unknown as TradingStatus);
@@ -105,6 +112,7 @@ export function useTradingControl(userId: string) {
     status,
     isLoading,
     error,
+    brokerNotConfigured,
     fetchStatus,
     startTrading,
     stopTrading,
