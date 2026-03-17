@@ -32,19 +32,11 @@ export function useRiskProfile(userId: string) {
     async (riskProfile: RiskProfile) => {
       if (!preferences) return;
       setIsLoading(true);
-      const { data, error: apiError } = await client.PUT(
+      const { data, error: apiError } = await client.PATCH(
         "/v1/users/{user_id}/preferences",
         {
           params: { path: { user_id: userId } },
-          body: {
-            riskProfile,
-            maxPortfolioRisk: preferences.maxPortfolioRisk,
-            maxPositionSize: preferences.maxPositionSize,
-            preferredSectors: preferences.preferredSectors ?? [],
-            excludedSectors: preferences.excludedSectors ?? [],
-            enableNotifications: preferences.enableNotifications,
-            tradingEnabled: preferences.tradingEnabled,
-          },
+          body: { riskProfile },
         }
       );
 

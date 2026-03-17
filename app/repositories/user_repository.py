@@ -1,13 +1,11 @@
 """User repository — ORM-based data access for user_data schema."""
 
 import uuid as uuid_mod
-from decimal import Decimal
 
 from sqlalchemy import select
 
 from shared.utils.postgres_client import PostgresClient
 
-from ..core.models import RiskProfile
 from .models import BrokerConfigRecord, UserPreferenceRecord, UserRecord
 
 
@@ -34,40 +32,27 @@ class UserRepository:
             )
             return result.scalar_one_or_none()
 
-    async def upsert_preferences(
+    async def patch_preferences(
         self,
         user_id: uuid_mod.UUID,
-        risk_profile: RiskProfile,
-        max_portfolio_risk: Decimal,
-        max_position_size: Decimal,
-        preferred_sectors: list[str],
-        excluded_sectors: list[str],
-        enable_notifications: bool,
-        trading_enabled: bool,
+        updates: dict[str, object],
     ) -> None:
+        """Update only the provided preference fields. Creates record if missing."""
+        allowed = {
+            "risk_profile", "max_portfolio_risk", "max_position_size",
+            "preferred_sectors", "excluded_sectors", "enable_notifications",
+        }
+        filtered = {k: v for k, v in updates.items() if k in allowed}
+        if not filtered:
+            return
+
         async with self.postgres.get_session() as session:
             existing = await session.get(UserPreferenceRecord, user_id)
             if existing:
-                existing.risk_profile = risk_profile
-                existing.max_portfolio_risk = max_portfolio_risk
-                existing.max_position_size = max_position_size
-                existing.preferred_sectors = preferred_sectors
-                existing.excluded_sectors = excluded_sectors
-                existing.enable_notifications = enable_notifications
-                existing.trading_enabled = trading_enabled
+                for key, value in filtered.items():
+                    setattr(existing, key, value)
             else:
-                session.add(
-                    UserPreferenceRecord(
-                        user_id=user_id,
-                        risk_profile=risk_profile,
-                        max_portfolio_risk=max_portfolio_risk,
-                        max_position_size=max_position_size,
-                        preferred_sectors=preferred_sectors,
-                        excluded_sectors=excluded_sectors,
-                        enable_notifications=enable_notifications,
-                        trading_enabled=trading_enabled,
-                    )
-                )
+                session.add(UserPreferenceRecord(user_id=user_id, **filtered))
 
     async def update_trading_enabled(self, user_id: uuid_mod.UUID, enabled: bool) -> None:
         async with self.postgres.get_session() as session:

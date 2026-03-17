@@ -75,31 +75,38 @@ class TestGetPreferences:
 
 
 class TestUpdatePreferences:
-    def test_success(self, client, mock_user_svc):
-        mock_user_svc.update_preferences.return_value = UserPreferences(
+    def test_patch_partial(self, client, mock_user_svc):
+        mock_user_svc.patch_preferences.return_value = UserPreferences(
             user_id=USER_ID,
             risk_profile=RiskProfile.CONSERVATIVE,
             preferred_sectors=["Healthcare"],
         )
-        resp = client.put(
+        resp = client.patch(
             f"/v1/users/{USER_ID}/preferences",
-            json={
-                "riskProfile": "conservative",
-                "maxPortfolioRisk": "0.15",
-                "maxPositionSize": "0.05",
-                "preferredSectors": ["Healthcare"],
-                "excludedSectors": [],
-                "enableNotifications": True,
-                "tradingEnabled": False,
-            },
+            json={"riskProfile": "conservative"},
         )
         assert resp.status_code == 200
         data = resp.json()
         assert data["riskProfile"] == "conservative"
-        mock_user_svc.update_preferences.assert_awaited_once()
+        mock_user_svc.patch_preferences.assert_awaited_once()
+
+    def test_patch_does_not_accept_trading_enabled(self, client, mock_user_svc):
+        """tradingEnabled is controlled via /trading endpoint, not preferences."""
+        mock_user_svc.patch_preferences.return_value = UserPreferences(
+            user_id=USER_ID,
+            risk_profile=RiskProfile.MODERATE,
+        )
+        resp = client.patch(
+            f"/v1/users/{USER_ID}/preferences",
+            json={"tradingEnabled": True},
+        )
+        assert resp.status_code == 200
+        # tradingEnabled should be ignored — patch_preferences called with empty dict
+        call_args = mock_user_svc.patch_preferences.call_args
+        assert "trading_enabled" not in call_args[0][1]
 
     def test_access_denied(self, client):
-        resp = client.put(
+        resp = client.patch(
             f"/v1/users/{OTHER_USER_ID}/preferences",
             json={"riskProfile": "moderate"},
         )
