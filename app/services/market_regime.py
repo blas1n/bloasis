@@ -5,7 +5,6 @@ Uses core/regime_classifier.py for pure parsing logic.
 """
 
 import asyncio
-import json
 import logging
 from datetime import UTC, datetime
 from typing import Any
@@ -63,22 +62,25 @@ class MarketRegimeService:
         regime = await self._classify(trigger)
 
         # Cache (Tier 1 shared, 6h)
-        await self.redis.setex(
-            CACHE_KEY,
-            settings.cache_regime_ttl,
-            regime.model_dump(),
-        )
+        try:
+            await self.redis.setex(
+                CACHE_KEY,
+                settings.cache_regime_ttl,
+                regime.model_dump(),
+            )
+        except Exception:
+            logger.warning("Failed to cache regime result", exc_info=True)
 
         return regime
 
     async def _classify(self, trigger: str) -> MarketRegime:
         """Run Claude classification."""
-        market_data = await self._fetch_market_data()
-        macro = await self._fetch_macro_indicators()
-
-        prompt = format_regime_prompt(market_data, macro)
-
         try:
+            market_data = await self._fetch_market_data()
+            macro = await self._fetch_macro_indicators()
+
+            prompt = format_regime_prompt(market_data, macro)
+
             raw = await self.llm.analyze(
                 prompt=prompt,
                 system_prompt=REGIME_SYSTEM_PROMPT,
@@ -105,7 +107,7 @@ class MarketRegimeService:
                 ),
             )
 
-        except (RuntimeError, json.JSONDecodeError, ValueError) as e:
+        except Exception as e:
             logger.error("Regime classification failed", extra={"error": str(e)})
             return self._fallback_regime()
 
@@ -135,7 +137,7 @@ class MarketRegimeService:
                 )
                 data["sp500_1m_change"] = round(float(change), 2)
                 data["sp500_trend"] = "up" if change > 0 else "down"
-        except (ValueError, KeyError) as e:
+        except Exception as e:
             logger.warning("Market data fetch failed", extra={"error": str(e)})
 
         return data
@@ -177,7 +179,7 @@ class MarketRegimeService:
                 if not irx_hist.empty:
                     yield_2y_proxy = float(irx_hist["Close"].iloc[-1])
                     return round(yield_10y - yield_2y_proxy, 2)
-        except (ValueError, KeyError) as e:
+        except Exception as e:
             logger.warning("Yield spread fetch failed", extra={"error": str(e)})
 
         return 0.5

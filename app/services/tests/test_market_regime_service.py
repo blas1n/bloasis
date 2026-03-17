@@ -175,6 +175,63 @@ class TestFetchYieldSpread:
         assert spread == 0.5
 
 
+class TestErrorHandling:
+    async def test_fallback_on_fetch_market_data_error(self, regime_svc):
+        with patch.object(
+            regime_svc, "_fetch_market_data", side_effect=ConnectionError("Network down")
+        ):
+            with patch.object(regime_svc, "_fetch_macro_indicators", return_value={}):
+                result = await regime_svc._classify("auto")
+        assert result.regime == "sideways"
+        assert result.trigger == "fallback"
+
+    async def test_fallback_on_fetch_macro_error(self, regime_svc):
+        with patch.object(regime_svc, "_fetch_market_data", return_value={"vix": 20.0}):
+            with patch.object(
+                regime_svc, "_fetch_macro_indicators", side_effect=OSError("FRED unavailable")
+            ):
+                result = await regime_svc._classify("auto")
+        assert result.regime == "sideways"
+        assert result.trigger == "fallback"
+
+    async def test_fallback_on_llm_auth_error(self, regime_svc, mock_llm):
+        mock_llm.analyze.side_effect = Exception("AuthenticationError: Invalid API key")
+        with patch.object(regime_svc, "_fetch_market_data", return_value={"vix": 20.0}):
+            with patch.object(regime_svc, "_fetch_macro_indicators", return_value={}):
+                result = await regime_svc._classify("auto")
+        assert result.regime == "sideways"
+        assert result.trigger == "fallback"
+
+    async def test_sync_fetch_market_data_catches_broad_exception(self, regime_svc):
+        with patch("yfinance.Ticker", side_effect=ConnectionError("Network timeout")):
+            data = await regime_svc._fetch_market_data()
+        assert data["vix"] == 20.0
+        assert data["sp500_trend"] == "neutral"
+
+    async def test_sync_fetch_yield_spread_catches_broad_exception(self, regime_svc):
+        with patch("yfinance.Ticker", side_effect=ConnectionError("Network timeout")):
+            spread = await regime_svc._fetch_yield_spread()
+        assert spread == 0.5
+
+    async def test_get_current_survives_redis_write_failure(self, regime_svc, mock_redis, mock_llm):
+        mock_redis.get.return_value = None
+        mock_redis.setex.side_effect = ConnectionError("Redis down")
+        mock_llm.analyze.return_value = {
+            "regime": "bull",
+            "confidence": 0.8,
+            "reasoning": "Strong market",
+        }
+        with patch.object(
+            regime_svc, "_fetch_market_data", return_value={"vix": 15.0, "sp500_trend": "up"}
+        ):
+            with patch.object(
+                regime_svc, "_fetch_macro_indicators", return_value={"yield_curve_10y_2y": 0.5}
+            ):
+                result = await regime_svc.get_current()
+        assert result.regime == "bull"
+        assert result.confidence == 0.8
+
+
 class TestFallbackRegime:
     def test_returns_conservative_default(self, regime_svc):
         result = regime_svc._fallback_regime()

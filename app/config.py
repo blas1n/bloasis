@@ -121,6 +121,7 @@ class Settings(BaseSettings):
     scheduler_enabled: bool = False
     analysis_interval_seconds: int = 600  # 10 minutes
     max_stocks_per_analysis: int = 15
+    signal_min_confidence: float = 0.7
 
     # --- Backtesting ---
     backtest_default_cash: Decimal = Decimal("100000.00")
