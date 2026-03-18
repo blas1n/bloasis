@@ -158,8 +158,8 @@ def calculate_momentum(bars: list[dict[str, float]]) -> float:
     if len(bars) < 20:
         return 50.0
 
-    recent_close = bars[-1]["close"]
-    ma20 = sum(bar["close"] for bar in bars[-20:]) / 20
+    recent_close = float(bars[-1]["close"])
+    ma20 = sum(float(bar["close"]) for bar in bars[-20:]) / 20
 
     if ma20 == 0:
         return 50.0
@@ -184,9 +184,9 @@ def calculate_volatility(bars: list[dict[str, float]]) -> float:
         return 50.0
 
     returns = [
-        (bars[i]["close"] - bars[i - 1]["close"]) / bars[i - 1]["close"]
+        (float(bars[i]["close"]) - float(bars[i - 1]["close"])) / float(bars[i - 1]["close"])
         for i in range(1, len(bars))
-        if bars[i - 1]["close"] != 0
+        if float(bars[i - 1]["close"]) != 0
     ]
 
     if len(returns) < 2:
