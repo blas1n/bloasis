@@ -122,6 +122,7 @@ def _calculate_position_size(
     """Calculate volatility-adjusted position size.
 
     Uses inverse-volatility weighting capped at max_size per risk profile.
+    Ensures minimum 0.01 size for valid signals (avoid qty=0 database errors).
     """
     max_size = MAX_POSITION_SIZE.get(risk_profile, Decimal("0.10"))
     target_vol = TARGET_VOLATILITY.get(risk_profile, 0.15)
@@ -139,7 +140,9 @@ def _calculate_position_size(
             vol_ratio = max(Decimal("0.3"), min(Decimal("2.0"), vol_ratio))
             base = base * vol_ratio
 
-    return min(base, max_size).quantize(Decimal("0.0001"))
+    result = min(base, max_size).quantize(Decimal("0.0001"))
+    # Ensure minimum size to avoid database constraint violations (qty > 0)
+    return max(result, Decimal("0.0001"))
 
 
 def _calculate_levels(
