@@ -151,8 +151,9 @@ async def _execute_signals(
                 order_type="market",
                 ai_reason=signal.rationale,
             )
-            # Mark as executed to prevent retry on next cycle
-            await redis.setex(dedup_key, dedup_ttl, "1")
+            # Mark as executed to prevent retry on next cycle (only if successful)
+            if result.status not in ("failed",):
+                await redis.setex(dedup_key, dedup_ttl, "1")
 
             if result.status != "failed":
                 executed += 1
