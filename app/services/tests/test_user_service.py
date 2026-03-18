@@ -8,7 +8,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 
 from app.config import settings
-from app.core.models import BrokerAccountInfo, RiskProfile, UserPreferences
+from app.core.models import BrokerAccountInfo, RiskProfile
 from app.services.user import UserService
 
 
