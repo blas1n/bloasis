@@ -143,7 +143,7 @@ def calculate_final_score(
     return score.quantize(Decimal("0.01"))
 
 
-def calculate_momentum(bars: list[dict[str, float]]) -> float:
+def calculate_momentum(bars: list[dict[str, float | Decimal]]) -> float:
     """Calculate momentum score (0-100).
 
     Based on price position relative to 20-day MA.
@@ -168,7 +168,7 @@ def calculate_momentum(bars: list[dict[str, float]]) -> float:
     return float(max(0.0, min(100.0, 50.0 + (momentum_pct * 5))))
 
 
-def calculate_volatility(bars: list[dict[str, float]]) -> float:
+def calculate_volatility(bars: list[dict[str, float | Decimal]]) -> float:
     """Calculate volatility score (0-100, inverse).
 
     Lower volatility = higher score.
@@ -196,7 +196,7 @@ def calculate_volatility(bars: list[dict[str, float]]) -> float:
     return float(max(0.0, 100.0 - (std_dev * 500)))
 
 
-def calculate_liquidity(bars: list[dict[str, float]]) -> float:
+def calculate_liquidity(bars: list[dict[str, float | Decimal]]) -> float:
     """Calculate liquidity score (0-100).
 
     Based on 20-day average volume. 1M+ volume = 100.

@@ -47,6 +47,7 @@ export function TradeHistoryTable({
               <th className="px-4 py-3">Price</th>
               <th className="px-4 py-3">Commission</th>
               <th className="px-4 py-3">Executed At</th>
+              <th className="px-4 py-3">Reason</th>
               <th className="px-4 py-3 text-right">P&L</th>
             </tr>
           </thead>
@@ -72,6 +73,9 @@ export function TradeHistoryTable({
                 </td>
                 <td className="px-4 py-3 text-text-secondary">
                   {formatDateTime(trade.executedAt)}
+                </td>
+                <td className="px-4 py-3 text-text-secondary max-w-[200px] truncate" title={trade.aiReason ?? undefined}>
+                  {trade.aiReason ?? "—"}
                 </td>
                 <td className="px-4 py-3 text-right">
                   {Number(trade.realizedPnl) !== 0 && (

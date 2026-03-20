@@ -25,6 +25,7 @@ MANIFEST
 
 # Virtual Environment
 .venv/
+.venv_check/
 venv/
 ENV/
 env/
@@ -47,6 +48,7 @@ env/
 *~
 
 # Testing
+test-results/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/

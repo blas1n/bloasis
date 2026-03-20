@@ -49,6 +49,7 @@ def generate_signal(
     rationale: str = "",
     risk_approved: bool = True,
     position_adjustment: float = 1.0,
+    sector: str = "Unknown",
 ) -> TradingSignal:
     """Generate a single trading signal with ATR-based levels.
 
@@ -102,6 +103,7 @@ def generate_signal(
         risk_approved=risk_approved,
         profit_tiers=profit_tiers,
         trailing_stop_pct=trailing_stop_pct,
+        sector=sector,
     )
 
 

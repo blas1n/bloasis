@@ -174,6 +174,24 @@ class TestGetTrades:
         assert len(trades) == 1
         assert trades[0].symbol == "AAPL"
         assert trades[0].side == "buy"
+        assert trades[0].ai_reason == "test"
+
+    async def test_returns_trades_with_null_ai_reason(self, portfolio_svc, mock_trade_repo):
+        row = MagicMock()
+        row.order_id = "order-2"
+        row.symbol = "TSLA"
+        row.action = "SELL"
+        row.quantity = 5
+        row.price = Decimal("200.00")
+        row.commission = Decimal("1.00")
+        row.realized_pnl = Decimal("50.00")
+        row.executed_at = datetime(2024, 1, 2, tzinfo=UTC)
+        row.ai_reason = None
+        mock_trade_repo.get_trades.return_value = [row]
+
+        trades = await portfolio_svc.get_trades("user-1", limit=10)
+        assert len(trades) == 1
+        assert trades[0].ai_reason is None
 
     async def test_empty_trades(self, portfolio_svc, mock_trade_repo):
         mock_trade_repo.get_trades.return_value = []

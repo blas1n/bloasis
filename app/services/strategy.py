@@ -271,6 +271,16 @@ class StrategyService:
             if not symbol or entry_price <= 0:
                 continue
 
+            rationale = item.get("rationale", "")
+            if not rationale:
+                risk_note = item.get("risk_note", "")
+                rationale = (
+                    f"AI signal: {direction} {symbol} "
+                    f"(strength={strength:.0%}, risk={risk_level})"
+                )
+                if risk_note:
+                    rationale += f". {risk_note}"
+
             signal = generate_signal(
                 symbol=symbol,
                 direction=direction,
@@ -279,7 +289,8 @@ class StrategyService:
                 risk_level=risk_level,
                 risk_profile=risk_profile,
                 ohlcv_bars=ohlcv_data.get(symbol),
-                rationale=item.get("rationale", ""),
+                rationale=rationale,
+                sector=item.get("sector", "Unknown"),
             )
             signals.append(signal)
 

@@ -3,8 +3,7 @@
 
 import asyncio
 import sys
-from datetime import datetime
-from decimal import Decimal
+from datetime import UTC, datetime
 
 from app.config import settings
 from app.repositories.order_repository import OrderRepository
@@ -40,7 +39,7 @@ async def check_trading_state(db: PostgresClient) -> dict:
         "trading_enabled": True,
         "orders_pending": all_orders,
         "trades_total": all_trades,
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "trades_sample": [
             {
                 "symbol": t.symbol,

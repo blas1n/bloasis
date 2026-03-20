@@ -16,7 +16,7 @@ import uuid
 from fastapi import FastAPI
 
 from .config import settings
-from .core.models import RiskProfile, SignalAction, TradingSignal
+from .core.models import OrderStatus, RiskProfile, SignalAction, TradingSignal
 from .repositories.order_repository import OrderRepository
 from .repositories.portfolio_repository import PortfolioRepository
 from .repositories.trade_repository import TradeRepository
@@ -109,7 +109,7 @@ async def _execute_signals(
     Returns number of orders executed.
     """
     redis = app.state.redis
-    min_confidence = settings.signal_min_confidence
+    min_confidence = float(settings.signal_min_confidence)
 
     # Filter to actionable signals
     actionable = [
@@ -124,7 +124,7 @@ async def _execute_signals(
         return 0
 
     # Check deduplication before building executor
-    dedup_ttl = settings.cache_user_portfolio_ttl
+    dedup_ttl = settings.signal_dedup_ttl
     pending: list[tuple[TradingSignal, str]] = []
     for sig in actionable:
         key = f"executed_signal:{user_id}:{sig.symbol}:{sig.action}"
@@ -149,13 +149,12 @@ async def _execute_signals(
                 qty=signal.size_recommendation,
                 price=signal.entry_price,
                 order_type="market",
+                sector=signal.sector,
                 ai_reason=signal.rationale,
             )
             # Mark as executed to prevent retry on next cycle (only if successful)
-            if result.status not in ("failed",):
+            if result.status != OrderStatus.FAILED:
                 await redis.setex(dedup_key, dedup_ttl, "1")
-
-            if result.status != "failed":
                 executed += 1
                 logger.info(
                     "Signal executed",

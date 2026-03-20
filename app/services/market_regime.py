@@ -82,7 +82,7 @@ class MarketRegimeService:
                 prompt=prompt,
                 system_prompt=REGIME_SYSTEM_PROMPT,
                 response_format="json",
-                max_tokens=4096,
+                max_tokens=1024,
             )
 
             result = parse_regime_response(raw)

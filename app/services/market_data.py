@@ -36,7 +36,9 @@ class MarketDataService:
         self.postgres = postgres
 
     @cache_aside(
-        key_fn=lambda self, symbol, period="3mo", interval="1d": f"ohlcv:{symbol}:{period}:{interval}",
+        key_fn=lambda self, symbol, period="3mo", interval="1d": (
+            f"ohlcv:{symbol}:{period}:{interval}"
+        ),
         ttl=settings.cache_ohlcv_ttl,
     )
     async def get_ohlcv(

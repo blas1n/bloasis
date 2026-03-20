@@ -1,6 +1,7 @@
 """User repository — ORM-based data access for user_data schema."""
 
 import uuid as uuid_mod
+from decimal import Decimal
 
 from sqlalchemy import select
 
@@ -52,7 +53,16 @@ class UserRepository:
                 for key, value in filtered.items():
                     setattr(existing, key, value)
             else:
-                session.add(UserPreferenceRecord(user_id=user_id, **filtered))
+                defaults: dict[str, object] = {
+                    "risk_profile": "moderate",
+                    "max_portfolio_risk": Decimal("0.20"),
+                    "max_position_size": Decimal("0.10"),
+                    "preferred_sectors": [],
+                    "excluded_sectors": [],
+                    "enable_notifications": True,
+                }
+                defaults.update(filtered)
+                session.add(UserPreferenceRecord(user_id=user_id, **defaults))
 
     async def update_trading_enabled(self, user_id: uuid_mod.UUID, enabled: bool) -> None:
         async with self.postgres.get_session() as session:
