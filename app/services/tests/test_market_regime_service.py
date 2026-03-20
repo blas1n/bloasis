@@ -238,3 +238,41 @@ class TestFallbackRegime:
         assert result.regime == "sideways"
         assert result.confidence == 0.5
         assert result.trigger == "fallback"
+
+
+class TestFallbackCacheTTL:
+    """Fallback regime must use short TTL to allow retry on next cycle."""
+
+    async def test_successful_regime_uses_full_ttl(self, regime_svc, mock_redis, mock_llm):
+        """Normal classification → cached with full 6h TTL."""
+        mock_redis.get.return_value = None
+        mock_llm.analyze.return_value = {
+            "regime": "bull",
+            "confidence": 0.8,
+            "reasoning": "Strong market",
+        }
+        with patch.object(
+            regime_svc, "_fetch_market_data", return_value={"vix": 15.0, "sp500_trend": "up"}
+        ):
+            with patch.object(
+                regime_svc, "_fetch_macro_indicators", return_value={"yield_curve_10y_2y": 0.5}
+            ):
+                result = await regime_svc.get_current()
+
+        assert result.trigger == "baseline"
+        ttl_used = mock_redis.setex.call_args[0][1]
+        # Full TTL should be >> 300 seconds (5 min fallback TTL)
+        assert ttl_used > 300
+
+    async def test_fallback_regime_uses_short_ttl(self, regime_svc, mock_redis, mock_llm):
+        """LLM failure → fallback cached with short 5-min TTL, not 6h."""
+        mock_redis.get.return_value = None
+        mock_llm.analyze.side_effect = RuntimeError("LLM unavailable")
+        with patch.object(regime_svc, "_fetch_market_data", return_value={"vix": 20.0}):
+            with patch.object(regime_svc, "_fetch_macro_indicators", return_value={}):
+                result = await regime_svc.get_current()
+
+        assert result.trigger == "fallback"
+        ttl_used = mock_redis.setex.call_args[0][1]
+        # Fallback must use short TTL (300s = 5 min) so the next cycle retries LLM
+        assert ttl_used == 300

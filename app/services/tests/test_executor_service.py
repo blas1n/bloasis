@@ -121,6 +121,37 @@ class TestExecuteOrder:
         # Order status updated to filled
         assert mock_order_repo.update_status.call_count == 2  # after submit + after record
 
+    @patch("app.services.executor.settings")
+    async def test_ai_reason_passed_through_to_trade(
+        self, mock_settings, executor_svc, mock_portfolio_svc, mock_broker, mock_order_repo
+    ):
+        """ai_reason flows from execute_order → create_pending_order + record_trade."""
+        mock_settings.max_position_size = Decimal("0.10")
+        mock_settings.max_single_order = Decimal("0.05")
+        mock_settings.max_sector_concentration = Decimal("0.30")
+        mock_settings.vix_high_threshold = Decimal("30")
+        mock_settings.vix_extreme_threshold = Decimal("40")
+
+        ai_reason = "Strong momentum with RSI in healthy range"
+        result = await executor_svc.execute_order(
+            user_id="user-1",
+            symbol="MSFT",
+            side="buy",
+            qty=Decimal("10"),
+            price=Decimal("350"),
+            sector="Technology",
+            ai_reason=ai_reason,
+        )
+        assert result.status == OrderStatus.FILLED
+
+        # ai_reason passed to pending order
+        create_kwargs = mock_order_repo.create_pending_order.call_args.kwargs
+        assert create_kwargs["ai_reason"] == ai_reason
+
+        # ai_reason passed to record_trade
+        record_kwargs = mock_portfolio_svc.record_trade.call_args.kwargs
+        assert record_kwargs["ai_reason"] == ai_reason
+
     async def test_order_rejected_extreme_vix(self, executor_svc, mock_market_data_svc):
         mock_market_data_svc.get_vix.return_value = 45.0
         result = await executor_svc.execute_order(
@@ -276,3 +307,48 @@ class TestRiskAdjustment:
         if result.status == "filled":
             call_kwargs = mock_portfolio_svc.record_trade.call_args.kwargs
             assert call_kwargs["qty"] <= Decimal("10")
+
+    @patch("app.services.executor.settings")
+    async def test_zero_qty_after_risk_adjustment_rejected_without_db_insert(
+        self, mock_settings, executor_svc, mock_order_repo, mock_portfolio_svc
+    ):
+        """When risk adjustment reduces qty to 0, order must be rejected before DB insert.
+
+        This prevents CheckViolationError on the orders_qty_check DB constraint.
+        """
+        mock_settings.max_position_size = Decimal("0.10")
+        mock_settings.max_single_order = Decimal("0.05")
+        mock_settings.max_sector_concentration = Decimal("0.30")
+        mock_settings.vix_high_threshold = Decimal("30")
+        mock_settings.vix_extreme_threshold = Decimal("40")
+
+        # Sector is already at 100% — any new order will get adjusted_size=0
+        mock_portfolio_svc.get_portfolio.return_value = Portfolio(
+            user_id="user-1",
+            total_value=Decimal("100000"),
+            cash_balance=Decimal("0"),
+            invested_value=Decimal("100000"),
+            positions=[
+                Position(
+                    symbol="AAPL",
+                    quantity=Decimal("100"),
+                    avg_cost=Decimal("1000"),
+                    current_price=Decimal("1000"),
+                    current_value=Decimal("100000"),
+                    sector="Technology",
+                )
+            ],
+        )
+
+        result = await executor_svc.execute_order(
+            user_id="user-1",
+            symbol="MSFT",
+            side="buy",
+            qty=Decimal("1"),
+            price=Decimal("350"),
+            sector="Technology",
+        )
+
+        assert result.status == OrderStatus.FAILED
+        # DB must NOT be touched — no pending order created
+        mock_order_repo.create_pending_order.assert_not_called()

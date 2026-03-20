@@ -121,6 +121,17 @@ class ExecutorService:
         if risk_result.adjusted_size is not None:
             effective_qty = risk_result.adjusted_size
 
+        # Guard: reject before touching DB if qty is zero after risk adjustment
+        if effective_qty <= 0:
+            return OrderResult(
+                order_id="",
+                symbol=symbol,
+                side=OrderSide(side),
+                qty=qty,
+                status=OrderStatus.FAILED,
+                error_message="Order rejected: effective qty is zero after risk adjustment",
+            )
+
         # Step 2: Outbox — create pending order in DB (survives crashes)
         client_order_id = str(uuid.uuid4())
         order_record = await self.order_repo.create_pending_order(

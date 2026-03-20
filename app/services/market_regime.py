@@ -61,13 +61,10 @@ class MarketRegimeService:
         # Classify
         regime = await self._classify(trigger)
 
-        # Cache (Tier 1 shared, 6h)
+        # Cache (Tier 1 shared): successful regime → 6h, fallback → 5min (retry soon)
+        ttl = settings.cache_regime_ttl if regime.trigger != "fallback" else 300
         try:
-            await self.redis.setex(
-                CACHE_KEY,
-                settings.cache_regime_ttl,
-                regime.model_dump(),
-            )
+            await self.redis.setex(CACHE_KEY, ttl, regime.model_dump())
         except Exception:
             logger.warning("Failed to cache regime result", exc_info=True)
 
@@ -85,7 +82,7 @@ class MarketRegimeService:
                 prompt=prompt,
                 system_prompt=REGIME_SYSTEM_PROMPT,
                 response_format="json",
-                max_tokens=1024,
+                max_tokens=4096,
             )
 
             result = parse_regime_response(raw)
@@ -108,7 +105,10 @@ class MarketRegimeService:
             )
 
         except Exception as e:
-            logger.error("Regime classification failed", extra={"error": str(e)})
+            logger.error(
+                "Regime classification failed",
+                extra={"error": str(e), "error_type": type(e).__name__},
+            )
             return self._fallback_regime()
 
     async def _fetch_market_data(self) -> dict[str, Any]:

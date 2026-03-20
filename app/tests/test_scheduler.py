@@ -285,9 +285,10 @@ class TestExecuteSignals:
         assert f"executed_signal:{user_id}:AAPL:buy" == dedup_call[0][0]
 
     @patch("app.scheduler._build_executor_service")
-    async def test_failed_order_still_sets_dedup(
+    async def test_failed_order_does_not_set_dedup(
         self, mock_build, mock_app, user_id, mock_user_repo
     ):
+        """Failed orders skip dedup key so the signal can be retried next cycle."""
         mock_executor = AsyncMock()
         mock_executor.execute_order = AsyncMock(
             return_value=OrderResult(
@@ -305,7 +306,7 @@ class TestExecuteSignals:
         result = await _execute_signals(mock_app, user_id, signals, mock_user_repo)
 
         assert result == 0  # Failed order not counted
-        mock_app.state.redis.setex.assert_called()  # But dedup key still set
+        mock_app.state.redis.setex.assert_not_called()  # No dedup — allow retry
 
     @patch("app.scheduler._build_executor_service")
     async def test_executor_exception_isolated(self, mock_build, mock_app, user_id, mock_user_repo):

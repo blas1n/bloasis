@@ -58,10 +58,13 @@ test.describe('Trading flow — user perspective (API)', () => {
     expect(Number(xomTrade.price)).toBeGreaterThan(0);
     expect(xomTrade.executedAt).toBeTruthy();
 
+    // Step 5: Verify AI reasoning is displayed
+    expect(xomTrade.aiReason).toBeTruthy();
+
     console.log('\n✅ VERIFIED: User can see the Alpaca-filled XOM trade on the Trading page');
     console.log(`   BUY XOM × ${xomTrade.qty} @ $${xomTrade.price}`);
     console.log(`   Executed: ${xomTrade.executedAt}`);
-    console.log(`   Status: EXECUTED (filled by Alpaca)`);
+    console.log(`   AI Reason: ${xomTrade.aiReason}`);
   });
 
   test('backend API directly returns filled trade', async ({ request }) => {
@@ -91,6 +94,9 @@ test.describe('Trading flow — user perspective (API)', () => {
     expect(xom.side).toBe('buy');
     expect(Number(xom.price)).toBeCloseTo(159.29, 0);
 
+    // Verify AI reasoning is present (not empty)
+    expect(xom.aiReason).toBeTruthy();
     console.log(`✅ Backend confirms: XOM BUY filled @ $${xom.price}`);
+    console.log(`   AI Reason: ${xom.aiReason}`);
   });
 });
