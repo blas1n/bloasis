@@ -13,9 +13,20 @@ import { test, expect } from '@playwright/test';
 
 const FRONTEND_URL = process.env.E2E_FRONTEND_URL ?? 'http://localhost:3000';
 const API_URL = process.env.E2E_API_URL ?? 'http://localhost:8000';
-const DEMO_EMAIL = process.env.E2E_DEMO_EMAIL ?? 'demo@bloasis.ai';
-const DEMO_PASSWORD = process.env.E2E_DEMO_PASSWORD ?? 'demo1234';
-const USER_ID = process.env.E2E_USER_ID ?? '00000000-0000-0000-0000-000000000001';
+
+function requireEnv(name: string): string {
+  const value = process.env[name];
+  if (!value) {
+    throw new Error(
+      `Missing required env var: ${name}. See frontend/.env.example for E2E config.`,
+    );
+  }
+  return value;
+}
+
+const DEMO_EMAIL = requireEnv('E2E_DEMO_EMAIL');
+const DEMO_PASSWORD = requireEnv('E2E_DEMO_PASSWORD');
+const USER_ID = requireEnv('E2E_USER_ID');
 
 test.describe('Trading flow — user perspective (API)', () => {
 

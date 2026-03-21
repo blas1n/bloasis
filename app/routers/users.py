@@ -5,7 +5,7 @@ from decimal import Decimal
 from typing import Any
 
 from fastapi import APIRouter, Body, Depends
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from ..core.broker import BrokerAdapter
 from ..core.models import RiskProfile, UserPreferences
@@ -29,6 +29,12 @@ class PreferencesUpdate(CamelModel):
     preferred_sectors: list[str] | None = None
     excluded_sectors: list[str] | None = None
     enable_notifications: bool | None = None
+
+    @model_validator(mode="after")
+    def require_at_least_one_field(self) -> "PreferencesUpdate":
+        if not self.model_dump(exclude_none=True):
+            raise ValueError("At least one field must be provided")
+        return self
 
 
 class BrokerConfigUpdate(CamelModel):

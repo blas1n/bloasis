@@ -91,19 +91,23 @@ class TestUpdatePreferences:
         mock_user_svc.patch_preferences.assert_awaited_once()
 
     def test_patch_does_not_accept_trading_enabled(self, client, mock_user_svc):
-        """tradingEnabled is controlled via /trading endpoint, not preferences."""
-        mock_user_svc.patch_preferences.return_value = UserPreferences(
-            user_id=USER_ID,
-            risk_profile=RiskProfile.MODERATE,
-        )
+        """tradingEnabled is controlled via /trading endpoint, not preferences.
+        Sending only tradingEnabled results in an empty update → 422."""
         resp = client.patch(
             f"/v1/users/{USER_ID}/preferences",
             json={"tradingEnabled": True},
         )
-        assert resp.status_code == 200
-        # tradingEnabled should be ignored — patch_preferences called with empty dict
-        call_args = mock_user_svc.patch_preferences.call_args
-        assert "trading_enabled" not in call_args[0][1]
+        assert resp.status_code == 422
+        mock_user_svc.patch_preferences.assert_not_awaited()
+
+    def test_patch_empty_body_returns_422(self, client, mock_user_svc):
+        """Empty body should be rejected."""
+        resp = client.patch(
+            f"/v1/users/{USER_ID}/preferences",
+            json={},
+        )
+        assert resp.status_code == 422
+        mock_user_svc.patch_preferences.assert_not_awaited()
 
     def test_access_denied(self, client):
         resp = client.patch(
