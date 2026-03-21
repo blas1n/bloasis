@@ -174,11 +174,21 @@ async def _execute_signals(
                         "error": result.error_message,
                     },
                 )
-        except Exception:
+        except (OSError, ConnectionError) as e:
             logger.error(
-                "Signal execution error for %s/%s",
+                "Signal execution network/IO error for %s/%s: %s",
                 user_id,
                 signal.symbol,
+                type(e).__name__,
+                exc_info=True,
+            )
+        except Exception as e:
+            logger.error(
+                "Signal execution unexpected error for %s/%s: %s: %s",
+                user_id,
+                signal.symbol,
+                type(e).__name__,
+                e,
                 exc_info=True,
             )
 

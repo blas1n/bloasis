@@ -5,11 +5,11 @@ from decimal import Decimal
 from typing import Any
 
 from fastapi import APIRouter, Body, Depends
-from pydantic import BaseModel, Field
+from pydantic import Field
 
 from ..core.broker import BrokerAdapter
 from ..core.models import RiskProfile, UserPreferences
-from ..core.responses import BrokerStatusResponse, BrokerUpdateResponse
+from ..core.responses import BrokerStatusResponse, BrokerUpdateResponse, CamelModel
 from ..dependencies import (
     get_broker_adapter,
     get_portfolio_service,
@@ -22,18 +22,18 @@ from ..services.user import UserService
 router = APIRouter()
 
 
-class PreferencesUpdate(BaseModel):
-    riskProfile: RiskProfile | None = None
-    maxPortfolioRisk: Decimal | None = Field(default=None, ge=Decimal("0.01"), le=Decimal("1.0"))
-    maxPositionSize: Decimal | None = Field(default=None, ge=Decimal("0.01"), le=Decimal("1.0"))
-    preferredSectors: list[str] | None = None
-    excludedSectors: list[str] | None = None
-    enableNotifications: bool | None = None
+class PreferencesUpdate(CamelModel):
+    risk_profile: RiskProfile | None = None
+    max_portfolio_risk: Decimal | None = Field(default=None, ge=Decimal("0.01"), le=Decimal("1.0"))
+    max_position_size: Decimal | None = Field(default=None, ge=Decimal("0.01"), le=Decimal("1.0"))
+    preferred_sectors: list[str] | None = None
+    excluded_sectors: list[str] | None = None
+    enable_notifications: bool | None = None
 
 
-class BrokerConfigUpdate(BaseModel):
-    apiKey: str = Field(min_length=1)
-    secretKey: str = Field(min_length=1)
+class BrokerConfigUpdate(CamelModel):
+    api_key: str = Field(min_length=1)
+    secret_key: str = Field(min_length=1)
     paper: bool = True
 
 
@@ -54,17 +54,7 @@ async def update_preferences(
     user_svc: UserService = Depends(get_user_service),
 ) -> dict[str, Any]:
     """Partially update user preferences. Only provided fields are changed."""
-    updates = body.model_dump(exclude_none=True)
-    # Convert camelCase keys to snake_case for service layer
-    field_map: dict[str, str] = {
-        "riskProfile": "risk_profile",
-        "maxPortfolioRisk": "max_portfolio_risk",
-        "maxPositionSize": "max_position_size",
-        "preferredSectors": "preferred_sectors",
-        "excludedSectors": "excluded_sectors",
-        "enableNotifications": "enable_notifications",
-    }
-    snake_updates = {field_map[k]: v for k, v in updates.items() if k in field_map}
+    snake_updates = body.model_dump(exclude_none=True)
     result = await user_svc.patch_preferences(user_id, snake_updates)
     return result.model_dump()
 
@@ -89,8 +79,8 @@ async def update_broker_config(
     """Save broker API credentials and sync positions."""
     return await user_svc.update_broker_config(
         user_id,
-        body.apiKey,
-        body.secretKey,
+        body.api_key,
+        body.secret_key,
         body.paper,
         portfolio_svc=portfolio_svc,
     )
