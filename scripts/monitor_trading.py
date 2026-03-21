@@ -4,6 +4,9 @@
 import asyncio
 import sys
 from datetime import UTC, datetime
+from typing import Any
+
+import structlog
 
 from app.config import settings
 from app.repositories.order_repository import OrderRepository
@@ -11,8 +14,10 @@ from app.repositories.trade_repository import TradeRepository
 from app.repositories.user_repository import UserRepository
 from shared.utils.postgres_client import PostgresClient
 
+logger = structlog.get_logger(__name__)
 
-async def check_trading_state(db: PostgresClient) -> dict:
+
+async def check_trading_state(db: PostgresClient) -> dict[str, Any]:
     """Check current trading state across all tables."""
     user_repo = UserRepository(postgres=db)
     order_repo = OrderRepository(postgres=db)
@@ -53,27 +58,38 @@ async def check_trading_state(db: PostgresClient) -> dict:
     }
 
 
-async def main():
-    """Main monitoring loop."""
+async def main() -> int:
+    """Main monitoring entry point."""
     db = PostgresClient(settings.database_url)
 
     try:
         state = await check_trading_state(db)
-        print("\n=== Trading State ===")
-        for key, value in state.items():
-            if key != "trades_sample":
-                print(f"{key}: {value}")
 
-        if state.get("trades_sample"):
-            print("\nRecent Trades:")
-            for trade in state["trades_sample"]:
-                print(f"  {trade['symbol']} {trade['action']} {trade['qty']} @ {trade['price']}")
+        if "error" in state:
+            logger.error("monitoring_failed", error=state["error"])
+            return 1
+
+        logger.info(
+            "trading_state",
+            user_id=state["user_id"],
+            orders_pending=state["orders_pending"],
+            trades_total=state["trades_total"],
+        )
+
+        for trade in state.get("trades_sample", []):
+            logger.info(
+                "recent_trade",
+                symbol=trade["symbol"],
+                action=trade["action"],
+                qty=trade["qty"],
+                price=trade["price"],
+            )
 
         if state.get("trades_total", 0) > 0:
-            print("\n✓ Trades detected! Trading is working.")
+            logger.info("trading_status", status="active")
             return 0
         else:
-            print("\n✗ No trades yet. Waiting for scheduler cycle...")
+            logger.warning("trading_status", status="no_trades_yet")
             return 1
 
     finally:

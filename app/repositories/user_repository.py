@@ -40,8 +40,12 @@ class UserRepository:
     ) -> None:
         """Update only the provided preference fields. Creates record if missing."""
         allowed = {
-            "risk_profile", "max_portfolio_risk", "max_position_size",
-            "preferred_sectors", "excluded_sectors", "enable_notifications",
+            "risk_profile",
+            "max_portfolio_risk",
+            "max_position_size",
+            "preferred_sectors",
+            "excluded_sectors",
+            "enable_notifications",
         }
         filtered = {k: v for k, v in updates.items() if k in allowed}
         if not filtered:

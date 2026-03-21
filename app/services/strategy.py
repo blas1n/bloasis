@@ -275,8 +275,7 @@ class StrategyService:
             if not rationale:
                 risk_note = item.get("risk_note", "")
                 rationale = (
-                    f"AI signal: {direction} {symbol} "
-                    f"(strength={strength:.0%}, risk={risk_level})"
+                    f"AI signal: {direction} {symbol} (strength={strength:.0%}, risk={risk_level})"
                 )
                 if risk_note:
                     rationale += f". {risk_note}"

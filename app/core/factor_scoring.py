@@ -210,7 +210,7 @@ def calculate_liquidity(bars: list[dict[str, float | Decimal]]) -> float:
     if len(bars) < 20:
         return 50.0
 
-    avg_volume = sum(bar["volume"] for bar in bars[-20:]) / 20
+    avg_volume = sum(float(bar["volume"]) for bar in bars[-20:]) / 20
     return float(min(100.0, (avg_volume / 1_000_000) * 100))
 
 

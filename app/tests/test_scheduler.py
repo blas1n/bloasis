@@ -309,6 +309,54 @@ class TestExecuteSignals:
         mock_app.state.redis.setex.assert_not_called()  # No dedup — allow retry
 
     @patch("app.scheduler._build_executor_service")
+    async def test_compensation_needed_does_not_set_dedup(
+        self, mock_build, mock_app, user_id, mock_user_repo
+    ):
+        """COMPENSATION_NEEDED orders must allow retry — dedup key must NOT be set."""
+        mock_executor = AsyncMock()
+        mock_executor.execute_order = AsyncMock(
+            return_value=OrderResult(
+                order_id="broker-456",
+                symbol="AAPL",
+                side=OrderSide.BUY,
+                qty=Decimal("10"),
+                status=OrderStatus.COMPENSATION_NEEDED,
+                error_message="Trade recording failed",
+            )
+        )
+        mock_build.return_value = mock_executor
+        signals = [_make_signal()]
+
+        result = await _execute_signals(mock_app, user_id, signals, mock_user_repo)
+
+        assert result == 0  # Not counted as successful
+        mock_app.state.redis.setex.assert_not_called()  # No dedup — allow retry
+
+    @patch("app.scheduler._build_executor_service")
+    async def test_redis_dedup_failure_still_counts_execution(
+        self, mock_build, mock_app, user_id, mock_user_repo
+    ):
+        """If Redis fails to set dedup key, execution still counts but signal may retry."""
+        mock_executor = AsyncMock()
+        mock_executor.execute_order = AsyncMock(
+            return_value=OrderResult(
+                order_id="broker-789",
+                symbol="AAPL",
+                side=OrderSide.BUY,
+                qty=Decimal("10"),
+                status=OrderStatus.FILLED,
+            )
+        )
+        mock_build.return_value = mock_executor
+        mock_app.state.redis.setex = AsyncMock(side_effect=ConnectionError("Redis down"))
+        signals = [_make_signal()]
+
+        result = await _execute_signals(mock_app, user_id, signals, mock_user_repo)
+
+        assert result == 1  # Execution still counted
+        mock_executor.execute_order.assert_called_once()
+
+    @patch("app.scheduler._build_executor_service")
     async def test_executor_exception_isolated(self, mock_build, mock_app, user_id, mock_user_repo):
         mock_executor = AsyncMock()
         mock_executor.execute_order = AsyncMock(side_effect=Exception("Broker timeout"))

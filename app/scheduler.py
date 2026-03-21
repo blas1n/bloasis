@@ -152,9 +152,17 @@ async def _execute_signals(
                 sector=signal.sector,
                 ai_reason=signal.rationale,
             )
-            # Mark as executed to prevent retry on next cycle (only if successful)
-            if result.status != OrderStatus.FAILED:
-                await redis.setex(dedup_key, dedup_ttl, "1")
+            # Only dedup on terminal success (FILLED, SUBMITTED).
+            # FAILED and COMPENSATION_NEEDED must allow retry next cycle.
+            dedup_statuses = {OrderStatus.FILLED, OrderStatus.SUBMITTED}
+            if result.status in dedup_statuses:
+                try:
+                    await redis.setex(dedup_key, dedup_ttl, "1")
+                except (OSError, ConnectionError):
+                    logger.warning(
+                        "Failed to set dedup key (signal will retry next cycle)",
+                        extra={"symbol": signal.symbol},
+                    )
                 executed += 1
                 logger.info(
                     "Signal executed",
@@ -167,10 +175,11 @@ async def _execute_signals(
                 )
             else:
                 logger.warning(
-                    "Signal execution failed",
+                    "Signal execution did not complete",
                     extra={
                         "user_id": str(user_id),
                         "symbol": signal.symbol,
+                        "status": result.status,
                         "error": result.error_message,
                     },
                 )

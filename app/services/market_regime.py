@@ -104,10 +104,17 @@ class MarketRegimeService:
                 ),
             )
 
+        except (RuntimeError, ValueError, ValidationError, KeyError, ConnectionError, OSError) as e:
+            logger.error(
+                "Regime classification failed (expected)",
+                extra={"error": str(e), "error_type": type(e).__name__},
+            )
+            return self._fallback_regime()
         except Exception as e:
             logger.error(
-                "Regime classification failed",
-                extra={"error": str(e), "error_type": type(e).__name__},
+                "Regime classification failed (unexpected: %s)",
+                type(e).__name__,
+                exc_info=True,
             )
             return self._fallback_regime()
 
