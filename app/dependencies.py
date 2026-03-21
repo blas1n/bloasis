@@ -120,7 +120,13 @@ async def get_broker_adapter(
 ) -> BrokerAdapter:
     from .services.brokers.factory import create_broker_adapter
 
-    return await create_broker_adapter(current_user, user_repo)
+    try:
+        return await create_broker_adapter(current_user, user_repo)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail="No broker credentials configured. Please set up your broker connection.",
+        )
 
 
 # --- Service dependencies ---

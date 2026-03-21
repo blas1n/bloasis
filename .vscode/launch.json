@@ -1,0 +1,81 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "FastAPI (uvicorn)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": ["app.main:app", "--reload", "--host", "0.0.0.0", "--port", "8000"],
+      "envFile": "${workspaceFolder}/.env",
+      "cwd": "${workspaceFolder}",
+      "jinja": true,
+      "justMyCode": false
+    },
+    {
+      "name": "Next.js (dev)",
+      "type": "node",
+      "request": "launch",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "cwd": "${workspaceFolder}/frontend",
+      "env": {
+        "NEXT_PUBLIC_API_URL": "/api"
+      },
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Alembic: upgrade head",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "alembic",
+      "args": ["upgrade", "head"],
+      "envFile": "${workspaceFolder}/.env",
+      "cwd": "${workspaceFolder}",
+      "justMyCode": false
+    },
+    {
+      "name": "Alembic: autogenerate",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "alembic",
+      "args": ["revision", "--autogenerate", "-m", "${input:migrationMessage}"],
+      "envFile": "${workspaceFolder}/.env",
+      "cwd": "${workspaceFolder}",
+      "justMyCode": false
+    },
+    {
+      "name": "pytest (current file)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": ["${file}", "-v", "-s"],
+      "envFile": "${workspaceFolder}/.env",
+      "cwd": "${workspaceFolder}",
+      "justMyCode": false
+    },
+    {
+      "name": "pytest (all)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": ["app/", "-v", "--cov=app"],
+      "envFile": "${workspaceFolder}/.env",
+      "cwd": "${workspaceFolder}",
+      "justMyCode": false
+    }
+  ],
+  "inputs": [
+    {
+      "id": "migrationMessage",
+      "type": "promptString",
+      "description": "Migration message (e.g. 'add users table')"
+    }
+  ],
+  "compounds": [
+    {
+      "name": "Full Stack (FastAPI + Next.js)",
+      "configurations": ["FastAPI (uvicorn)", "Next.js (dev)"]
+    }
+  ]
+}

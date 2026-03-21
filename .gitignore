@@ -25,6 +25,7 @@ MANIFEST
 
 # Virtual Environment
 .venv/
+.venv_check/
 venv/
 ENV/
 env/
@@ -34,7 +35,8 @@ env/
 .idea/
 
 # VSCode
-.vscode/
+.vscode/*
+!.vscode/launch.json
 *.code-workspace
 
 # Stoneforge
@@ -46,6 +48,7 @@ env/
 *~
 
 # Testing
+test-results/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/

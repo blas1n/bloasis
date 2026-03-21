@@ -143,7 +143,7 @@ def calculate_final_score(
     return score.quantize(Decimal("0.01"))
 
 
-def calculate_momentum(bars: list[dict[str, float]]) -> float:
+def calculate_momentum(bars: list[dict[str, float | Decimal]]) -> float:
     """Calculate momentum score (0-100).
 
     Based on price position relative to 20-day MA.
@@ -158,8 +158,8 @@ def calculate_momentum(bars: list[dict[str, float]]) -> float:
     if len(bars) < 20:
         return 50.0
 
-    recent_close = bars[-1]["close"]
-    ma20 = sum(bar["close"] for bar in bars[-20:]) / 20
+    recent_close = float(bars[-1]["close"])
+    ma20 = sum(float(bar["close"]) for bar in bars[-20:]) / 20
 
     if ma20 == 0:
         return 50.0
@@ -168,7 +168,7 @@ def calculate_momentum(bars: list[dict[str, float]]) -> float:
     return float(max(0.0, min(100.0, 50.0 + (momentum_pct * 5))))
 
 
-def calculate_volatility(bars: list[dict[str, float]]) -> float:
+def calculate_volatility(bars: list[dict[str, float | Decimal]]) -> float:
     """Calculate volatility score (0-100, inverse).
 
     Lower volatility = higher score.
@@ -184,9 +184,9 @@ def calculate_volatility(bars: list[dict[str, float]]) -> float:
         return 50.0
 
     returns = [
-        (bars[i]["close"] - bars[i - 1]["close"]) / bars[i - 1]["close"]
+        (float(bars[i]["close"]) - float(bars[i - 1]["close"])) / float(bars[i - 1]["close"])
         for i in range(1, len(bars))
-        if bars[i - 1]["close"] != 0
+        if float(bars[i - 1]["close"]) != 0
     ]
 
     if len(returns) < 2:
@@ -196,7 +196,7 @@ def calculate_volatility(bars: list[dict[str, float]]) -> float:
     return float(max(0.0, 100.0 - (std_dev * 500)))
 
 
-def calculate_liquidity(bars: list[dict[str, float]]) -> float:
+def calculate_liquidity(bars: list[dict[str, float | Decimal]]) -> float:
     """Calculate liquidity score (0-100).
 
     Based on 20-day average volume. 1M+ volume = 100.
@@ -210,7 +210,7 @@ def calculate_liquidity(bars: list[dict[str, float]]) -> float:
     if len(bars) < 20:
         return 50.0
 
-    avg_volume = sum(bar["volume"] for bar in bars[-20:]) / 20
+    avg_volume = sum(float(bar["volume"]) for bar in bars[-20:]) / 20
     return float(min(100.0, (avg_volume / 1_000_000) * 100))
 
 

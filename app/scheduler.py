@@ -3,6 +3,7 @@
 Runs as an asyncio coroutine within the FastAPI lifespan.
 Handles:
 - Analysis cycles for active users (10-minute interval)
+- Signal execution (signals → orders via ExecutorService)
 - Order outbox processing (pending → broker submission)
 - Order status polling (submitted → filled/cancelled)
 - Reconciliation (broker vs DB diff detection, hourly)
@@ -15,12 +16,14 @@ import uuid
 from fastapi import FastAPI
 
 from .config import settings
-from .core.models import RiskProfile
+from .core.models import OrderStatus, RiskProfile, SignalAction, TradingSignal
 from .repositories.order_repository import OrderRepository
 from .repositories.portfolio_repository import PortfolioRepository
 from .repositories.trade_repository import TradeRepository
 from .repositories.user_repository import UserRepository
+from .services.brokers.factory import create_broker_adapter
 from .services.classification import ClassificationService
+from .services.executor import ExecutorService
 from .services.macro import MacroService
 from .services.market_data import MarketDataService
 from .services.market_regime import MarketRegimeService
@@ -56,6 +59,170 @@ def _build_order_processor(app: FastAPI) -> OrderProcessor:
     )
 
 
+async def _build_executor_service(
+    app: FastAPI,
+    user_id: uuid.UUID,
+    user_repo: UserRepository,
+) -> ExecutorService | None:
+    """Build an ExecutorService for a given user. Returns None if broker not configured."""
+    redis = app.state.redis
+    postgres = app.state.postgres
+
+    try:
+        broker = await create_broker_adapter(user_id, user_repo)
+    except ValueError:
+        logger.warning(
+            "No broker configured, skipping signal execution",
+            extra={"user_id": str(user_id)},
+        )
+        return None
+
+    portfolio_repo = PortfolioRepository(postgres=postgres)
+    trade_repo = TradeRepository(postgres=postgres)
+    order_repo = OrderRepository(postgres=postgres)
+    market_data_svc = MarketDataService(redis=redis, postgres=postgres)
+    portfolio_svc = PortfolioService(
+        redis=redis,
+        portfolio_repo=portfolio_repo,
+        trade_repo=trade_repo,
+        market_data_svc=market_data_svc,
+    )
+
+    return ExecutorService(
+        redis=redis,
+        portfolio_svc=portfolio_svc,
+        market_data_svc=market_data_svc,
+        broker=broker,
+        order_repo=order_repo,
+        user_repo=user_repo,
+    )
+
+
+async def _execute_signals(
+    app: FastAPI,
+    user_id: uuid.UUID,
+    signals: list[TradingSignal],
+    user_repo: UserRepository,
+) -> int:
+    """Convert qualifying signals to orders via ExecutorService.
+
+    Returns number of orders executed.
+    """
+    redis = app.state.redis
+    min_confidence = float(settings.signal_min_confidence)
+
+    # Filter to actionable signals
+    actionable = [
+        s
+        for s in signals
+        if s.action in (SignalAction.BUY, SignalAction.SELL)
+        and s.confidence >= min_confidence
+        and s.risk_approved
+    ]
+
+    if not actionable:
+        return 0
+
+    # Check deduplication before building executor
+    dedup_ttl = settings.signal_dedup_ttl
+    pending: list[tuple[TradingSignal, str]] = []
+    for sig in actionable:
+        key = f"executed_signal:{user_id}:{sig.symbol}:{sig.action}"
+        cached = await redis.get(key)
+        if cached is None:
+            pending.append((sig, key))
+
+    if not pending:
+        return 0
+
+    executor = await _build_executor_service(app, user_id, user_repo)
+    if executor is None:
+        return 0
+
+    executed = 0
+    failed = 0
+    for signal, dedup_key in pending:
+        try:
+            result = await executor.execute_order(
+                user_id=user_id,
+                symbol=signal.symbol,
+                side=signal.action.value,
+                qty=signal.size_recommendation,
+                price=signal.entry_price,
+                order_type="market",
+                sector=signal.sector,
+                ai_reason=signal.rationale,
+            )
+            # Only dedup on terminal success (FILLED, SUBMITTED).
+            # FAILED and COMPENSATION_NEEDED must allow retry next cycle.
+            dedup_statuses = {OrderStatus.FILLED, OrderStatus.SUBMITTED}
+            if result.status in dedup_statuses:
+                try:
+                    await redis.setex(dedup_key, dedup_ttl, "1")
+                except (OSError, ConnectionError):
+                    logger.warning(
+                        "Failed to set dedup key (signal will retry next cycle)",
+                        extra={"symbol": signal.symbol},
+                    )
+                executed += 1
+                logger.info(
+                    "Signal executed",
+                    extra={
+                        "user_id": str(user_id),
+                        "symbol": signal.symbol,
+                        "side": signal.action,
+                        "status": result.status,
+                    },
+                )
+            else:
+                failed += 1
+                logger.warning(
+                    "Signal execution did not complete",
+                    extra={
+                        "user_id": str(user_id),
+                        "symbol": signal.symbol,
+                        "status": result.status,
+                        "error": result.error_message,
+                    },
+                )
+        except (OSError, ConnectionError) as e:
+            failed += 1
+            logger.error(
+                "Signal execution network/IO error",
+                extra={
+                    "user_id": str(user_id),
+                    "symbol": signal.symbol,
+                    "error_type": type(e).__name__,
+                },
+                exc_info=True,
+            )
+        except Exception as e:
+            failed += 1
+            logger.error(
+                "Signal execution unexpected error",
+                extra={
+                    "user_id": str(user_id),
+                    "symbol": signal.symbol,
+                    "error_type": type(e).__name__,
+                    "error": str(e),
+                },
+                exc_info=True,
+            )
+
+    if failed > 0:
+        logger.warning(
+            "Signal execution completed with failures",
+            extra={
+                "user_id": str(user_id),
+                "executed": executed,
+                "failed": failed,
+                "total": len(pending),
+            },
+        )
+
+    return executed
+
+
 async def _run_analysis_cycle(app: FastAPI) -> None:
     """Run one analysis cycle for all active users."""
     redis = app.state.redis
@@ -89,12 +256,29 @@ async def _run_analysis_cycle(app: FastAPI) -> None:
             risk_profile = RiskProfile(prefs.risk_profile) if prefs else RiskProfile.MODERATE
             excluded = list(prefs.excluded_sectors) if prefs and prefs.excluded_sectors else []
 
-            await strategy_svc.run_analysis(
+            result = await strategy_svc.run_analysis(
                 user_id=user_id,
                 risk_profile=risk_profile,
                 excluded_sectors=excluded,
             )
             logger.info("Scheduler: analysis complete for user %s", user_id)
+
+            # Execute qualifying signals as orders
+            if result.signals:
+                try:
+                    executed_count = await _execute_signals(app, user_id, result.signals, user_repo)
+                    if executed_count > 0:
+                        logger.info(
+                            "Scheduler: executed %d signals for user %s",
+                            executed_count,
+                            user_id,
+                        )
+                except Exception:
+                    logger.error(
+                        "Scheduler: signal execution failed for user %s",
+                        user_id,
+                        exc_info=True,
+                    )
         except Exception:
             logger.error("Scheduler: analysis failed for user %s", user_id, exc_info=True)
 

@@ -5,11 +5,11 @@ from decimal import Decimal
 from typing import Any
 
 from fastapi import APIRouter, Body, Depends
-from pydantic import BaseModel, Field
+from pydantic import Field, model_validator
 
 from ..core.broker import BrokerAdapter
 from ..core.models import RiskProfile, UserPreferences
-from ..core.responses import BrokerStatusResponse, BrokerUpdateResponse
+from ..core.responses import BrokerStatusResponse, BrokerUpdateResponse, CamelModel
 from ..dependencies import (
     get_broker_adapter,
     get_portfolio_service,
@@ -22,21 +22,24 @@ from ..services.user import UserService
 router = APIRouter()
 
 
-class PreferencesUpdate(BaseModel):
-    riskProfile: RiskProfile = RiskProfile.MODERATE
-    maxPortfolioRisk: Decimal = Field(
-        default=Decimal("0.20"), ge=Decimal("0.01"), le=Decimal("1.0")
-    )
-    maxPositionSize: Decimal = Field(default=Decimal("0.10"), ge=Decimal("0.01"), le=Decimal("1.0"))
-    preferredSectors: list[str] = []
-    excludedSectors: list[str] = []
-    enableNotifications: bool = True
-    tradingEnabled: bool = False
+class PreferencesUpdate(CamelModel):
+    risk_profile: RiskProfile | None = None
+    max_portfolio_risk: Decimal | None = Field(default=None, ge=Decimal("0.01"), le=Decimal("1.0"))
+    max_position_size: Decimal | None = Field(default=None, ge=Decimal("0.01"), le=Decimal("1.0"))
+    preferred_sectors: list[str] | None = None
+    excluded_sectors: list[str] | None = None
+    enable_notifications: bool | None = None
+
+    @model_validator(mode="after")
+    def require_at_least_one_field(self) -> "PreferencesUpdate":
+        if not self.model_dump(exclude_none=True):
+            raise ValueError("At least one field must be provided")
+        return self
 
 
-class BrokerConfigUpdate(BaseModel):
-    apiKey: str = Field(min_length=1)
-    secretKey: str = Field(min_length=1)
+class BrokerConfigUpdate(CamelModel):
+    api_key: str = Field(min_length=1)
+    secret_key: str = Field(min_length=1)
     paper: bool = True
 
 
@@ -50,24 +53,15 @@ async def get_preferences(
     return prefs.model_dump()
 
 
-@router.put("/{user_id}/preferences", response_model=UserPreferences)
+@router.patch("/{user_id}/preferences", response_model=UserPreferences)
 async def update_preferences(
     user_id: uuid.UUID = Depends(verify_user_access),
     body: PreferencesUpdate = Body(),
     user_svc: UserService = Depends(get_user_service),
 ) -> dict[str, Any]:
-    """Update user risk profile and preferences."""
-    prefs = UserPreferences(
-        user_id=str(user_id),
-        risk_profile=body.riskProfile,
-        max_portfolio_risk=body.maxPortfolioRisk,
-        max_position_size=body.maxPositionSize,
-        preferred_sectors=body.preferredSectors,
-        excluded_sectors=body.excludedSectors,
-        enable_notifications=body.enableNotifications,
-        trading_enabled=body.tradingEnabled,
-    )
-    result = await user_svc.update_preferences(user_id, prefs)
+    """Partially update user preferences. Only provided fields are changed."""
+    snake_updates = body.model_dump(exclude_none=True)
+    result = await user_svc.patch_preferences(user_id, snake_updates)
     return result.model_dump()
 
 
@@ -91,8 +85,8 @@ async def update_broker_config(
     """Save broker API credentials and sync positions."""
     return await user_svc.update_broker_config(
         user_id,
-        body.apiKey,
-        body.secretKey,
+        body.api_key,
+        body.secret_key,
         body.paper,
         portfolio_svc=portfolio_svc,
     )

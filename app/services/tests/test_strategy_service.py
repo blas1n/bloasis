@@ -213,3 +213,33 @@ class TestGenerateSignals:
         ]
         signals = strategy_svc._generate_signals(analysis, {}, "low", "moderate")
         assert signals == []
+
+    def test_fallback_rationale_when_empty(self, strategy_svc):
+        analysis = [
+            {
+                "symbol": "XOM",
+                "direction": "long",
+                "strength": 0.75,
+                "entry_price": 150,
+            },
+        ]
+        signals = strategy_svc._generate_signals(analysis, {}, "medium", "moderate")
+        assert len(signals) == 1
+        assert "XOM" in signals[0].rationale
+        assert "long" in signals[0].rationale
+        assert "75%" in signals[0].rationale
+
+    def test_fallback_rationale_includes_risk_note(self, strategy_svc):
+        analysis = [
+            {
+                "symbol": "AAPL",
+                "direction": "short",
+                "strength": 0.6,
+                "entry_price": 180,
+                "rationale": "",
+                "risk_note": "High concentration in tech sector",
+            },
+        ]
+        signals = strategy_svc._generate_signals(analysis, {}, "high", "moderate")
+        assert len(signals) == 1
+        assert "High concentration" in signals[0].rationale

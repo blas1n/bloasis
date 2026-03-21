@@ -2,6 +2,7 @@
 
 Usage: PYTHONPATH=/workspace python scripts/export_openapi.py
 """
+
 import json
 from pathlib import Path
 

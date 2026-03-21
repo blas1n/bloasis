@@ -8,7 +8,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 
 from app.config import settings
-from app.core.models import BrokerAccountInfo, RiskProfile, UserPreferences
+from app.core.models import BrokerAccountInfo, RiskProfile
 from app.services.user import UserService
 
 
@@ -134,11 +134,25 @@ class TestPreferences:
         prefs = await user_svc.get_preferences("user-1")
         assert prefs.risk_profile == RiskProfile.MODERATE
 
-    async def test_update_preferences(self, user_svc, mock_redis, mock_user_repo):
-        prefs = UserPreferences(user_id="user-1", risk_profile=RiskProfile.AGGRESSIVE)
-        result = await user_svc.update_preferences("user-1", prefs)
+    async def test_patch_preferences(self, user_svc, mock_redis, mock_user_repo):
+        mock_redis.get.return_value = None
+        mock_user_repo.patch_preferences = AsyncMock()
+        mock_user_repo.get_preferences.return_value = MagicMock(
+            risk_profile=RiskProfile.AGGRESSIVE,
+            max_portfolio_risk=Decimal("0.20"),
+            max_position_size=Decimal("0.10"),
+            preferred_sectors=[],
+            excluded_sectors=[],
+            enable_notifications=True,
+            trading_enabled=True,
+        )
+        result = await user_svc.patch_preferences(
+            "user-1", {"risk_profile": RiskProfile.AGGRESSIVE}
+        )
         assert result.risk_profile == RiskProfile.AGGRESSIVE
-        mock_user_repo.upsert_preferences.assert_called_once()
+        mock_user_repo.patch_preferences.assert_called_once_with(
+            "user-1", {"risk_profile": RiskProfile.AGGRESSIVE}
+        )
         mock_redis.delete.assert_called_once()
 
 

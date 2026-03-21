@@ -132,22 +132,13 @@ class UserService:
         await self.redis.setex(cache_key, settings.cache_user_preferences_ttl, prefs.model_dump())
         return prefs
 
-    async def update_preferences(
-        self, user_id: uuid.UUID, prefs: UserPreferences
+    async def patch_preferences(
+        self, user_id: uuid.UUID, updates: dict[str, Any]
     ) -> UserPreferences:
-        """Update user preferences."""
-        await self.user_repo.upsert_preferences(
-            user_id=user_id,
-            risk_profile=prefs.risk_profile,
-            max_portfolio_risk=prefs.max_portfolio_risk,
-            max_position_size=prefs.max_position_size,
-            preferred_sectors=prefs.preferred_sectors,
-            excluded_sectors=prefs.excluded_sectors,
-            enable_notifications=prefs.enable_notifications,
-            trading_enabled=prefs.trading_enabled,
-        )
+        """Partially update user preferences. Only provided fields are changed."""
+        await self.user_repo.patch_preferences(user_id, updates)
         await self.redis.delete(f"user:{user_id}:preferences")
-        return prefs
+        return await self.get_preferences(user_id)
 
     # --- Broker ---
 

@@ -186,6 +186,7 @@ class TradingSignal(BaseModel):
     risk_approved: bool = True
     profit_tiers: list[ProfitTier] = Field(default_factory=list)
     trailing_stop_pct: Decimal = Decimal("0")
+    sector: str = "Unknown"
 
 
 # --- Risk Evaluation ---

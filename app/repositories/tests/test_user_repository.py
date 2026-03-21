@@ -1,5 +1,6 @@
 """Tests for UserRepository — ORM-based data access."""
 
+import uuid
 from contextlib import asynccontextmanager
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock
@@ -9,7 +10,7 @@ import pytest
 from app.core.models import RiskProfile
 from app.repositories.user_repository import UserRepository
 
-TEST_USER_ID = "00000000-0000-0000-0000-000000000001"
+TEST_USER_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 
 
 def _make_mock_postgres(session):
@@ -44,6 +45,7 @@ class TestFindByEmail:
         postgres = _make_mock_postgres(mock_session)
         repo = UserRepository(postgres=postgres)
         result = await repo.find_by_email("test@example.com")
+        assert result is not None
         assert result.user_id == TEST_USER_ID
 
     async def test_returns_none(self, mock_session):
@@ -63,12 +65,13 @@ class TestFindById:
         postgres = _make_mock_postgres(mock_session)
         repo = UserRepository(postgres=postgres)
         result = await repo.find_by_id(TEST_USER_ID)
+        assert result is not None
         assert result.user_id == TEST_USER_ID
 
     async def test_returns_none(self, mock_session):
         postgres = _make_mock_postgres(mock_session)
         repo = UserRepository(postgres=postgres)
-        result = await repo.find_by_id("00000000-0000-0000-0000-000000000099")
+        result = await repo.find_by_id(uuid.UUID("00000000-0000-0000-0000-000000000099"))
         assert result is None
 
 
@@ -80,6 +83,7 @@ class TestGetPreferences:
         postgres = _make_mock_postgres(mock_session)
         repo = UserRepository(postgres=postgres)
         result = await repo.get_preferences(TEST_USER_ID)
+        assert result is not None
         assert result.risk_profile == RiskProfile.AGGRESSIVE
 
     async def test_returns_none(self, mock_session):
@@ -89,19 +93,16 @@ class TestGetPreferences:
         assert result is None
 
 
-class TestUpsertPreferences:
+class TestPatchPreferences:
     async def test_creates_new(self, mock_session):
         postgres = _make_mock_postgres(mock_session)
         repo = UserRepository(postgres=postgres)
-        await repo.upsert_preferences(
+        await repo.patch_preferences(
             user_id=TEST_USER_ID,
-            risk_profile=RiskProfile.AGGRESSIVE,
-            max_portfolio_risk=Decimal("0.20"),
-            max_position_size=Decimal("0.10"),
-            preferred_sectors=["Technology"],
-            excluded_sectors=["Energy"],
-            enable_notifications=True,
-            trading_enabled=True,
+            updates={
+                "risk_profile": RiskProfile.AGGRESSIVE,
+                "max_portfolio_risk": Decimal("0.20"),
+            },
         )
         mock_session.add.assert_called_once()
 
@@ -111,18 +112,35 @@ class TestUpsertPreferences:
 
         postgres = _make_mock_postgres(mock_session)
         repo = UserRepository(postgres=postgres)
-        await repo.upsert_preferences(
+        await repo.patch_preferences(
             user_id=TEST_USER_ID,
-            risk_profile=RiskProfile.CONSERVATIVE,
-            max_portfolio_risk=Decimal("0.10"),
-            max_position_size=Decimal("0.05"),
-            preferred_sectors=["Healthcare"],
-            excluded_sectors=[],
-            enable_notifications=False,
-            trading_enabled=False,
+            updates={
+                "risk_profile": RiskProfile.CONSERVATIVE,
+                "max_portfolio_risk": Decimal("0.10"),
+            },
         )
         assert existing.risk_profile == RiskProfile.CONSERVATIVE
         assert existing.max_portfolio_risk == Decimal("0.10")
+        mock_session.add.assert_not_called()
+
+    async def test_ignores_trading_enabled(self, mock_session):
+        existing = MagicMock(trading_enabled=True)
+        mock_session.get = AsyncMock(return_value=existing)
+
+        postgres = _make_mock_postgres(mock_session)
+        repo = UserRepository(postgres=postgres)
+        await repo.patch_preferences(
+            user_id=TEST_USER_ID,
+            updates={"trading_enabled": False},
+        )
+        # trading_enabled is not in allowed fields, so it should not change
+        assert existing.trading_enabled is True
+
+    async def test_empty_updates_noop(self, mock_session):
+        postgres = _make_mock_postgres(mock_session)
+        repo = UserRepository(postgres=postgres)
+        await repo.patch_preferences(user_id=TEST_USER_ID, updates={})
+        mock_session.get.assert_not_called()
         mock_session.add.assert_not_called()
 
 
@@ -163,7 +181,10 @@ class TestGetBrokerConfig:
     async def test_returns_configs(self, mock_session):
         cfg1 = MagicMock(config_key="api_key")
         cfg2 = MagicMock(config_key="secret_key")
-        mock_session.execute.return_value.scalars.return_value.all.return_value = [cfg1, cfg2]
+        mock_session.execute.return_value.scalars.return_value.all.return_value = [
+            cfg1,
+            cfg2,
+        ]
 
         postgres = _make_mock_postgres(mock_session)
         repo = UserRepository(postgres=postgres)
