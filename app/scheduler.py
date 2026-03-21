@@ -140,6 +140,7 @@ async def _execute_signals(
         return 0
 
     executed = 0
+    failed = 0
     for signal, dedup_key in pending:
         try:
             result = await executor.execute_order(
@@ -174,6 +175,7 @@ async def _execute_signals(
                     },
                 )
             else:
+                failed += 1
                 logger.warning(
                     "Signal execution did not complete",
                     extra={
@@ -184,22 +186,39 @@ async def _execute_signals(
                     },
                 )
         except (OSError, ConnectionError) as e:
+            failed += 1
             logger.error(
-                "Signal execution network/IO error for %s/%s: %s",
-                user_id,
-                signal.symbol,
-                type(e).__name__,
+                "Signal execution network/IO error",
+                extra={
+                    "user_id": str(user_id),
+                    "symbol": signal.symbol,
+                    "error_type": type(e).__name__,
+                },
                 exc_info=True,
             )
         except Exception as e:
+            failed += 1
             logger.error(
-                "Signal execution unexpected error for %s/%s: %s: %s",
-                user_id,
-                signal.symbol,
-                type(e).__name__,
-                e,
+                "Signal execution unexpected error",
+                extra={
+                    "user_id": str(user_id),
+                    "symbol": signal.symbol,
+                    "error_type": type(e).__name__,
+                    "error": str(e),
+                },
                 exc_info=True,
             )
+
+    if failed > 0:
+        logger.warning(
+            "Signal execution completed with failures",
+            extra={
+                "user_id": str(user_id),
+                "executed": executed,
+                "failed": failed,
+                "total": len(pending),
+            },
+        )
 
     return executed
 

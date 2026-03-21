@@ -11,11 +11,11 @@ import { test, expect } from '@playwright/test';
  * This validates the FULL stack: Frontend proxy → FastAPI → DB → Response
  */
 
-const FRONTEND_URL = 'http://localhost:3000';
-const API_URL = 'http://localhost:8000';
-const DEMO_EMAIL = 'demo@bloasis.ai';
-const DEMO_PASSWORD = 'demo1234';
-const USER_ID = '00000000-0000-0000-0000-000000000001';
+const FRONTEND_URL = process.env.E2E_FRONTEND_URL ?? 'http://localhost:3000';
+const API_URL = process.env.E2E_API_URL ?? 'http://localhost:8000';
+const DEMO_EMAIL = process.env.E2E_DEMO_EMAIL ?? 'demo@bloasis.ai';
+const DEMO_PASSWORD = process.env.E2E_DEMO_PASSWORD ?? 'demo1234';
+const USER_ID = process.env.E2E_USER_ID ?? '00000000-0000-0000-0000-000000000001';
 
 test.describe('Trading flow — user perspective (API)', () => {
 
