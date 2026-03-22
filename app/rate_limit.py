@@ -3,9 +3,12 @@
 Separate module to avoid circular imports between main.py and routers.
 """
 
+import jwt
 from fastapi import Request
 from slowapi import Limiter
 from slowapi.util import get_remote_address
+
+from .config import settings
 
 
 def _rate_limit_key(request: Request) -> str:
@@ -13,13 +16,17 @@ def _rate_limit_key(request: Request) -> str:
     auth_header = request.headers.get("Authorization", "")
     if auth_header.startswith("Bearer "):
         try:
-            from .config import decode_jwt_user_id
-
             token = auth_header.removeprefix("Bearer ")
-            user_id = decode_jwt_user_id(token)
-            if user_id:
-                return user_id
-        except (ValueError, KeyError):
+            payload = jwt.decode(
+                token,
+                settings.supabase_jwt_secret,
+                algorithms=["HS256"],
+                audience="authenticated",
+            )
+            sub: str | None = payload.get("sub")
+            if sub:
+                return sub
+        except (jwt.InvalidTokenError, ValueError, KeyError):
             pass
     result: str = get_remote_address(request)
     return result

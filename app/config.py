@@ -7,16 +7,11 @@ Replaces 10 separate service config files.
 import base64
 import logging
 from decimal import Decimal
-from pathlib import Path
 
-import jwt
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings
 
 logger = logging.getLogger(__name__)
-
-# Module-level cache for JWT keys (loaded once, reused across requests)
-_jwt_key_cache: dict[str, str] = {}
 
 
 class Settings(BaseSettings):
@@ -53,12 +48,11 @@ class Settings(BaseSettings):
     alpaca_base_url: str = "https://paper-api.alpaca.markets"
     alpaca_paper: bool = True
 
-    # --- JWT (RS256, asymmetric) ---
-    jwt_private_key_path: str = "infra/keys/jwt-private.pem"
-    jwt_public_key_path: str = "infra/keys/jwt-public.pem"
-    jwt_algorithm: str = "RS256"
-    jwt_access_token_expire_minutes: int = 30
-    jwt_refresh_token_expire_days: int = 7
+    # --- Supabase Auth ---
+    supabase_url: str = ""
+    supabase_jwt_secret: str = ""
+    supabase_service_role_key: str = ""
+    supabase_anon_key: str = ""
 
     # --- Encryption (required for broker config) ---
     fernet_key: str = Field(default="", validation_alias="CREDENTIAL_ENCRYPTION_KEY")
@@ -96,26 +90,6 @@ class Settings(BaseSettings):
                     'print(Fernet.generate_key().decode())"'
                 )
         return v
-
-    @property
-    def jwt_private_key(self) -> str:
-        """Load RSA private key for signing tokens (cached after first read)."""
-        if "private" not in _jwt_key_cache:
-            path = Path(self.jwt_private_key_path)
-            if not path.exists():
-                raise ValueError(f"JWT private key not found at {path}")
-            _jwt_key_cache["private"] = path.read_text()
-        return _jwt_key_cache["private"]
-
-    @property
-    def jwt_public_key(self) -> str:
-        """Load RSA public key for verifying tokens (cached after first read)."""
-        if "public" not in _jwt_key_cache:
-            path = Path(self.jwt_public_key_path)
-            if not path.exists():
-                raise ValueError(f"JWT public key not found at {path}")
-            _jwt_key_cache["public"] = path.read_text()
-        return _jwt_key_cache["public"]
 
     # --- Trading ---
     scheduler_enabled: bool = False
@@ -166,18 +140,3 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
-
-
-def decode_jwt_user_id(token: str) -> str | None:
-    """Decode JWT and extract user_id (sub claim). Returns None on failure.
-
-    Shared helper used by rate_limit.py and UserService.validate_token().
-    """
-    try:
-        payload = jwt.decode(token, settings.jwt_public_key, algorithms=[settings.jwt_algorithm])
-        if payload.get("type") != "access":
-            return None
-        sub: str | None = payload.get("sub")
-        return sub
-    except jwt.InvalidTokenError:
-        return None

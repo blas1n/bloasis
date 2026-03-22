@@ -39,6 +39,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         api_base=settings.llm_api_base,
     )
 
+    # Initialize auth provider
+    from bsvibe_auth import SupabaseAuthProvider
+
+    auth_provider = SupabaseAuthProvider(
+        jwt_secret=settings.supabase_jwt_secret,
+        supabase_url=settings.supabase_url or None,
+        service_role_key=settings.supabase_service_role_key or None,
+    )
+
     await redis.connect()
     await postgres.connect()
     logger.info("Infrastructure connected (Redis + PostgreSQL)")
@@ -53,6 +62,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.redis = redis
     app.state.postgres = postgres
     app.state.llm = llm
+    app.state.auth_provider = auth_provider
     app.state.broker_enabled = broker_enabled
 
     # Start background scheduler if enabled

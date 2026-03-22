@@ -9,6 +9,7 @@ from __future__ import annotations
 import uuid
 from typing import TYPE_CHECKING
 
+from bsvibe_auth import AuthError
 from fastapi import Depends, HTTPException, Request
 
 from shared.ai_clients.llm_client import LLMClient
@@ -81,25 +82,19 @@ def get_user_service(
     return UserService(redis=redis, user_repo=user_repo)
 
 
-async def get_current_user(
-    request: Request,
-    user_svc: UserService = Depends(get_user_service),
-) -> uuid.UUID:
-    """Extract and validate JWT from Authorization header. Returns user_id as UUID."""
+async def get_current_user(request: Request) -> uuid.UUID:
+    """Extract and validate Supabase JWT from Authorization header. Returns user_id as UUID."""
     auth_header = request.headers.get("Authorization", "")
     if not auth_header.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing authorization token")
 
     token = auth_header.removeprefix("Bearer ")
-    user_id_str = user_svc.validate_token(token)
-
-    if not user_id_str:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
-
     try:
-        return uuid.UUID(user_id_str)
-    except ValueError:
-        raise HTTPException(status_code=401, detail="Invalid user ID in token")
+        provider = request.app.state.auth_provider
+        user = provider.verify_token(token)
+        return uuid.UUID(user.id)
+    except (AuthError, ValueError):
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
 
 
 def verify_user_access(

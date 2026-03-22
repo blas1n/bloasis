@@ -1,7 +1,0 @@
-# This directory contains JWT keys for RS256 algorithm
-#
-# Files in this directory:
-# - jwt-private.pem: Private key for signing (gitignored, Auth Service only)
-# - jwt-public.pem: Public key for verification (can be distributed to Envoy Gateway)
-#
-# Generate keys using: ./scripts/generate_jwt_keys.sh

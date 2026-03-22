@@ -1,31 +1,15 @@
 -- BLOASIS User Data Schema
--- User accounts and trading preferences
+-- User preferences and broker config (auth managed by Supabase)
 -- Executed after init.sql
 
 -- Create user_data schema
 CREATE SCHEMA IF NOT EXISTS user_data;
 
-COMMENT ON SCHEMA user_data IS 'User accounts and preferences';
+COMMENT ON SCHEMA user_data IS 'User preferences and broker configuration';
 
--- Users table
-CREATE TABLE user_data.users (
-    user_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    email VARCHAR(255) UNIQUE NOT NULL,
-    password_hash VARCHAR(255) NOT NULL,
-    name VARCHAR(255) NOT NULL,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-
-COMMENT ON TABLE user_data.users IS 'User accounts';
-COMMENT ON COLUMN user_data.users.user_id IS 'Unique user identifier (UUID)';
-COMMENT ON COLUMN user_data.users.email IS 'Unique email address for login';
-COMMENT ON COLUMN user_data.users.password_hash IS 'bcrypt hashed password';
-COMMENT ON COLUMN user_data.users.name IS 'Display name';
-
--- User preferences table
+-- User preferences table (user_id references Supabase auth.users UUID)
 CREATE TABLE user_data.user_preferences (
-    user_id UUID PRIMARY KEY REFERENCES user_data.users(user_id) ON DELETE CASCADE,
+    user_id UUID PRIMARY KEY,
     risk_profile VARCHAR(50) DEFAULT 'moderate' CHECK (risk_profile IN ('conservative', 'moderate', 'aggressive')),
     max_portfolio_risk DECIMAL(5,4) DEFAULT 0.20 CHECK (max_portfolio_risk BETWEEN 0 AND 1),
     max_position_size DECIMAL(5,4) DEFAULT 0.10 CHECK (max_position_size BETWEEN 0 AND 1),
@@ -45,9 +29,6 @@ COMMENT ON COLUMN user_data.user_preferences.excluded_sectors IS 'Sectors to exc
 COMMENT ON COLUMN user_data.user_preferences.enable_notifications IS 'Whether to receive trading notifications';
 COMMENT ON COLUMN user_data.user_preferences.trading_enabled IS 'Whether AI auto-trading is enabled';
 
--- Indexes
-CREATE INDEX idx_users_email ON user_data.users(email);
-
 -- Trigger to update updated_at timestamp
 CREATE OR REPLACE FUNCTION user_data.update_updated_at_column()
 RETURNS TRIGGER AS $$
@@ -57,26 +38,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE TRIGGER update_users_updated_at
-    BEFORE UPDATE ON user_data.users
-    FOR EACH ROW
-    EXECUTE FUNCTION user_data.update_updated_at_column();
-
 CREATE TRIGGER update_user_preferences_updated_at
     BEFORE UPDATE ON user_data.user_preferences
     FOR EACH ROW
     EXECUTE FUNCTION user_data.update_updated_at_column();
-
--- Seed demo user with fixed UUID (idempotent)
--- Login: demo@bloasis.ai / demo1234
-INSERT INTO user_data.users (user_id, email, password_hash, name)
-VALUES (
-    '00000000-0000-0000-0000-000000000001',
-    'demo@bloasis.ai',
-    '$2b$12$6oXHl7HyxjIMn.ZtukowoOT5RhlKObEMXgBgMp1DfduOPYiyOFWX2',
-    'Demo User'
-) ON CONFLICT (user_id) DO NOTHING;
-
-INSERT INTO user_data.user_preferences (user_id)
-VALUES ('00000000-0000-0000-0000-000000000001')
-ON CONFLICT (user_id) DO NOTHING;

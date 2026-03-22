@@ -59,18 +59,29 @@ async function proxyRequest(
           fetchOptions.headers = headers;
           response = await fetch(url, fetchOptions);
 
-          // Always persist new token after successful refresh
+          // Always persist new tokens after successful refresh
           const data = response.ok ? await response.json() : { error: "Request failed" };
           const nextRes = NextResponse.json(data, {
             status: response.status,
           });
+          const secure = process.env.COOKIE_SECURE !== "false";
           nextRes.cookies.set("access_token", refreshData.accessToken, {
             httpOnly: true,
-            secure: process.env.NODE_ENV === "production",
+            secure,
             sameSite: "lax",
             path: "/",
-            maxAge: 30 * 60,
+            maxAge: 3600,
           });
+          // Supabase rotates refresh tokens
+          if (refreshData.refreshToken) {
+            nextRes.cookies.set("refresh_token", refreshData.refreshToken, {
+              httpOnly: true,
+              secure,
+              sameSite: "lax",
+              path: "/",
+              maxAge: 7 * 24 * 60 * 60,
+            });
+          }
           return nextRes;
         }
       }

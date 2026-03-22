@@ -40,11 +40,12 @@ class TokenResponse(CamelModel):
     access_token: str
     refresh_token: str
     user_id: str
-    name: str
+    name: str = ""
 
 
 class RefreshTokenResponse(CamelModel):
     access_token: str
+    refresh_token: str
 
 
 class UserInfoResponse(CamelModel):

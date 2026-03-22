@@ -1,17 +1,16 @@
-"""User Service — Account management, preferences, JWT.
+"""User Service — Supabase Auth proxy, preferences, broker config.
 
-Replaces: services/user/ + services/auth/ (794 + 341 = 1135 lines → ~130 lines)
+Auth operations (signup, login, refresh, logout) proxy to Supabase Auth REST API.
+Preferences and broker config remain local (PostgreSQL).
 """
 
 from __future__ import annotations
 
 import logging
 import uuid
-from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
-import bcrypt
-import jwt
+import httpx
 
 from shared.utils.redis_client import RedisClient
 
@@ -27,81 +26,125 @@ logger = logging.getLogger(__name__)
 
 
 class UserService:
-    """User management, authentication, and preferences."""
+    """User management via Supabase Auth, preferences, and broker config."""
 
     def __init__(self, redis: RedisClient, user_repo: UserRepository) -> None:
         self.redis = redis
         self.user_repo = user_repo
 
-    # --- Authentication ---
+    # --- Supabase Auth Proxy ---
+
+    async def signup(self, email: str, password: str) -> dict[str, Any] | None:
+        """Register a new user via Supabase Auth."""
+        url = f"{settings.supabase_url}/auth/v1/signup"
+        headers = {
+            "apikey": settings.supabase_anon_key,
+            "Content-Type": "application/json",
+        }
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                url,
+                json={"email": email, "password": password},
+                headers=headers,
+                timeout=30,
+            )
+        if resp.status_code >= 400:
+            return None
+
+        data = resp.json()
+        session = data.get("session")
+        user = data.get("user", {})
+        if not session:
+            return None
+
+        user_metadata = user.get("user_metadata", {})
+        return {
+            "accessToken": session["access_token"],
+            "refreshToken": session["refresh_token"],
+            "userId": user.get("id", ""),
+            "name": user_metadata.get("name", ""),
+        }
 
     async def login(self, email: str, password: str) -> dict[str, Any] | None:
-        """Authenticate user and return tokens."""
-        row = await self.user_repo.find_by_email(email)
-        if not row:
+        """Authenticate user via Supabase Auth."""
+        url = f"{settings.supabase_url}/auth/v1/token?grant_type=password"
+        headers = {
+            "apikey": settings.supabase_anon_key,
+            "Content-Type": "application/json",
+        }
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                url,
+                json={"email": email, "password": password},
+                headers=headers,
+                timeout=30,
+            )
+        if resp.status_code >= 400:
             return None
 
-        if not bcrypt.checkpw(password.encode(), row.password_hash.encode()):
-            return None
-
-        user_id = str(row.user_id)
-        access_token = self._create_access_token(user_id)
-        refresh_token = self._create_refresh_token(user_id)
-
-        await self.redis.setex(
-            f"refresh:{refresh_token}",
-            settings.jwt_refresh_token_expire_days * 86400,
-            user_id,
-        )
+        data = resp.json()
+        user = data.get("user", {})
+        user_metadata = user.get("user_metadata", {})
 
         return {
-            "accessToken": access_token,
-            "refreshToken": refresh_token,
-            "userId": user_id,
-            "name": row.name,
+            "accessToken": data["access_token"],
+            "refreshToken": data["refresh_token"],
+            "userId": user.get("id", ""),
+            "name": user_metadata.get("name", ""),
         }
 
     async def refresh_token(self, refresh_token: str) -> dict[str, Any] | None:
-        """Refresh access token using refresh token."""
-        user_id = await self.redis.get(f"refresh:{refresh_token}")
-        if not user_id:
+        """Refresh access token via Supabase Auth."""
+        url = f"{settings.supabase_url}/auth/v1/token?grant_type=refresh_token"
+        headers = {
+            "apikey": settings.supabase_anon_key,
+            "Content-Type": "application/json",
+        }
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                url,
+                json={"refresh_token": refresh_token},
+                headers=headers,
+                timeout=30,
+            )
+        if resp.status_code >= 400:
             return None
 
-        access_token = self._create_access_token(str(user_id))
-        return {"accessToken": access_token}
+        data = resp.json()
+        return {
+            "accessToken": data["access_token"],
+            "refreshToken": data["refresh_token"],
+        }
 
-    async def logout(self, refresh_token: str) -> None:
-        """Invalidate refresh token."""
-        await self.redis.delete(f"refresh:{refresh_token}")
+    async def logout(self, access_token: str) -> None:
+        """Logout user via Supabase Auth."""
+        url = f"{settings.supabase_url}/auth/v1/logout"
+        headers = {
+            "apikey": settings.supabase_anon_key,
+            "Authorization": f"Bearer {access_token}",
+        }
+        async with httpx.AsyncClient() as client:
+            await client.post(url, headers=headers, timeout=30)
 
-    async def get_user_info(self, user_id: uuid.UUID) -> dict[str, Any] | None:
-        """Get basic user info by ID. Returns None if not found."""
-        row = await self.user_repo.find_by_id(user_id)
-        if not row:
+    async def get_user_info(self, access_token: str) -> dict[str, Any] | None:
+        """Get user info from Supabase Auth."""
+        url = f"{settings.supabase_url}/auth/v1/user"
+        headers = {
+            "apikey": settings.supabase_anon_key,
+            "Authorization": f"Bearer {access_token}",
+        }
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(url, headers=headers, timeout=30)
+        if resp.status_code >= 400:
             return None
-        return {"userId": str(row.user_id), "name": row.name or "", "email": row.email}
 
-    def validate_token(self, token: str) -> str | None:
-        """Validate JWT access token. Returns user_id or None."""
-        from ..config import decode_jwt_user_id
-
-        return decode_jwt_user_id(token)
-
-    def _create_access_token(self, user_id: str) -> str:
-        expire = datetime.now(UTC) + timedelta(minutes=settings.jwt_access_token_expire_minutes)
-        return jwt.encode(
-            {"sub": user_id, "exp": expire, "type": "access"},
-            settings.jwt_private_key,
-            algorithm=settings.jwt_algorithm,
-        )
-
-    def _create_refresh_token(self, user_id: str) -> str:
-        expire = datetime.now(UTC) + timedelta(days=settings.jwt_refresh_token_expire_days)
-        return jwt.encode(
-            {"sub": user_id, "exp": expire, "type": "refresh", "jti": str(uuid.uuid4())},
-            settings.jwt_private_key,
-            algorithm=settings.jwt_algorithm,
-        )
+        data = resp.json()
+        user_metadata = data.get("user_metadata", {})
+        return {
+            "userId": data.get("id", ""),
+            "name": user_metadata.get("name", ""),
+            "email": data.get("email", ""),
+        }
 
     # --- Preferences ---
 
@@ -145,11 +188,7 @@ class UserService:
     async def get_broker_status(
         self, user_id: uuid.UUID, broker: BrokerAdapter | None = None
     ) -> dict[str, Any]:
-        """Get broker connection status using adapter.
-
-        If broker adapter is provided, uses it to test connection and get account info.
-        Otherwise, checks if credentials are configured.
-        """
+        """Get broker connection status using adapter."""
         configs = await self.user_repo.get_broker_config(user_id)
         configured = len(configs) > 0
 
@@ -207,11 +246,7 @@ class UserService:
         broker_type: str = "alpaca",
         portfolio_svc: PortfolioService | None = None,
     ) -> dict[str, Any]:
-        """Update broker configuration and optionally sync positions.
-
-        If portfolio_svc is provided, creates a fresh broker adapter with the
-        new credentials and syncs positions from the broker.
-        """
+        """Update broker configuration and optionally sync positions."""
         from cryptography.fernet import Fernet
 
         if not settings.fernet_key:

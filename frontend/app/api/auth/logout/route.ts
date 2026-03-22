@@ -3,18 +3,16 @@ import { NextRequest, NextResponse } from "next/server";
 const API_BASE_URL = process.env.API_URL || "http://localhost:8000";
 
 export async function POST(request: NextRequest) {
-  const refreshToken = request.cookies.get("refresh_token")?.value;
+  const accessToken = request.cookies.get("access_token")?.value;
 
-  // Best-effort backend logout
-  if (refreshToken) {
+  // Best-effort backend logout via access token
+  if (accessToken) {
     try {
       await fetch(`${API_BASE_URL}/v1/auth/tokens`, {
         method: "DELETE",
         headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${refreshToken}`,
+          Authorization: `Bearer ${accessToken}`,
         },
-        body: JSON.stringify({ refreshToken }),
       });
     } catch {
       // ignore — cookies will be cleared regardless

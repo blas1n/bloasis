@@ -23,7 +23,7 @@ export async function POST(request: NextRequest) {
     // Set httpOnly cookies for tokens
     const response = NextResponse.json({
       userId: data.userId,
-      name: data.name,
+      name: data.name || "",
     });
 
     const secure = process.env.COOKIE_SECURE !== "false";
@@ -33,7 +33,7 @@ export async function POST(request: NextRequest) {
       secure,
       sameSite: "lax",
       path: "/",
-      maxAge: 30 * 60, // 30 minutes
+      maxAge: 3600, // 1 hour (Supabase default)
     });
 
     response.cookies.set("refresh_token", data.refreshToken, {
