@@ -57,7 +57,8 @@ export function Sidebar() {
 
   async function handleLogout() {
     await logout();
-    router.push("/login");
+    // Middleware will redirect to BSVibe Auth on next navigation
+    router.push("/dashboard");
   }
 
   return (
