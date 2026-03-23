@@ -1,7 +1,7 @@
 """Tests for FastAPI dependency injection — auth and user access."""
 
 import uuid
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from bsvibe_auth import AuthError, BSVibeUser
@@ -24,13 +24,13 @@ class TestGetCurrentUser:
         request.headers.get.return_value = "Bearer valid-token"
 
         mock_provider = MagicMock()
-        mock_provider.verify_token.return_value = _make_bsvibe_user()
+        mock_provider.verify_token = AsyncMock(return_value=_make_bsvibe_user())
         request.app.state.auth_provider = mock_provider
 
         result = await get_current_user(request)
 
         assert result == USER_UUID
-        mock_provider.verify_token.assert_called_once_with("valid-token")
+        mock_provider.verify_token.assert_awaited_once_with("valid-token")
 
     async def test_missing_auth_header(self) -> None:
         request = MagicMock()
@@ -54,7 +54,7 @@ class TestGetCurrentUser:
         request.headers.get.return_value = "Bearer invalid-token"
 
         mock_provider = MagicMock()
-        mock_provider.verify_token.side_effect = AuthError("Invalid token")
+        mock_provider.verify_token = AsyncMock(side_effect=AuthError("Invalid token"))
         request.app.state.auth_provider = mock_provider
 
         with pytest.raises(HTTPException) as exc_info:
@@ -68,7 +68,7 @@ class TestGetCurrentUser:
         request.headers.get.return_value = "Bearer valid-token"
 
         mock_provider = MagicMock()
-        mock_provider.verify_token.return_value = _make_bsvibe_user("not-a-uuid")
+        mock_provider.verify_token = AsyncMock(return_value=_make_bsvibe_user("not-a-uuid"))
         request.app.state.auth_provider = mock_provider
 
         with pytest.raises(HTTPException) as exc_info:

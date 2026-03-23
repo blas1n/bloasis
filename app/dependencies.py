@@ -91,7 +91,7 @@ async def get_current_user(request: Request) -> uuid.UUID:
     token = auth_header.removeprefix("Bearer ")
     try:
         provider = request.app.state.auth_provider
-        user = provider.verify_token(token)
+        user = await provider.verify_token(token)
         return uuid.UUID(user.id)
     except (AuthError, ValueError):
         raise HTTPException(status_code=401, detail="Invalid or expired token")
