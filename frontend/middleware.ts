@@ -7,9 +7,15 @@ export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   const isPublic =
+    pathname === "/" || // landing page
     pathname.startsWith("/auth/") || // callback handler
     pathname === "/health" ||
     pathname.startsWith("/api/"); // API proxy handles its own auth
+
+  // Redirect authenticated users from landing to dashboard
+  if (pathname === "/" && accessToken) {
+    return NextResponse.redirect(new URL("/dashboard", request.url));
+  }
 
   // Protect all non-public routes — redirect to BSVibe Auth
   if (!isPublic && !accessToken) {
