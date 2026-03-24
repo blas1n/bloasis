@@ -46,6 +46,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         jwt_secret=settings.supabase_jwt_secret,
         supabase_url=settings.supabase_url or None,
         service_role_key=settings.supabase_service_role_key or None,
+        algorithms=["ES256"],
     )
 
     await redis.connect()
