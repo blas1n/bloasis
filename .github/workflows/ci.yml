@@ -34,18 +34,16 @@ jobs:
         uses: astral-sh/setup-uv@v4
 
       - name: Install dependencies
-        run: uv pip install --system ".[dev]"
+        run: uv sync --extra dev
 
       - name: Lint (ruff)
-        run: |
-          ruff check app/ shared/
-          ruff format --check app/ shared/
+        run: uv run ruff check app/ shared/
 
       - name: Type check (mypy)
-        run: mypy app/ shared/
+        run: uv run mypy app/ shared/
 
       - name: Test (pytest)
-        run: pytest app/ --cov=app --cov-fail-under=80
+        run: uv run pytest app/ --cov=app --cov-fail-under=80
 
   frontend:
     name: Frontend (TypeScript)
@@ -74,10 +72,10 @@ jobs:
         uses: astral-sh/setup-uv@v4
 
       - name: Install Python dependencies
-        run: uv pip install --system ".[dev]"
+        run: uv sync --extra dev
 
       - name: Generate OpenAPI schema
-        run: PYTHONPATH=/workspace python scripts/export_openapi.py
+        run: uv run python scripts/export_openapi.py
         env:
           PYTHONPATH: ${{ github.workspace }}
 
