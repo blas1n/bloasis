@@ -29,13 +29,26 @@ export async function POST(request: NextRequest) {
     const data = await res.json();
     const response = NextResponse.json({ success: true });
 
+    const secure = process.env.COOKIE_SECURE !== "false";
+
     response.cookies.set("access_token", data.accessToken, {
       httpOnly: true,
-      secure: process.env.COOKIE_SECURE !== "false",
+      secure,
       sameSite: "lax",
       path: "/",
-      maxAge: 30 * 60,
+      maxAge: 3600,
     });
+
+    // Supabase rotates refresh tokens — update cookie
+    if (data.refreshToken) {
+      response.cookies.set("refresh_token", data.refreshToken, {
+        httpOnly: true,
+        secure,
+        sameSite: "lax",
+        path: "/",
+        maxAge: 7 * 24 * 60 * 60,
+      });
+    }
 
     return response;
   } catch {

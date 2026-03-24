@@ -13,12 +13,12 @@ from app.repositories.user_repository import UserRepository
 TEST_USER_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 
 
-def _make_mock_postgres(session):
+def _make_mock_postgres(session: AsyncMock) -> MagicMock:
     """Create a mock PostgresClient with get_session returning a context manager."""
     postgres = MagicMock()
 
     @asynccontextmanager
-    async def mock_get_session():
+    async def mock_get_session():  # type: ignore[no-untyped-def]
         yield session
 
     postgres.get_session = mock_get_session
@@ -26,7 +26,7 @@ def _make_mock_postgres(session):
 
 
 @pytest.fixture
-def mock_session():
+def mock_session() -> AsyncMock:
     session = AsyncMock()
     result = MagicMock()
     result.scalar_one_or_none.return_value = None
@@ -37,46 +37,8 @@ def mock_session():
     return session
 
 
-class TestFindByEmail:
-    async def test_returns_user(self, mock_session):
-        user = MagicMock(email="test@example.com", user_id=TEST_USER_ID)
-        mock_session.execute.return_value.scalar_one_or_none.return_value = user
-
-        postgres = _make_mock_postgres(mock_session)
-        repo = UserRepository(postgres=postgres)
-        result = await repo.find_by_email("test@example.com")
-        assert result is not None
-        assert result.user_id == TEST_USER_ID
-
-    async def test_returns_none(self, mock_session):
-        postgres = _make_mock_postgres(mock_session)
-        repo = UserRepository(postgres=postgres)
-        result = await repo.find_by_email("unknown@example.com")
-        assert result is None
-
-
-class TestFindById:
-    async def test_returns_user(self, mock_session):
-        user = MagicMock()
-        user.user_id = TEST_USER_ID
-        user.name = "Test"
-        mock_session.execute.return_value.scalar_one_or_none.return_value = user
-
-        postgres = _make_mock_postgres(mock_session)
-        repo = UserRepository(postgres=postgres)
-        result = await repo.find_by_id(TEST_USER_ID)
-        assert result is not None
-        assert result.user_id == TEST_USER_ID
-
-    async def test_returns_none(self, mock_session):
-        postgres = _make_mock_postgres(mock_session)
-        repo = UserRepository(postgres=postgres)
-        result = await repo.find_by_id(uuid.UUID("00000000-0000-0000-0000-000000000099"))
-        assert result is None
-
-
 class TestGetPreferences:
-    async def test_returns_preferences(self, mock_session):
+    async def test_returns_preferences(self, mock_session: AsyncMock) -> None:
         prefs = MagicMock(risk_profile=RiskProfile.AGGRESSIVE)
         mock_session.execute.return_value.scalar_one_or_none.return_value = prefs
 
@@ -86,7 +48,7 @@ class TestGetPreferences:
         assert result is not None
         assert result.risk_profile == RiskProfile.AGGRESSIVE
 
-    async def test_returns_none(self, mock_session):
+    async def test_returns_none(self, mock_session: AsyncMock) -> None:
         postgres = _make_mock_postgres(mock_session)
         repo = UserRepository(postgres=postgres)
         result = await repo.get_preferences(TEST_USER_ID)
@@ -94,7 +56,7 @@ class TestGetPreferences:
 
 
 class TestPatchPreferences:
-    async def test_creates_new(self, mock_session):
+    async def test_creates_new(self, mock_session: AsyncMock) -> None:
         postgres = _make_mock_postgres(mock_session)
         repo = UserRepository(postgres=postgres)
         await repo.patch_preferences(
@@ -106,7 +68,7 @@ class TestPatchPreferences:
         )
         mock_session.add.assert_called_once()
 
-    async def test_updates_existing(self, mock_session):
+    async def test_updates_existing(self, mock_session: AsyncMock) -> None:
         existing = MagicMock()
         mock_session.get = AsyncMock(return_value=existing)
 
@@ -123,7 +85,7 @@ class TestPatchPreferences:
         assert existing.max_portfolio_risk == Decimal("0.10")
         mock_session.add.assert_not_called()
 
-    async def test_ignores_trading_enabled(self, mock_session):
+    async def test_ignores_trading_enabled(self, mock_session: AsyncMock) -> None:
         existing = MagicMock(trading_enabled=True)
         mock_session.get = AsyncMock(return_value=existing)
 
@@ -136,7 +98,7 @@ class TestPatchPreferences:
         # trading_enabled is not in allowed fields, so it should not change
         assert existing.trading_enabled is True
 
-    async def test_empty_updates_noop(self, mock_session):
+    async def test_empty_updates_noop(self, mock_session: AsyncMock) -> None:
         postgres = _make_mock_postgres(mock_session)
         repo = UserRepository(postgres=postgres)
         await repo.patch_preferences(user_id=TEST_USER_ID, updates={})
@@ -145,7 +107,7 @@ class TestPatchPreferences:
 
 
 class TestUpdateTradingEnabled:
-    async def test_updates_existing(self, mock_session):
+    async def test_updates_existing(self, mock_session: AsyncMock) -> None:
         existing = MagicMock(trading_enabled=False)
         mock_session.get = AsyncMock(return_value=existing)
 
@@ -154,7 +116,7 @@ class TestUpdateTradingEnabled:
         await repo.update_trading_enabled(TEST_USER_ID, True)
         assert existing.trading_enabled is True
 
-    async def test_creates_if_not_exists(self, mock_session):
+    async def test_creates_if_not_exists(self, mock_session: AsyncMock) -> None:
         postgres = _make_mock_postgres(mock_session)
         repo = UserRepository(postgres=postgres)
         await repo.update_trading_enabled(TEST_USER_ID, True)
@@ -162,7 +124,7 @@ class TestUpdateTradingEnabled:
 
 
 class TestGetTradingEnabled:
-    async def test_returns_true(self, mock_session):
+    async def test_returns_true(self, mock_session: AsyncMock) -> None:
         mock_session.execute.return_value.scalar_one_or_none.return_value = True
 
         postgres = _make_mock_postgres(mock_session)
@@ -170,7 +132,7 @@ class TestGetTradingEnabled:
         result = await repo.get_trading_enabled(TEST_USER_ID)
         assert result is True
 
-    async def test_returns_false_when_none(self, mock_session):
+    async def test_returns_false_when_none(self, mock_session: AsyncMock) -> None:
         postgres = _make_mock_postgres(mock_session)
         repo = UserRepository(postgres=postgres)
         result = await repo.get_trading_enabled(TEST_USER_ID)
@@ -178,7 +140,7 @@ class TestGetTradingEnabled:
 
 
 class TestGetBrokerConfig:
-    async def test_returns_configs(self, mock_session):
+    async def test_returns_configs(self, mock_session: AsyncMock) -> None:
         cfg1 = MagicMock(config_key="api_key")
         cfg2 = MagicMock(config_key="secret_key")
         mock_session.execute.return_value.scalars.return_value.all.return_value = [
@@ -191,7 +153,7 @@ class TestGetBrokerConfig:
         result = await repo.get_broker_config(TEST_USER_ID)
         assert len(result) == 2
 
-    async def test_returns_empty(self, mock_session):
+    async def test_returns_empty(self, mock_session: AsyncMock) -> None:
         postgres = _make_mock_postgres(mock_session)
         repo = UserRepository(postgres=postgres)
         result = await repo.get_broker_config(TEST_USER_ID)
@@ -199,14 +161,14 @@ class TestGetBrokerConfig:
 
 
 class TestUpsertBrokerConfig:
-    async def test_creates_new(self, mock_session):
+    async def test_creates_new(self, mock_session: AsyncMock) -> None:
         mock_session.get = AsyncMock(return_value=None)
         postgres = _make_mock_postgres(mock_session)
         repo = UserRepository(postgres=postgres)
         await repo.upsert_broker_config(TEST_USER_ID, "api_key", "encrypted_value")
         mock_session.add.assert_called_once()
 
-    async def test_updates_existing(self, mock_session):
+    async def test_updates_existing(self, mock_session: AsyncMock) -> None:
         existing = MagicMock(encrypted_value="old_value")
         mock_session.get = AsyncMock(return_value=existing)
 

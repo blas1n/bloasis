@@ -17,7 +17,6 @@ export interface AuthUser {
 interface AuthContextType {
   user: AuthUser | null;
   isLoading: boolean;
-  login: (email: string, password: string) => Promise<string | null>;
   logout: () => Promise<void>;
 }
 
@@ -37,7 +36,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const res = await fetch("/api/auth/me");
       if (res.ok) {
         const data = await res.json();
-        setUser({ userId: data.userId, name: data.name });
+        setUser({ userId: data.userId, name: data.name || "" });
       } else {
         setUser(null);
       }
@@ -47,30 +46,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setIsLoading(false);
     }
   }
-
-  const login = useCallback(
-    async (email: string, password: string): Promise<string | null> => {
-      try {
-        const res = await fetch("/api/auth/login", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email, password }),
-        });
-
-        if (!res.ok) {
-          const data = await res.json();
-          return data.error || "Login failed";
-        }
-
-        const data = await res.json();
-        setUser({ userId: data.userId, name: data.name });
-        return null; // success
-      } catch {
-        return "Network error";
-      }
-    },
-    []
-  );
 
   const logout = useCallback(async () => {
     try {
@@ -82,7 +57,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, isLoading, login, logout }}>
+    <AuthContext.Provider value={{ user, isLoading, logout }}>
       {isLoading ? null : children}
     </AuthContext.Provider>
   );

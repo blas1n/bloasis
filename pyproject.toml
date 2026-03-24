@@ -35,9 +35,9 @@ dependencies = [
     "python-dotenv>=1.0.0",
 
     # Auth
+    "bsvibe-auth @ git+https://github.com/blas1n/BSVibe-Auth.git#subdirectory=python",
     "pyjwt>=2.8.0",
     "cryptography>=41.0.0",
-    "bcrypt>=4.0.0",
 
     # Rate limiting
     "slowapi>=0.1.9",
@@ -66,6 +66,9 @@ dev = [
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["app", "shared"]
@@ -101,6 +104,7 @@ module = [
     "vectorbt.*",
     "riskfolio.*",
     "litellm.*",
+    "bsvibe_auth.*",
     "fredapi.*",
     "slowapi.*",
     "slowapi.errors.*",

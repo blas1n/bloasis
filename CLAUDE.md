@@ -32,7 +32,7 @@ app/                # FastAPI monolith
     classification.py # Sector/asset classification (LLM)
     market_data.py  # yfinance data + caching
     portfolio.py    # Position/trade management
-    user.py         # Auth, preferences, broker config
+    user.py         # Supabase Auth proxy, preferences, broker config
   core/             # Pure computation (no I/O)
     models.py       # Pydantic domain models
     risk_rules.py   # Deterministic risk evaluation
@@ -76,7 +76,7 @@ Full rules in `.claude/rules/` — these are the non-negotiable ones:
 - **Pure core/** — no I/O in `app/core/`, only computation and models
 - **Decimal** for all financial calculations (never float)
 - **Type hints** on all public functions
-- **JWT auth** on all endpoints except `/v1/auth/*` and `/health`
+- **Supabase Auth** — token verification via `bsvibe-auth` (HS256), all endpoints except `/v1/auth/*` and `/health`
 - **No sys.path.insert()** — use PYTHONPATH
 - **No hardcoded secrets** — use .env files (gitignored)
 - **Tests mandatory** — 80% minimum coverage, mock all external APIs

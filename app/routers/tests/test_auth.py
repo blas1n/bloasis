@@ -1,7 +1,8 @@
-"""Tests for auth router — /v1/auth/tokens."""
+"""Tests for auth router — /v1/auth/tokens (Supabase Auth proxy)."""
 
 import uuid
-from unittest.mock import AsyncMock
+from typing import Any
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -14,13 +15,13 @@ USER_UUID = uuid.UUID(USER_ID)
 
 
 @pytest.fixture
-def mock_user_svc():
+def mock_user_svc() -> AsyncMock:
     svc = AsyncMock()
     return svc
 
 
 @pytest.fixture
-def app(mock_user_svc):
+def app(mock_user_svc: AsyncMock) -> Any:
     application = create_app()
     application.dependency_overrides[get_user_service] = lambda: mock_user_svc
     application.dependency_overrides[get_current_user] = lambda: USER_UUID
@@ -29,12 +30,12 @@ def app(mock_user_svc):
 
 
 @pytest.fixture
-def client(app):
+def client(app: Any) -> TestClient:
     return TestClient(app, raise_server_exceptions=False)
 
 
 class TestLogin:
-    def test_login_success(self, client, mock_user_svc):
+    def test_login_success(self, client: TestClient, mock_user_svc: AsyncMock) -> None:
         mock_user_svc.login.return_value = {
             "accessToken": "access-tok",
             "refreshToken": "refresh-tok",
@@ -49,45 +50,80 @@ class TestLogin:
         assert data["userId"] == USER_ID
         mock_user_svc.login.assert_awaited_once_with("a@b.com", "pw")
 
-    def test_login_invalid_credentials(self, client, mock_user_svc):
+    def test_login_invalid_credentials(
+        self, client: TestClient, mock_user_svc: AsyncMock
+    ) -> None:
         mock_user_svc.login.return_value = None
         resp = client.post("/v1/auth/tokens", json={"email": "a@b.com", "password": "wrong"})
         assert resp.status_code == 401
         assert resp.json()["detail"] == "Invalid credentials"
 
-    def test_login_missing_fields(self, client):
+    def test_login_missing_fields(self, client: TestClient) -> None:
         resp = client.post("/v1/auth/tokens", json={})
         assert resp.status_code == 422
 
-    def test_login_missing_password(self, client):
+    def test_login_missing_password(self, client: TestClient) -> None:
         resp = client.post("/v1/auth/tokens", json={"email": "a@b.com"})
         assert resp.status_code == 422
 
 
-class TestMe:
-    def test_success(self, client, mock_user_svc):
-        mock_user_svc.get_user_info.return_value = {
+class TestSignup:
+    def test_signup_success(self, client: TestClient, mock_user_svc: AsyncMock) -> None:
+        mock_user_svc.signup.return_value = {
+            "accessToken": "access-tok",
+            "refreshToken": "refresh-tok",
             "userId": USER_ID,
-            "name": "Test User",
-            "email": "test@example.com",
+            "name": "",
         }
-        resp = client.get("/v1/auth/me")
+        resp = client.post(
+            "/v1/auth/tokens/signup", json={"email": "new@b.com", "password": "pw"}
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["accessToken"] == "access-tok"
+        mock_user_svc.signup.assert_awaited_once_with("new@b.com", "pw")
+
+    def test_signup_failure(self, client: TestClient, mock_user_svc: AsyncMock) -> None:
+        mock_user_svc.signup.return_value = None
+        resp = client.post(
+            "/v1/auth/tokens/signup", json={"email": "bad@b.com", "password": "pw"}
+        )
+        assert resp.status_code == 400
+        assert resp.json()["detail"] == "Signup failed"
+
+
+class TestMe:
+    @patch("app.routers.auth.pyjwt")
+    def test_success(
+        self, mock_jwt: MagicMock, client: TestClient, mock_user_svc: AsyncMock
+    ) -> None:
+        mock_jwt.decode.return_value = {
+            "sub": USER_ID,
+            "email": "test@example.com",
+            "user_metadata": {"name": "Test User"},
+        }
+        resp = client.get("/v1/auth/me", headers={"Authorization": "Bearer some-token"})
         assert resp.status_code == 200
         data = resp.json()
         assert data["userId"] == USER_ID
-        mock_user_svc.get_user_info.assert_awaited_once_with(USER_UUID)
+        assert data["name"] == "Test User"
+        assert data["email"] == "test@example.com"
 
 
 class TestRefresh:
-    def test_refresh_success(self, client, mock_user_svc):
-        mock_user_svc.refresh_token.return_value = {"accessToken": "new-access-tok"}
+    def test_refresh_success(self, client: TestClient, mock_user_svc: AsyncMock) -> None:
+        mock_user_svc.refresh_token.return_value = {
+            "accessToken": "new-access-tok",
+            "refreshToken": "new-refresh-tok",
+        }
         resp = client.post("/v1/auth/tokens/refresh", json={"refreshToken": "valid-refresh"})
         assert resp.status_code == 200
         data = resp.json()
         assert data["accessToken"] == "new-access-tok"
+        assert data["refreshToken"] == "new-refresh-tok"
         mock_user_svc.refresh_token.assert_awaited_once_with("valid-refresh")
 
-    def test_refresh_invalid_token(self, client, mock_user_svc):
+    def test_refresh_invalid_token(self, client: TestClient, mock_user_svc: AsyncMock) -> None:
         mock_user_svc.refresh_token.return_value = None
         resp = client.post("/v1/auth/tokens/refresh", json={"refreshToken": "invalid"})
         assert resp.status_code == 401
@@ -95,9 +131,19 @@ class TestRefresh:
 
 
 class TestLogout:
-    def test_logout_success(self, client, mock_user_svc):
+    def test_logout_success(self, client: TestClient, mock_user_svc: AsyncMock) -> None:
         mock_user_svc.logout.return_value = None
-        resp = client.request("DELETE", "/v1/auth/tokens", json={"refreshToken": "some-token"})
+        resp = client.request(
+            "DELETE",
+            "/v1/auth/tokens",
+            headers={"Authorization": "Bearer some-access-token"},
+        )
         assert resp.status_code == 200
         assert resp.json()["success"] is True
-        mock_user_svc.logout.assert_awaited_once_with("some-token")
+        mock_user_svc.logout.assert_awaited_once_with("some-access-token")
+
+    def test_logout_no_token(self, client: TestClient, mock_user_svc: AsyncMock) -> None:
+        resp = client.request("DELETE", "/v1/auth/tokens")
+        assert resp.status_code == 200
+        assert resp.json()["success"] is True
+        mock_user_svc.logout.assert_not_awaited()

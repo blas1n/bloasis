@@ -1,7 +1,7 @@
 """SQLAlchemy ORM models for BLOASIS.
 
 Maps to existing PostgreSQL schemas:
-- user_data: users, user_preferences, broker_config
+- user_data: user_preferences, broker_config
 - trading: portfolios, positions, trades
 """
 
@@ -30,22 +30,6 @@ class Base(DeclarativeBase):
 
 
 # --- user_data schema ---
-
-
-class UserRecord(Base):
-    __tablename__ = "users"
-    __table_args__ = {"schema": "user_data"}
-
-    user_id: Mapped[uuid_mod.UUID] = mapped_column(Uuid, primary_key=True, default=uuid_mod.uuid4)
-    email: Mapped[str] = mapped_column(String, unique=True, nullable=False)
-    password_hash: Mapped[str] = mapped_column(String, nullable=False)
-    name: Mapped[str | None] = mapped_column(String)
-    created_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
-    updated_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
-    )
 
 
 class UserPreferenceRecord(Base):

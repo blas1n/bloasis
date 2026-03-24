@@ -7,22 +7,12 @@ from sqlalchemy import select
 
 from shared.utils.postgres_client import PostgresClient
 
-from .models import BrokerConfigRecord, UserPreferenceRecord, UserRecord
+from .models import BrokerConfigRecord, UserPreferenceRecord
 
 
 class UserRepository:
     def __init__(self, postgres: PostgresClient) -> None:
         self.postgres = postgres
-
-    async def find_by_email(self, email: str) -> UserRecord | None:
-        async with self.postgres.get_session() as session:
-            result = await session.execute(select(UserRecord).where(UserRecord.email == email))
-            return result.scalar_one_or_none()
-
-    async def find_by_id(self, user_id: uuid_mod.UUID) -> UserRecord | None:
-        async with self.postgres.get_session() as session:
-            result = await session.execute(select(UserRecord).where(UserRecord.user_id == user_id))
-            return result.scalar_one_or_none()
 
     # --- Preferences ---
 
