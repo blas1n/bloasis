@@ -1,10 +1,9 @@
 """Tests for FastAPI dependency injection — auth and user access."""
 
 import uuid
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
-from bsvibe_auth import AuthError, BSVibeUser
 from fastapi import HTTPException
 
 from app.dependencies import get_current_user, verify_user_access
@@ -14,23 +13,24 @@ USER_UUID = uuid.UUID(USER_ID)
 OTHER_UUID = uuid.UUID("00000000-0000-0000-0000-000000000002")
 
 
-def _make_bsvibe_user(user_id: str = USER_ID) -> BSVibeUser:
-    return BSVibeUser(id=user_id, email="test@example.com")
-
-
 class TestGetCurrentUser:
     async def test_valid_bearer_token(self) -> None:
         request = MagicMock()
         request.headers.get.return_value = "Bearer valid-token"
 
-        mock_provider = MagicMock()
-        mock_provider.verify_token = AsyncMock(return_value=_make_bsvibe_user())
-        request.app.state.auth_provider = mock_provider
+        mock_jwks = MagicMock()
+        mock_key = MagicMock()
+        mock_jwks.get_signing_key_from_jwt.return_value = mock_key
+        request.app.state.jwks_client = mock_jwks
 
-        result = await get_current_user(request)
+        with patch("app.dependencies.jwt") as mock_jwt:
+            mock_jwt.decode.return_value = {"sub": USER_ID, "aud": "authenticated"}
+            mock_jwt.ExpiredSignatureError = Exception
+            mock_jwt.InvalidTokenError = Exception
+            result = await get_current_user(request)
 
         assert result == USER_UUID
-        mock_provider.verify_token.assert_awaited_once_with("valid-token")
+        mock_jwks.get_signing_key_from_jwt.assert_called_once_with("valid-token")
 
     async def test_missing_auth_header(self) -> None:
         request = MagicMock()
@@ -49,13 +49,35 @@ class TestGetCurrentUser:
             await get_current_user(request)
         assert exc_info.value.status_code == 401
 
+    async def test_expired_token(self) -> None:
+        import jwt as real_jwt
+
+        request = MagicMock()
+        request.headers.get.return_value = "Bearer expired-token"
+
+        mock_jwks = MagicMock()
+        mock_jwks.get_signing_key_from_jwt.return_value = MagicMock()
+        request.app.state.jwks_client = mock_jwks
+
+        with patch("app.dependencies.jwt") as mock_jwt:
+            mock_jwt.ExpiredSignatureError = real_jwt.ExpiredSignatureError
+            mock_jwt.InvalidTokenError = real_jwt.InvalidTokenError
+            mock_jwt.decode.side_effect = real_jwt.ExpiredSignatureError()
+            with pytest.raises(HTTPException) as exc_info:
+                await get_current_user(request)
+
+        assert exc_info.value.status_code == 401
+        assert "expired" in exc_info.value.detail.lower()
+
     async def test_invalid_token(self) -> None:
+        import jwt as real_jwt
+
         request = MagicMock()
         request.headers.get.return_value = "Bearer invalid-token"
 
-        mock_provider = MagicMock()
-        mock_provider.verify_token = AsyncMock(side_effect=AuthError("Invalid token"))
-        request.app.state.auth_provider = mock_provider
+        mock_jwks = MagicMock()
+        mock_jwks.get_signing_key_from_jwt.side_effect = real_jwt.InvalidTokenError()
+        request.app.state.jwks_client = mock_jwks
 
         with pytest.raises(HTTPException) as exc_info:
             await get_current_user(request)
@@ -67,14 +89,17 @@ class TestGetCurrentUser:
         request = MagicMock()
         request.headers.get.return_value = "Bearer valid-token"
 
-        mock_provider = MagicMock()
-        mock_provider.verify_token = AsyncMock(return_value=_make_bsvibe_user("not-a-uuid"))
-        request.app.state.auth_provider = mock_provider
+        mock_jwks = MagicMock()
+        mock_jwks.get_signing_key_from_jwt.return_value = MagicMock()
+        request.app.state.jwks_client = mock_jwks
 
-        with pytest.raises(HTTPException) as exc_info:
-            await get_current_user(request)
+        with patch("app.dependencies.jwt") as mock_jwt:
+            mock_jwt.decode.return_value = {"sub": "not-a-uuid"}
+            mock_jwt.ExpiredSignatureError = Exception
+            mock_jwt.InvalidTokenError = Exception
+            with pytest.raises(HTTPException) as exc_info:
+                await get_current_user(request)
         assert exc_info.value.status_code == 401
-        assert "Invalid or expired token" in exc_info.value.detail
 
 
 class TestVerifyUserAccess:
