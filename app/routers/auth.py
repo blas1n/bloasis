@@ -1,12 +1,14 @@
 """Auth router — /v1/auth/tokens (Supabase Auth proxy)"""
 
+import uuid
 from typing import Any
 
+import jwt as pyjwt
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from ..core.responses import RefreshTokenResponse, SuccessResponse, TokenResponse, UserInfoResponse
-from ..dependencies import get_user_service
+from ..dependencies import get_current_user, get_user_service
 from ..rate_limit import limiter
 from ..services.user import UserService
 
@@ -58,18 +60,16 @@ async def signup(
 @router.get("/me", response_model=UserInfoResponse)
 async def me(
     request: Request,
-    user_svc: UserService = Depends(get_user_service),
+    user_id: uuid.UUID = Depends(get_current_user),
 ) -> dict[str, Any]:
-    """Get current user info from Supabase Auth."""
+    """Get current user info from JWT claims."""
     auth_header = request.headers.get("Authorization", "")
-    if not auth_header.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing authorization token")
-
     token = auth_header.removeprefix("Bearer ")
-    info = await user_svc.get_user_info(token)
-    if not info:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
-    return info
+    payload = pyjwt.decode(token, options={"verify_signature": False})
+    user_metadata = payload.get("user_metadata", {})
+    email = payload.get("email", "")
+    name = user_metadata.get("name", email.split("@")[0] if email else "")
+    return {"userId": str(user_id), "name": name, "email": email}
 
 
 @router.post("/tokens/refresh", response_model=RefreshTokenResponse)

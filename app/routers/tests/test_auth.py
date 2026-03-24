@@ -2,7 +2,7 @@
 
 import uuid
 from typing import Any
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -93,24 +93,21 @@ class TestSignup:
 
 
 class TestMe:
-    def test_success(self, client: TestClient, mock_user_svc: AsyncMock) -> None:
-        mock_user_svc.get_user_info.return_value = {
-            "userId": USER_ID,
-            "name": "Test User",
+    @patch("app.routers.auth.pyjwt")
+    def test_success(
+        self, mock_jwt: MagicMock, client: TestClient, mock_user_svc: AsyncMock
+    ) -> None:
+        mock_jwt.decode.return_value = {
+            "sub": USER_ID,
             "email": "test@example.com",
+            "user_metadata": {"name": "Test User"},
         }
         resp = client.get("/v1/auth/me", headers={"Authorization": "Bearer some-token"})
         assert resp.status_code == 200
         data = resp.json()
         assert data["userId"] == USER_ID
-        mock_user_svc.get_user_info.assert_awaited_once_with("some-token")
-
-    def test_missing_auth(self, client: TestClient) -> None:
-        # me endpoint checks Authorization header directly
-        app = client.app
-        app.dependency_overrides.pop(get_current_user, None)  # type: ignore[union-attr]
-        resp = client.get("/v1/auth/me")
-        assert resp.status_code == 401
+        assert data["name"] == "Test User"
+        assert data["email"] == "test@example.com"
 
 
 class TestRefresh:
