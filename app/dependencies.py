@@ -9,7 +9,7 @@ from __future__ import annotations
 import uuid
 from typing import TYPE_CHECKING
 
-import jwt
+from bsvibe_auth import AuthError
 from fastapi import Depends, HTTPException, Request
 
 from shared.ai_clients.llm_client import LLMClient
@@ -90,21 +90,10 @@ async def get_current_user(request: Request) -> uuid.UUID:
 
     token = auth_header.removeprefix("Bearer ")
     try:
-        jwks_client = request.app.state.jwks_client
-        signing_key = jwks_client.get_signing_key_from_jwt(token)
-        payload = jwt.decode(
-            token,
-            signing_key.key,
-            algorithms=["ES256"],
-            audience="authenticated",
-        )
-        sub: str | None = payload.get("sub")
-        if not sub:
-            raise HTTPException(status_code=401, detail="Invalid token: missing sub")
-        return uuid.UUID(sub)
-    except jwt.ExpiredSignatureError:
-        raise HTTPException(status_code=401, detail="Token expired")
-    except (jwt.InvalidTokenError, ValueError, KeyError):
+        provider = request.app.state.auth_provider
+        user = await provider.verify_token(token)
+        return uuid.UUID(user.id)
+    except (AuthError, ValueError):
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
 

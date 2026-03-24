@@ -426,7 +426,7 @@ provides-extras = ["dev"]
 [[package]]
 name = "bsvibe-auth"
 version = "0.1.0"
-source = { git = "https://github.com/blas1n/BSVibe-Auth.git?subdirectory=python#54df5b5ad2a44cc6fc9a908899901ba80396c4b8" }
+source = { git = "https://github.com/blas1n/BSVibe-Auth.git?subdirectory=python#cc9e3be3e5e771558687472ffd3bb152474124a3" }
 dependencies = [
     { name = "httpx" },
     { name = "pydantic" },

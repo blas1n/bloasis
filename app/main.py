@@ -39,11 +39,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         api_base=settings.llm_api_base,
     )
 
-    # Initialize JWKS client for ES256 token verification
-    from jwt import PyJWKClient
+    # Initialize auth provider (JWKS + ES256)
+    from bsvibe_auth import SupabaseAuthProvider
 
-    jwks_client = PyJWKClient(
-        f"{settings.supabase_url}/auth/v1/.well-known/jwks.json"
+    auth_provider = SupabaseAuthProvider(
+        jwt_secret=settings.supabase_jwt_secret,
+        supabase_url=settings.supabase_url or None,
+        service_role_key=settings.supabase_service_role_key or None,
+        algorithms=["ES256"],
     )
 
     await redis.connect()
@@ -60,7 +63,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.redis = redis
     app.state.postgres = postgres
     app.state.llm = llm
-    app.state.jwks_client = jwks_client
+    app.state.auth_provider = auth_provider
     app.state.broker_enabled = broker_enabled
 
     # Start background scheduler if enabled
