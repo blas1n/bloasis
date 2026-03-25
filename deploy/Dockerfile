@@ -15,7 +15,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && make install \
     && cd .. \
     && rm -rf ta-lib \
-    && apt-get purge -y build-essential git autoconf automake libtool \
+    && apt-get purge -y build-essential autoconf automake libtool \
     && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/*
 

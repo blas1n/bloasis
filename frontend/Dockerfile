@@ -16,7 +16,9 @@ FROM python:3.11-slim AS schema-gen
 
 WORKDIR /app
 
-RUN pip install --no-cache-dir uv
+RUN apt-get update && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/* \
+    && pip install --no-cache-dir uv
 
 COPY pyproject.toml uv.lock* ./
 RUN uv sync --no-dev --frozen
