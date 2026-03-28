@@ -6,11 +6,11 @@ Preferences and broker config remain local (PostgreSQL).
 
 from __future__ import annotations
 
-import logging
 import uuid
 from typing import TYPE_CHECKING, Any
 
 import httpx
+import structlog
 
 from shared.utils.redis_client import RedisClient
 
@@ -22,7 +22,7 @@ from ..config import settings
 from ..core.models import RiskProfile, UserPreferences
 from ..repositories.user_repository import UserRepository
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 class UserService:

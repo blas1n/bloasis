@@ -5,10 +5,10 @@ Uses core/regime_classifier.py for pure parsing logic.
 """
 
 import asyncio
-import logging
 from datetime import UTC, datetime
 from typing import Any
 
+import structlog
 from pydantic import ValidationError
 
 from shared.ai_clients.llm_client import LLMClient
@@ -21,7 +21,7 @@ from ..core.prompts.regime import REGIME_SYSTEM_PROMPT, format_regime_prompt
 from ..core.regime_classifier import calculate_risk_level, parse_regime_response
 from .macro import MacroService
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 CACHE_KEY = "market:regime:current"
 
@@ -66,7 +66,7 @@ class MarketRegimeService:
         try:
             await self.redis.setex(CACHE_KEY, ttl, regime.model_dump())
         except Exception:
-            logger.warning("Failed to cache regime result", exc_info=True)
+            logger.warning("regime_cache_write_failed", exc_info=True)
 
         return regime
 
@@ -106,14 +106,15 @@ class MarketRegimeService:
 
         except (RuntimeError, ValueError, ValidationError, KeyError, ConnectionError, OSError) as e:
             logger.error(
-                "Regime classification failed (expected)",
-                extra={"error": str(e), "error_type": type(e).__name__},
+                "regime_classification_failed",
+                error=str(e),
+                error_type=type(e).__name__,
             )
             return self._fallback_regime()
         except Exception as e:
             logger.error(
-                "Regime classification failed (unexpected: %s)",
-                type(e).__name__,
+                "regime_classification_failed_unexpected",
+                error_type=type(e).__name__,
                 exc_info=True,
             )
             return self._fallback_regime()
@@ -145,7 +146,7 @@ class MarketRegimeService:
                 data["sp500_1m_change"] = round(float(change), 2)
                 data["sp500_trend"] = "up" if change > 0 else "down"
         except Exception as e:
-            logger.warning("Market data fetch failed", extra={"error": str(e)})
+            logger.warning("market_data_fetch_failed", error=str(e))
 
         return data
 
@@ -187,7 +188,7 @@ class MarketRegimeService:
                     yield_2y_proxy = float(irx_hist["Close"].iloc[-1])
                     return round(yield_10y - yield_2y_proxy, 2)
         except Exception as e:
-            logger.warning("Yield spread fetch failed", extra={"error": str(e)})
+            logger.warning("yield_spread_fetch_failed", error=str(e))
 
         return 0.5
 

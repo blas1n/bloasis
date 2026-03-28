@@ -7,16 +7,16 @@ Pure computation module -- no I/O, no service clients.
 Receives OHLCV data directly as dict[str, list[dict]].
 """
 
-import logging
 from decimal import Decimal
 from typing import Any
 
 import numpy as np
 import pandas as pd
+import structlog
 
 from .models import RiskProfile
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 # Lazy import: riskfolio-lib is a heavy optional dependency.
 rp: Any = None
@@ -81,7 +81,7 @@ class PortfolioOptimizer:
             )
 
             if weights is None or weights.empty:
-                logger.warning("Optimization returned empty weights, using equal-weight")
+                logger.warning("optimization_empty_weights", fallback="equal_weight")
                 return self._equal_weight(symbols)
 
             # Apply risk profile scaling
@@ -100,15 +100,11 @@ class PortfolioOptimizer:
                 else:
                     result[sym] = Decimal("0")
 
-            logger.info(
-                "Optimized weights for %d symbols (profile=%s)",
-                len(result),
-                risk_profile,
-            )
+            logger.info("weights_optimized", symbol_count=len(result), risk_profile=risk_profile)
             return result
 
         except (ValueError, RuntimeError) as e:
-            logger.warning("Portfolio optimization failed, using equal-weight: %s", e)
+            logger.warning("portfolio_optimization_failed", error=str(e), fallback="equal_weight")
             return self._equal_weight(symbols)
 
     def _build_returns(

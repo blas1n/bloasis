@@ -9,12 +9,12 @@ API key can be passed explicitly via api_key parameter or read from env by litel
 """
 
 import json
-import logging
 from typing import Any
 
 import litellm
+import structlog
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 # Suppress noisy litellm debug logs
 litellm.suppress_debug_info = True
@@ -73,7 +73,7 @@ class LLMClient:
         max_tokens = max_tokens or self.max_tokens
         system = system_prompt or "You are a financial analysis expert."
 
-        logger.info(f"Calling LLM: model={model}, prompt_length={len(prompt)}")
+        logger.info("llm_call", model=model, prompt_length=len(prompt))
 
         messages: list[dict[str, str]] = [
             {"role": "system", "content": system},
@@ -99,7 +99,7 @@ class LLMClient:
             if content is None:
                 raise ValueError("No text content in response")
 
-            logger.info("LLM call successful")
+            logger.info("llm_call_successful")
 
             if response_format == "json":
                 return self._parse_json(content)
@@ -107,7 +107,7 @@ class LLMClient:
             return content
 
         except Exception as e:
-            logger.error(f"LLM API error: {e}")
+            logger.error("llm_api_error", error=str(e))
             raise
 
     @staticmethod

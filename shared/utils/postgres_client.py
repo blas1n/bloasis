@@ -4,12 +4,12 @@ PostgreSQL client utility for BLOASIS services.
 Provides async PostgreSQL operations using SQLAlchemy with asyncpg dialect.
 """
 
-import logging
 import os
 from collections.abc import AsyncGenerator, Sequence
 from contextlib import asynccontextmanager
 from typing import Any
 
+import structlog
 from sqlalchemy import text
 from sqlalchemy.engine import Result
 from sqlalchemy.exc import SQLAlchemyError
@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 class PostgresClient:
@@ -98,17 +98,11 @@ class PostgresClient:
 
             # Extract host info for logging (without credentials)
             host_info = self._extract_host_info()
-            logger.info(
-                "Connected to PostgreSQL",
-                extra={"host": host_info},
-            )
+            logger.info("connected_to_postgresql", host=host_info)
 
         except (SQLAlchemyError, OSError) as e:
             host_info = self._extract_host_info()
-            logger.error(
-                "PostgreSQL connection failed",
-                extra={"host": host_info, "error": str(e)},
-            )
+            logger.error("postgresql_connection_failed", host=host_info, error=str(e))
             raise ConnectionError(f"Failed to connect to PostgreSQL at {host_info}: {e}") from e
 
     async def close(self) -> None:
@@ -122,10 +116,7 @@ class PostgresClient:
             host_info = self._extract_host_info()
             self.engine = None
             self.session_maker = None
-            logger.info(
-                "Disconnected from PostgreSQL",
-                extra={"host": host_info},
-            )
+            logger.info("disconnected_from_postgresql", host=host_info)
 
     @asynccontextmanager
     async def get_session(self) -> AsyncGenerator[AsyncSession, None]:
@@ -190,16 +181,10 @@ class PostgresClient:
                 result: Result[Any] = await session.execute(stmt)
                 rows = result.fetchall()
                 await session.commit()
-                logger.debug(
-                    "Query executed",
-                    extra={"query_length": len(query), "row_count": len(rows)},
-                )
+                logger.debug("query_executed", query_length=len(query), row_count=len(rows))
                 return rows
         except SQLAlchemyError as e:
-            logger.error(
-                "Query execution failed",
-                extra={"error": str(e)},
-            )
+            logger.error("query_execution_failed", error=str(e))
             raise RuntimeError(f"Failed to execute query: {e}") from e
 
     def _extract_host_info(self) -> str:

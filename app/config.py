@@ -5,13 +5,13 @@ Replaces 10 separate service config files.
 """
 
 import base64
-import logging
 from decimal import Decimal
 
+import structlog
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 class Settings(BaseSettings):

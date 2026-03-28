@@ -8,11 +8,11 @@ Key simplifications:
 """
 
 import json
-import logging
 from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
+import structlog
 from pydantic import ValidationError
 
 from shared.utils.redis_client import RedisClient
@@ -28,7 +28,7 @@ from ..core.backtesting.models import (
 from ..core.backtesting.vectorbt_engine import VectorBTEngine
 from .market_data import MarketDataService
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 # Cache TTL for backtest results (1 hour)
 _RESULT_CACHE_TTL = 3600
@@ -88,12 +88,7 @@ class BacktestingService:
                 initial_cash=settings.backtest_default_cash,
             )
 
-        logger.info(
-            "RunBacktest: symbols=%s, strategy=%s, period=%s",
-            symbols,
-            strategy_type,
-            period,
-        )
+        logger.info("backtest_start", symbols=symbols, strategy=strategy_type, period=period)
 
         results: list[SymbolResult] = []
         for symbol in symbols:
@@ -113,7 +108,7 @@ class BacktestingService:
                     )
                 results.append(result)
             except (ValueError, RuntimeError, TypeError) as e:
-                logger.error("Backtest failed for %s: %s", symbol, e)
+                logger.error("backtest_failed", symbol=symbol, error=str(e))
                 continue
 
         portfolio_metrics = self.metrics.calculate_portfolio_metrics(results)
@@ -133,10 +128,10 @@ class BacktestingService:
         await self._cache_result(user_id, backtest_id, response)
 
         logger.info(
-            "RunBacktest completed: backtest_id=%s, results=%d, avg_sharpe=%.2f",
-            backtest_id,
-            len(results),
-            portfolio_metrics.sharpe_ratio,
+            "backtest_completed",
+            backtest_id=backtest_id,
+            result_count=len(results),
+            avg_sharpe=portfolio_metrics.sharpe_ratio,
         )
 
         return response
@@ -162,7 +157,9 @@ class BacktestingService:
             data = json.loads(cached) if isinstance(cached, str) else cached
             return BacktestResult.model_validate(data)
         except (json.JSONDecodeError, ValidationError, TypeError) as e:
-            logger.warning("Failed to deserialize cached backtest %s: %s", backtest_id, e)
+            logger.warning(
+                "backtest_cache_deserialize_failed", backtest_id=backtest_id, error=str(e)
+            )
             return None
 
     async def compare_strategies(
@@ -211,9 +208,9 @@ class BacktestingService:
         best_strategy_id = comparisons[0].backtest_id
 
         logger.info(
-            "CompareStrategies completed: %d strategies compared, best=%s",
-            len(comparisons),
-            best_strategy_id,
+            "strategies_compared",
+            strategy_count=len(comparisons),
+            best_strategy_id=best_strategy_id,
         )
 
         return {
@@ -232,4 +229,4 @@ class BacktestingService:
         try:
             await self.redis.setex(cache_key, _RESULT_CACHE_TTL, result.model_dump_json())
         except (OSError, TypeError) as e:
-            logger.warning("Failed to cache backtest %s: %s", backtest_id, e)
+            logger.warning("backtest_cache_write_failed", backtest_id=backtest_id, error=str(e))

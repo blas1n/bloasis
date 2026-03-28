@@ -3,8 +3,9 @@
 Resolves per-user broker credentials from DB, falls back to global env settings.
 """
 
-import logging
 import uuid
+
+import structlog
 
 from ...config import settings
 from ...core.broker import BrokerAdapter
@@ -13,7 +14,7 @@ from ...shared.utils.broker import decrypt_broker_credentials
 from .alpaca import AlpacaAdapter
 from .mock import MockBrokerAdapter
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 async def create_broker_adapter(
@@ -38,8 +39,7 @@ async def create_broker_adapter(
 
     if not api_key or not secret_key:
         logger.warning(
-            "No broker credentials found, falling back to global env",
-            extra={"user_id": str(user_id), "broker_type": broker_type},
+            "broker_credentials_not_found", user_id=str(user_id), broker_type=broker_type
         )
         api_key = settings.alpaca_api_key
         secret_key = settings.alpaca_secret_key

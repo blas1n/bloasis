@@ -4,16 +4,16 @@ Consolidates all Alpaca-specific code from executor.py, portfolio.py, and user.p
 into a single adapter behind the BrokerAdapter interface.
 """
 
-import logging
 from decimal import Decimal
 
 import httpx
+import structlog
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from ...core.broker import BrokerAdapter
 from ...core.models import BrokerAccountInfo, BrokerPosition, OrderResult, OrderSide, OrderStatus
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 # Alpaca API status → OrderStatus mapping
 _ALPACA_STATUS_MAP: dict[str, str] = {
@@ -118,8 +118,7 @@ class AlpacaAdapter(BrokerAdapter):
 
         if resp.status_code not in (200, 201):
             logger.error(
-                "Alpaca order failed",
-                extra={"status": resp.status_code, "body": resp.text[:200]},
+                "alpaca_order_failed", status=resp.status_code, body=resp.text[:200]
             )
             return OrderResult(
                 order_id="",
@@ -177,20 +176,18 @@ class AlpacaAdapter(BrokerAdapter):
             # 404 or 422 means order already filled/cancelled — still considered success
             if resp.status_code in (404, 422):
                 logger.warning(
-                    "Order already resolved when attempting cancel",
-                    extra={"broker_order_id": broker_order_id, "status": resp.status_code},
+                    "order_already_resolved",
+                    broker_order_id=broker_order_id,
+                    status=resp.status_code,
                 )
                 return True
             logger.error(
-                "Failed to cancel Alpaca order",
-                extra={"broker_order_id": broker_order_id, "status": resp.status_code},
+                "alpaca_cancel_failed", broker_order_id=broker_order_id, status=resp.status_code
             )
             return False
         except httpx.HTTPError:
             logger.error(
-                "HTTP error cancelling Alpaca order",
-                extra={"broker_order_id": broker_order_id},
-                exc_info=True,
+                "alpaca_cancel_http_error", broker_order_id=broker_order_id, exc_info=True
             )
             return False
 

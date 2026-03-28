@@ -5,11 +5,12 @@ Replaces 5x duplicated cache patterns across services with a single decorator.
 
 import asyncio
 import functools
-import logging
 from collections.abc import Callable
 from typing import Any
 
-logger = logging.getLogger(__name__)
+import structlog
+
+logger = structlog.get_logger(__name__)
 
 _LOCK_TTL = 30  # seconds — max time to hold a computation lock
 
@@ -52,7 +53,7 @@ def cache_aside(
                 if cached is not None:
                     return cached
             except OSError as e:
-                logger.warning("Cache read error for %s: %s", cache_key, e)
+                logger.warning("cache_read_error", cache_key=cache_key, error=str(e))
 
             # Acquire lock to prevent stampede on concurrent cache misses
             lock_key = f"{cache_key}:lock"
@@ -82,7 +83,7 @@ def cache_aside(
                     try:
                         await redis.setex(cache_key, ttl, result)
                     except OSError as e:
-                        logger.warning("Cache write error for %s: %s", cache_key, e)
+                        logger.warning("cache_write_error", cache_key=cache_key, error=str(e))
 
                 return result
             finally:

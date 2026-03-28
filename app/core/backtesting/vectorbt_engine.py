@@ -8,11 +8,11 @@ Pure computation module -- receives OHLCV data directly as list[dict].
 No I/O, no service clients.
 """
 
-import logging
 from typing import Any
 
 import numpy as np
 import pandas as pd
+import structlog
 
 from .models import BacktestConfig, SymbolResult
 
@@ -31,7 +31,7 @@ def _get_vbt() -> Any:
     return vbt
 
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 class VectorBTEngine:
@@ -76,11 +76,11 @@ class VectorBTEngine:
         Returns:
             SymbolResult with backtest metrics.
         """
-        logger.info("Running MA Crossover backtest for %s", symbol)
+        logger.info("ma_crossover_backtest_start", symbol=symbol)
 
         df = self._to_dataframe(ohlcv)
         if df.empty:
-            logger.warning("No data available for %s", symbol)
+            logger.warning("no_data_available", symbol=symbol)
             return self._create_empty_result(symbol)
 
         close = df["close"]
@@ -123,11 +123,11 @@ class VectorBTEngine:
         Returns:
             SymbolResult with backtest metrics.
         """
-        logger.info("Running RSI backtest for %s", symbol)
+        logger.info("rsi_backtest_start", symbol=symbol)
 
         df = self._to_dataframe(ohlcv)
         if df.empty:
-            logger.warning("No data available for %s", symbol)
+            logger.warning("no_data_available", symbol=symbol)
             return self._create_empty_result(symbol)
 
         close = df["close"]
