@@ -247,7 +247,7 @@ class StrategyService:
             if isinstance(result, list):
                 return result
             result_type = type(result).__name__
-            logger.warning("ai_analysis_returned_non_list", type=result_type)
+            logger.warning("ai_analysis_returned_non_list", result_type=result_type)
             return []
         except (RuntimeError, json.JSONDecodeError, ValueError) as e:
             logger.error("ai_analysis_failed", error=str(e))
