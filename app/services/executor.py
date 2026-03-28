@@ -11,10 +11,11 @@ Compensation:
   Step 4 failure → cancel broker order → mark "compensation_needed"
 """
 
-import logging
 import uuid
 from decimal import Decimal
 from typing import Any
+
+import structlog
 
 from shared.utils.redis_client import RedisClient
 
@@ -34,7 +35,7 @@ from ..repositories.user_repository import UserRepository
 from .market_data import MarketDataService
 from .portfolio import PortfolioService
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 class ExecutorService:
@@ -169,7 +170,7 @@ class ExecutorService:
             await self.order_repo.update_status(
                 order_record.id, OrderStatus.FAILED, error_message="Broker submission failed"
             )
-            logger.error("Broker submission failed for order %s", client_order_id, exc_info=True)
+            logger.error("broker_submission_failed", client_order_id=client_order_id, exc_info=True)
             return OrderResult(
                 order_id="",
                 symbol=symbol,
@@ -205,7 +206,8 @@ class ExecutorService:
             except Exception:
                 # Saga compensation: cancel broker order + mark compensation_needed
                 logger.error(
-                    "Trade recording failed, attempting broker cancellation",
+                    "trade_recording_failed",
+                    action="attempting_broker_cancellation",
                     exc_info=True,
                 )
                 cancelled = await self.broker.cancel_order(result.order_id)

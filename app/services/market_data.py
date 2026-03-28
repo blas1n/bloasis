@@ -4,11 +4,11 @@ Replaces: services/market-data/ (377 lines gRPC → ~120 lines direct)
 """
 
 import asyncio
-import logging
 import re
 from decimal import Decimal
 from typing import Any
 
+import structlog
 import yfinance as yf
 
 from shared.utils.postgres_client import PostgresClient
@@ -17,7 +17,7 @@ from shared.utils.redis_client import RedisClient
 from ..config import settings
 from ..shared.utils.cache import cache_aside
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 _SYMBOL_RE = re.compile(r"^[A-Z\^][A-Z0-9.\-]{0,9}$")
 
@@ -106,7 +106,7 @@ class MarketDataService:
             await self.redis.setex("market:vix", 300, str(vix))
             return vix
         except (TimeoutError, ValueError) as e:
-            logger.warning(f"Failed to get VIX: {e}")
+            logger.warning("vix_fetch_failed", error=str(e))
 
         return 20.0  # Default
 
@@ -131,7 +131,7 @@ class MarketDataService:
                 await self.redis.setex(cache_key, settings.cache_ohlcv_ttl, str(result))
                 return result
         except (TimeoutError, ValueError, KeyError) as e:
-            logger.warning(f"Failed to get previous close for {symbol}: {e}")
+            logger.warning("previous_close_fetch_failed", symbol=symbol, error=str(e))
 
         return Decimal("0")
 

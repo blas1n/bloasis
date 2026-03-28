@@ -5,13 +5,14 @@ Falls back to conservative defaults when FRED API key is not configured.
 """
 
 import asyncio
-import logging
+
+import structlog
 
 from shared.utils.redis_client import RedisClient
 
 from ..config import settings
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 CACHE_KEY = "macro:indicators"
 
@@ -57,13 +58,13 @@ class MacroService:
     async def _fetch_from_fred(self) -> dict[str, float]:
         """Fetch indicators from FRED API. Returns defaults on failure."""
         if not settings.fred_api_key:
-            logger.info("FRED API key not configured, using defaults")
+            logger.info("fred_api_key_not_configured", fallback="defaults")
             return dict(DEFAULTS)
 
         try:
             return await asyncio.to_thread(self._sync_fetch)
         except Exception as e:
-            logger.warning("FRED API call failed, using defaults", extra={"error": str(e)})
+            logger.warning("fred_api_call_failed", error=str(e), fallback="defaults")
             return dict(DEFAULTS)
 
     def _sync_fetch(self) -> dict[str, float]:
@@ -79,7 +80,7 @@ class MacroService:
             if not series.empty:
                 result["fed_funds_rate"] = float(series.iloc[-1])
         except (ValueError, KeyError) as e:
-            logger.warning("Failed to fetch fed_funds_rate", extra={"error": str(e)})
+            logger.warning("fred_fetch_failed", series="fed_funds_rate", error=str(e))
 
         # Unemployment Rate
         try:
@@ -87,7 +88,7 @@ class MacroService:
             if not series.empty:
                 result["unemployment_rate"] = float(series.iloc[-1])
         except (ValueError, KeyError) as e:
-            logger.warning("Failed to fetch unemployment_rate", extra={"error": str(e)})
+            logger.warning("fred_fetch_failed", series="unemployment_rate", error=str(e))
 
         # CPI Year-over-Year (calculate from 12-month change)
         try:
@@ -98,7 +99,7 @@ class MacroService:
                 if year_ago > 0:
                     result["cpi_yoy"] = round((current - year_ago) / year_ago * 100, 1)
         except (ValueError, KeyError) as e:
-            logger.warning("Failed to fetch cpi_yoy", extra={"error": str(e)})
+            logger.warning("fred_fetch_failed", series="cpi_yoy", error=str(e))
 
         # Credit Spread (High Yield - Investment Grade)
         try:
@@ -106,6 +107,6 @@ class MacroService:
             if not series.empty:
                 result["credit_spread"] = round(float(series.iloc[-1]) * 100, 0)
         except (ValueError, KeyError) as e:
-            logger.warning("Failed to fetch credit_spread", extra={"error": str(e)})
+            logger.warning("fred_fetch_failed", series="credit_spread", error=str(e))
 
         return result

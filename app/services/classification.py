@@ -6,8 +6,9 @@ Stage 2: Theme ranking → candidate symbols
 """
 
 import json
-import logging
 from typing import Any
+
+import structlog
 
 from shared.ai_clients.llm_client import LLMClient
 from shared.utils.redis_client import RedisClient
@@ -16,7 +17,7 @@ from ..config import settings
 from ..core.models import CandidateSymbol
 from ..core.prompts.sector import SECTOR_SYSTEM_PROMPT, format_sector_prompt
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 class ClassificationService:

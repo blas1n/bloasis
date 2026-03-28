@@ -5,10 +5,11 @@ broker positions vs DB positions as a defense-in-depth mechanism.
 """
 
 import json
-import logging
 import uuid
 from datetime import UTC, datetime
 from typing import Any
+
+import structlog
 
 from shared.utils.redis_client import RedisClient
 
@@ -19,7 +20,7 @@ from ..repositories.user_repository import UserRepository
 from .brokers.factory import create_broker_adapter
 from .portfolio import PortfolioService
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 # TTL for reconciliation diff records in Redis (7 days)
 _RECONCILIATION_TTL = 86400 * 7
@@ -106,17 +107,17 @@ class OrderProcessor:
             except ValueError as e:
                 # Unsupported broker_type or missing credentials — no point retrying
                 logger.error(
-                    "Cannot create broker adapter for order %s: %s",
-                    order.client_order_id,
-                    e,
+                    "broker_adapter_creation_failed",
+                    client_order_id=order.client_order_id,
+                    error=str(e),
                 )
                 await self.order_repo.update_status(
                     order.id, OrderStatus.FAILED, error_message=str(e)
                 )
             except Exception as e:
                 logger.error(
-                    "Failed to process pending order %s",
-                    order.client_order_id,
+                    "pending_order_processing_failed",
+                    client_order_id=order.client_order_id,
                     exc_info=True,
                 )
                 await self.order_repo.increment_retry(order.id, error_message=str(e))
@@ -170,8 +171,8 @@ class OrderProcessor:
                     )
             except Exception:
                 logger.error(
-                    "Failed to poll order %s",
-                    order.broker_order_id,
+                    "order_poll_failed",
+                    broker_order_id=order.broker_order_id,
                     exc_info=True,
                 )
 
@@ -190,7 +191,7 @@ class OrderProcessor:
                 diffs = await self._reconcile_user(user_id)
                 total_diffs += diffs
             except Exception:
-                logger.error("Reconciliation failed for user %s", user_id, exc_info=True)
+                logger.error("reconciliation_failed", user_id=str(user_id), exc_info=True)
 
         return total_diffs
 
@@ -218,13 +219,11 @@ class OrderProcessor:
 
             if bp and not dp:
                 logger.warning(
-                    "Reconciliation: position at broker but not in DB",
-                    extra={
-                        "user_id": str(user_id),
-                        "symbol": symbol,
-                        "qty": str(bp.quantity),
-                        "action_required": True,
-                    },
+                    "reconciliation_broker_only",
+                    user_id=str(user_id),
+                    symbol=symbol,
+                    qty=str(bp.quantity),
+                    action_required=True,
                 )
                 diffs.append(
                     {
@@ -238,13 +237,11 @@ class OrderProcessor:
             elif dp and not bp:
                 if dp.quantity > 0:
                     logger.warning(
-                        "Reconciliation: position in DB but not at broker",
-                        extra={
-                            "user_id": str(user_id),
-                            "symbol": symbol,
-                            "qty": str(dp.quantity),
-                            "action_required": True,
-                        },
+                        "reconciliation_db_only",
+                        user_id=str(user_id),
+                        symbol=symbol,
+                        qty=str(dp.quantity),
+                        action_required=True,
                     )
                     diffs.append(
                         {
@@ -257,14 +254,12 @@ class OrderProcessor:
                     )
             elif bp and dp and bp.quantity != dp.quantity:
                 logger.warning(
-                    "Reconciliation: quantity mismatch",
-                    extra={
-                        "user_id": str(user_id),
-                        "symbol": symbol,
-                        "broker_qty": str(bp.quantity),
-                        "db_qty": str(dp.quantity),
-                        "action_required": True,
-                    },
+                    "reconciliation_qty_mismatch",
+                    user_id=str(user_id),
+                    symbol=symbol,
+                    broker_qty=str(bp.quantity),
+                    db_qty=str(dp.quantity),
+                    action_required=True,
                 )
                 diffs.append(
                     {

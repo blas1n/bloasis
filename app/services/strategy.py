@@ -11,12 +11,12 @@ Pipeline:
 """
 
 import json
-import logging
 import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
+import structlog
 from pydantic import ValidationError
 
 from shared.ai_clients.llm_client import LLMClient
@@ -40,7 +40,7 @@ from .classification import ClassificationService
 from .market_data import MarketDataService
 from .market_regime import MarketRegimeService
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 class StrategyService:
@@ -91,7 +91,7 @@ class StrategyService:
             except (ValidationError, TypeError):
                 await self.redis.delete(cache_key)
 
-        logger.info("Running analysis", extra={"user_id": user_id})
+        logger.info("running_analysis", user_id=user_id)
 
         # 1. Market regime (Tier 1 cached, 6h)
         regime = await self.market_regime.get_current()
@@ -205,7 +205,7 @@ class StrategyService:
 
             except (ValueError, RuntimeError) as e:
                 logger.warning(
-                    "Failed to score candidate", extra={"symbol": candidate.symbol, "error": str(e)}
+                    "candidate_scoring_failed", symbol=candidate.symbol, error=str(e)
                 )
 
         # Sort by score descending, assign ranks, take top N
@@ -247,10 +247,10 @@ class StrategyService:
             if isinstance(result, list):
                 return result
             result_type = type(result).__name__
-            logger.warning("AI analysis returned non-list", extra={"type": result_type})
+            logger.warning("ai_analysis_returned_non_list", type=result_type)
             return []
         except (RuntimeError, json.JSONDecodeError, ValueError) as e:
-            logger.error("AI analysis failed", extra={"error": str(e)})
+            logger.error("ai_analysis_failed", error=str(e))
             raise RuntimeError(f"AI analysis unavailable: {e}") from e
 
     def _generate_signals(

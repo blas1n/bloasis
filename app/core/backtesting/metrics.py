@@ -4,14 +4,14 @@ Pure numpy functions for calculating portfolio and trading metrics.
 No I/O dependencies.
 """
 
-import logging
 from typing import Any
 
 import numpy as np
+import structlog
 
 from .models import PortfolioMetrics, SymbolResult
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 class MetricsCalculator:

@@ -5,15 +5,15 @@ Provides async Redis operations for caching with JSON serialization support.
 """
 
 import json
-import logging
 import os
 from decimal import Decimal
 from typing import Any
 
 import redis.asyncio as redis
+import structlog
 from redis.exceptions import RedisError
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 def _json_default(obj: Any) -> Any:
@@ -67,15 +67,9 @@ class RedisClient:
                 socket_connect_timeout=5,
             )
             await self.client.ping()
-            logger.info(
-                "Connected to Redis",
-                extra={"host": self.host, "port": self.port},
-            )
+            logger.info("connected_to_redis", host=self.host, port=self.port)
         except RedisError as e:
-            logger.error(
-                "Redis connection failed",
-                extra={"host": self.host, "port": self.port, "error": str(e)},
-            )
+            logger.error("redis_connection_failed", host=self.host, port=self.port, error=str(e))
             raise ConnectionError(
                 f"Failed to connect to Redis at {self.host}:{self.port}: {e}"
             ) from e
@@ -87,10 +81,7 @@ class RedisClient:
         if self.client is not None:
             await self.client.close()
             self.client = None
-            logger.info(
-                "Disconnected from Redis",
-                extra={"host": self.host, "port": self.port},
-            )
+            logger.info("disconnected_from_redis", host=self.host, port=self.port)
 
     async def get(self, key: str) -> Any | None:
         """
@@ -138,10 +129,7 @@ class RedisClient:
             serialized = str(value) if not isinstance(value, str) else value
 
         await self.client.setex(key, ttl, serialized)
-        logger.debug(
-            "Cache write",
-            extra={"key": key, "ttl": ttl},
-        )
+        logger.debug("cache_write", key=key, ttl=ttl)
 
     async def delete(self, key: str) -> None:
         """
@@ -157,7 +145,4 @@ class RedisClient:
             raise ConnectionError("Redis client is not connected. Call connect() first.")
 
         await self.client.delete(key)
-        logger.debug(
-            "Cache invalidation",
-            extra={"key": key},
-        )
+        logger.debug("cache_invalidation", key=key)

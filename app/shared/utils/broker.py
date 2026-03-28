@@ -4,12 +4,13 @@ Centralizes broker API credential decryption used by adapter factory.
 Falls back to global env settings when per-user credentials are not configured.
 """
 
-import logging
 from typing import Any
+
+import structlog
 
 from app.config import settings
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 def decrypt_broker_credentials(configs: list[Any]) -> dict[str, str]:
@@ -36,7 +37,7 @@ def decrypt_broker_credentials(configs: list[Any]) -> dict[str, str]:
         try:
             creds[cfg.config_key] = f.decrypt(cfg.encrypted_value.encode()).decode()
         except (InvalidToken, ValueError):
-            logger.warning("Failed to decrypt broker config key: %s", cfg.config_key)
+            logger.warning("broker_config_decrypt_failed", config_key=cfg.config_key)
 
     if "api_key" in creds and "secret_key" in creds:
         return creds

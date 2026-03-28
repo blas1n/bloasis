@@ -4,10 +4,10 @@ Single process replacing 10 gRPC services.
 Infrastructure: PostgreSQL + Redis only.
 """
 
-import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
+import structlog
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi.errors import RateLimitExceeded
@@ -15,10 +15,12 @@ from slowapi.middleware import SlowAPIMiddleware
 from starlette.responses import JSONResponse
 
 from .config import settings
+from .logging import setup_logging
 from .rate_limit import limiter
 from .shared.utils.response import CamelJSONResponse
 
-logger = logging.getLogger(__name__)
+setup_logging(log_level=settings.log_level)
+logger = structlog.get_logger(__name__)
 
 
 @asynccontextmanager
@@ -51,13 +53,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     await redis.connect()
     await postgres.connect()
-    logger.info("Infrastructure connected (Redis + PostgreSQL)")
+    logger.info("infrastructure_connected", services="Redis+PostgreSQL")
 
     broker_enabled = bool(settings.fernet_key)
     if not broker_enabled:
-        logger.warning(
-            "CREDENTIAL_ENCRYPTION_KEY is not set. Per-user broker configuration is disabled."
-        )
+        logger.warning("broker_config_disabled", reason="CREDENTIAL_ENCRYPTION_KEY not set")
 
     # Store in app state for dependency injection
     app.state.redis = redis
@@ -72,8 +72,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
         await start_scheduler(app)
         logger.info(
-            "Background scheduler started (interval=%ds)",
-            settings.analysis_interval_seconds,
+            "scheduler_started", interval_seconds=settings.analysis_interval_seconds
         )
 
     yield
@@ -87,7 +86,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Cleanup
     await redis.close()
     await postgres.close()
-    logger.info("Infrastructure disconnected")
+    logger.info("infrastructure_disconnected")
 
 
 def _rate_limit_exceeded_handler(request: Request, exc: Exception) -> JSONResponse:

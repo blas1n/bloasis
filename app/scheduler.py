@@ -10,9 +10,9 @@ Handles:
 """
 
 import asyncio
-import logging
 import uuid
 
+import structlog
 from fastapi import FastAPI
 
 from .config import settings
@@ -31,7 +31,7 @@ from .services.order_processor import OrderProcessor
 from .services.portfolio import PortfolioService
 from .services.strategy import StrategyService
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 def _build_order_processor(app: FastAPI) -> OrderProcessor:
@@ -72,8 +72,8 @@ async def _build_executor_service(
         broker = await create_broker_adapter(user_id, user_repo)
     except ValueError:
         logger.warning(
-            "No broker configured, skipping signal execution",
-            extra={"user_id": str(user_id)},
+            "no_broker_configured",
+            user_id=str(user_id),
         )
         return None
 
@@ -161,63 +161,53 @@ async def _execute_signals(
                     await redis.setex(dedup_key, dedup_ttl, "1")
                 except (OSError, ConnectionError):
                     logger.warning(
-                        "Failed to set dedup key (signal will retry next cycle)",
-                        extra={"symbol": signal.symbol},
+                        "dedup_key_set_failed",
+                        symbol=signal.symbol,
                     )
                 executed += 1
                 logger.info(
-                    "Signal executed",
-                    extra={
-                        "user_id": str(user_id),
-                        "symbol": signal.symbol,
-                        "side": signal.action,
-                        "status": result.status,
-                    },
+                    "signal_executed",
+                    user_id=str(user_id),
+                    symbol=signal.symbol,
+                    side=signal.action,
+                    status=result.status,
                 )
             else:
                 failed += 1
                 logger.warning(
-                    "Signal execution did not complete",
-                    extra={
-                        "user_id": str(user_id),
-                        "symbol": signal.symbol,
-                        "status": result.status,
-                        "error": result.error_message,
-                    },
+                    "signal_execution_incomplete",
+                    user_id=str(user_id),
+                    symbol=signal.symbol,
+                    status=result.status,
+                    error=result.error_message,
                 )
         except (OSError, ConnectionError) as e:
             failed += 1
             logger.error(
-                "Signal execution network/IO error",
-                extra={
-                    "user_id": str(user_id),
-                    "symbol": signal.symbol,
-                    "error_type": type(e).__name__,
-                },
+                "signal_execution_network_error",
+                user_id=str(user_id),
+                symbol=signal.symbol,
+                error_type=type(e).__name__,
                 exc_info=True,
             )
         except Exception as e:
             failed += 1
             logger.error(
-                "Signal execution unexpected error",
-                extra={
-                    "user_id": str(user_id),
-                    "symbol": signal.symbol,
-                    "error_type": type(e).__name__,
-                    "error": str(e),
-                },
+                "signal_execution_unexpected_error",
+                user_id=str(user_id),
+                symbol=signal.symbol,
+                error_type=type(e).__name__,
+                error=str(e),
                 exc_info=True,
             )
 
     if failed > 0:
         logger.warning(
-            "Signal execution completed with failures",
-            extra={
-                "user_id": str(user_id),
-                "executed": executed,
-                "failed": failed,
-                "total": len(pending),
-            },
+            "signal_execution_completed_with_failures",
+            user_id=str(user_id),
+            executed=executed,
+            failed=failed,
+            total=len(pending),
         )
 
     return executed
@@ -245,10 +235,10 @@ async def _run_analysis_cycle(app: FastAPI) -> None:
     active_users = await _get_active_users(user_repo)
 
     if not active_users:
-        logger.debug("No active trading users found")
+        logger.debug("no_active_trading_users")
         return
 
-    logger.info("Scheduler: running analysis for %d active users", len(active_users))
+    logger.info("scheduler_analysis_start", active_users=len(active_users))
 
     for user_id in active_users:
         try:
@@ -261,7 +251,7 @@ async def _run_analysis_cycle(app: FastAPI) -> None:
                 risk_profile=risk_profile,
                 excluded_sectors=excluded,
             )
-            logger.info("Scheduler: analysis complete for user %s", user_id)
+            logger.info("scheduler_analysis_complete", user_id=str(user_id))
 
             # Execute qualifying signals as orders
             if result.signals:
@@ -269,18 +259,18 @@ async def _run_analysis_cycle(app: FastAPI) -> None:
                     executed_count = await _execute_signals(app, user_id, result.signals, user_repo)
                     if executed_count > 0:
                         logger.info(
-                            "Scheduler: executed %d signals for user %s",
-                            executed_count,
-                            user_id,
+                            "scheduler_signals_executed",
+                            executed_count=executed_count,
+                            user_id=str(user_id),
                         )
                 except Exception:
                     logger.error(
-                        "Scheduler: signal execution failed for user %s",
-                        user_id,
+                        "scheduler_signal_execution_failed",
+                        user_id=str(user_id),
                         exc_info=True,
                     )
         except Exception:
-            logger.error("Scheduler: analysis failed for user %s", user_id, exc_info=True)
+            logger.error("scheduler_analysis_failed", user_id=str(user_id), exc_info=True)
 
 
 async def _run_order_processing(app: FastAPI) -> None:
@@ -290,16 +280,16 @@ async def _run_order_processing(app: FastAPI) -> None:
     try:
         pending = await processor.process_pending_orders()
         if pending > 0:
-            logger.info("Scheduler: processed %d pending orders", pending)
+            logger.info("scheduler_pending_orders_processed", count=pending)
     except Exception:
-        logger.error("Scheduler: pending order processing failed", exc_info=True)
+        logger.error("scheduler_pending_order_processing_failed", exc_info=True)
 
     try:
         resolved = await processor.poll_unresolved_orders()
         if resolved > 0:
-            logger.info("Scheduler: resolved %d unresolved orders", resolved)
+            logger.info("scheduler_unresolved_orders_resolved", count=resolved)
     except Exception:
-        logger.error("Scheduler: order polling failed", exc_info=True)
+        logger.error("scheduler_order_polling_failed", exc_info=True)
 
 
 async def _run_reconciliation(app: FastAPI) -> None:
@@ -309,11 +299,11 @@ async def _run_reconciliation(app: FastAPI) -> None:
     try:
         diffs = await processor.reconcile_with_broker()
         if diffs > 0:
-            logger.warning("Scheduler: reconciliation found %d diffs", diffs)
+            logger.warning("scheduler_reconciliation_diffs_found", diffs=diffs)
         else:
-            logger.info("Scheduler: reconciliation complete, no diffs")
+            logger.info("scheduler_reconciliation_complete")
     except Exception:
-        logger.error("Scheduler: reconciliation failed", exc_info=True)
+        logger.error("scheduler_reconciliation_failed", exc_info=True)
 
 
 async def _get_active_users(user_repo: UserRepository, limit: int = 200) -> list[uuid.UUID]:
@@ -321,7 +311,7 @@ async def _get_active_users(user_repo: UserRepository, limit: int = 200) -> list
     try:
         return await user_repo.get_active_trading_users(limit)
     except (OSError, RuntimeError):
-        logger.error("Scheduler: failed to get active users", exc_info=True)
+        logger.error("scheduler_get_active_users_failed", exc_info=True)
         return []
 
 
@@ -329,28 +319,28 @@ async def scheduler_loop(app: FastAPI) -> None:
     """Main scheduler loop — runs analysis + order processing at configured interval."""
     interval = settings.analysis_interval_seconds
     lock = asyncio.Lock()
-    logger.info("Scheduler started (interval=%ds)", interval)
+    logger.info("scheduler_started", interval_s=interval)
 
     try:
         while True:
             if lock.locked():
-                logger.warning("Scheduler: previous cycle still running, skipping")
+                logger.warning("scheduler_cycle_skipped_still_running")
             else:
                 async with lock:
                     try:
                         await _run_order_processing(app)
                         await _run_analysis_cycle(app)
                     except Exception:
-                        logger.error("Scheduler cycle failed", exc_info=True)
+                        logger.error("scheduler_cycle_failed", exc_info=True)
             await asyncio.sleep(interval)
     except asyncio.CancelledError:
-        logger.info("Scheduler stopped")
+        logger.info("scheduler_stopped")
 
 
 async def reconciliation_loop(app: FastAPI) -> None:
     """Reconciliation loop — runs hourly."""
     reconciliation_interval = 3600
-    logger.info("Reconciliation scheduler started (interval=%ds)", reconciliation_interval)
+    logger.info("reconciliation_scheduler_started", interval_s=reconciliation_interval)
 
     try:
         while True:
@@ -358,9 +348,9 @@ async def reconciliation_loop(app: FastAPI) -> None:
             try:
                 await _run_reconciliation(app)
             except Exception:
-                logger.error("Reconciliation cycle failed", exc_info=True)
+                logger.error("reconciliation_cycle_failed", exc_info=True)
     except asyncio.CancelledError:
-        logger.info("Reconciliation scheduler stopped")
+        logger.info("reconciliation_scheduler_stopped")
 
 
 async def start_scheduler(app: FastAPI) -> None:

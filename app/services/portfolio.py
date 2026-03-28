@@ -6,11 +6,12 @@ No event consumption — executor calls record_trade() directly.
 
 from __future__ import annotations
 
-import logging
 import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
+
+import structlog
 
 from shared.utils.redis_client import RedisClient
 
@@ -23,7 +24,7 @@ from ..core.models import OrderSide, Portfolio, Position, Trade
 from ..repositories.portfolio_repository import PortfolioRepository
 from ..repositories.trade_repository import TradeRepository
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 class PortfolioService:
@@ -105,8 +106,9 @@ class PortfolioService:
                         daily_pnl_pct = float((current_price - prev_close) / prev_close * 100)
                 except (TimeoutError, ValueError) as e:
                     logger.warning(
-                        "Failed to calculate daily P&L",
-                        extra={"symbol": row.symbol, "error": str(e)},
+                        "daily_pnl_calculation_failed",
+                        symbol=row.symbol,
+                        error=str(e),
                     )
 
             positions.append(
@@ -187,13 +189,13 @@ class PortfolioService:
             account = await broker.get_account()
             await self.portfolio_repo.update_cash_balance(user_id, account.cash)
         except Exception as e:
-            logger.error("Broker API error during sync", extra={"error": str(e)})
+            logger.error("broker_api_error_during_sync", error=str(e))
             return {"success": False, "errorMessage": "Broker API connection failed"}
 
         try:
             broker_positions = await broker.get_positions()
         except Exception as e:
-            logger.error("Failed to fetch broker positions", extra={"error": str(e)})
+            logger.error("broker_positions_fetch_failed", error=str(e))
             return {"success": False, "errorMessage": "Failed to fetch broker positions"}
 
         # Reconcile positions

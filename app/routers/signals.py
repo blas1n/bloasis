@@ -1,9 +1,9 @@
 """Signals router — /v1/users/{userId}/signals"""
 
-import logging
 import uuid
 from typing import Any
 
+import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from ..core.models import AnalysisResult
@@ -13,7 +13,7 @@ from ..services.strategy import StrategyService
 from ..services.user import UserService
 
 router = APIRouter()
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 @router.get("/{user_id}/signals", response_model=AnalysisResult)

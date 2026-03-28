@@ -3,14 +3,15 @@
 Simulates order execution with immediate fills at requested price.
 """
 
-import logging
 import uuid
 from decimal import Decimal
+
+import structlog
 
 from ...core.broker import BrokerAdapter
 from ...core.models import BrokerAccountInfo, BrokerPosition, OrderResult, OrderSide, OrderStatus
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 class MockBrokerAdapter(BrokerAdapter):
@@ -51,10 +52,7 @@ class MockBrokerAdapter(BrokerAdapter):
         client_order_id: str,
     ) -> OrderResult:
         order_id = str(uuid.uuid4())
-        logger.info(
-            "Mock order filled",
-            extra={"symbol": symbol, "side": side, "qty": str(qty)},
-        )
+        logger.info("mock_order_filled", symbol=symbol, side=side, qty=str(qty))
 
         # Update in-memory positions and cash
         order_side = OrderSide(side)
