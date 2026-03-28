@@ -15,7 +15,7 @@ from slowapi.middleware import SlowAPIMiddleware
 from starlette.responses import JSONResponse
 
 from .config import settings
-from .logging import setup_logging
+from .log_config import setup_logging
 from .rate_limit import limiter
 from .shared.utils.response import CamelJSONResponse
 
