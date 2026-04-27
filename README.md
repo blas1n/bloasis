@@ -1,174 +1,79 @@
 # BLOASIS
 
-**AI-Powered Multi-Asset Trading Platform**
+CLI-based trading research and execution. Deterministic factor scoring on
+US large caps with VIX-based regime de-risking, optional ML and LLM
+sentiment as ranked features, and walk-forward backtesting.
 
-BLOASIS combines LLMs and deterministic risk rules for automated trading decisions across multiple asset classes.
+> **Read first**: [`docs/mission.md`](./docs/mission.md). The system targets
+> SPY parity with lower drawdown (M2). It does **not** promise alpha.
 
-## Key Features
+## Status
 
-- **Market Regime Detection**: LLM-based classification (bull/bear/crisis/recovery/sideways)
-- **6-Factor Scoring**: Momentum, value, quality, volatility, liquidity, sentiment
-- **Deterministic Risk Rules**: Position sizing, sector concentration, VIX-based controls
-- **ATR-Based Signals**: Stop loss, take profit, trailing stops, multi-tier profit levels
-- **Alpaca Integration**: Paper/live trading via Alpaca API
+Phase 1 (M2 foundation), pre-alpha. See [`docs/roadmap.md`](./docs/roadmap.md).
 
-## Architecture
-
-Single FastAPI monolith with pure domain logic isolated in `core/`.
-
-```
-Frontend (Next.js) --> FastAPI (REST) --> PostgreSQL + Redis
-```
-
-**Design principles**:
-- `core/` -- Pure computation, zero I/O, testable without mocks
-- `services/` -- Orchestration layer (LLM calls, DB, cache)
-- `routers/` -- Thin HTTP layer, Pydantic validation
-- `shared/` -- Infrastructure adapters (LLM, Postgres, Redis clients)
-
-## Tech Stack
-
-| Layer | Technology |
-|-------|-----------|
-| Backend | Python 3.11+, FastAPI |
-| AI/ML | LiteLLM, deterministic risk rules |
-| Data | yfinance, TA-Lib, FRED API |
-| Database | PostgreSQL/TimescaleDB, Redis |
-| Frontend | TypeScript, React/Next.js |
-| Tooling | uv, ruff, Alembic |
-
-## Quick Start
-
-### Prerequisites
-
-- Docker & Docker Compose
-- Python 3.11+
-- [uv](https://docs.astral.sh/uv/) (package manager)
-
-### Setup
+## Quick start
 
 ```bash
-# 1. Clone
-git clone https://github.com/yourusername/bloasis.git
-cd bloasis
+# install
+uv sync --extra dev
 
-# 2. Install dependencies
-uv sync
+# initialize SQLite database
+bloasis init-db
 
-# 3. Start infrastructure
-docker compose -f deploy/docker-compose.yml up -d postgres redis
-
-# 4. Run database migrations
-uv run alembic upgrade head
-
-# 5. Start backend
-uv run uvicorn app.main:app --reload
-
-# 6. Start frontend
-cd frontend && npm run dev
+# inspect a config (with optional inline overrides)
+bloasis config show configs/baseline.yaml
+bloasis config show configs/baseline.yaml --set scorer.weights.momentum=0.25
 ```
 
-Visit: **http://localhost:3000**
+Backtest, analyze, and trade commands land in PR2-PR6.
 
-### Development Commands
-
-```bash
-ruff check app/ shared/          # Lint
-ruff format app/ shared/         # Format
-pytest app/ --cov=app            # Test (80% coverage gate)
-uvicorn app.main:app --reload    # Dev server
-```
-
-## Project Structure
+## Architecture (target)
 
 ```
-app/                  # FastAPI monolith
-  main.py             # Entry point + lifespan
-  config.py           # Pydantic Settings (all env vars)
-  dependencies.py     # FastAPI DI + auth
-  core/               # Pure computation (no I/O)
-    models.py          # Pydantic domain models
-    risk_rules.py      # Deterministic risk evaluation
-    signal_generator.py # ATR-based signal generation
-    factor_scoring.py  # 6-factor stock scoring
-    technical_indicators.py # TA-Lib calculations
-    regime_classifier.py # Regime response parsing
-    prompts/           # LLM prompt templates
-  services/            # Business logic (orchestration)
-    strategy.py        # Analysis pipeline
-    executor.py        # Order execution + Alpaca
-    market_regime.py   # Market regime classification
-    classification.py  # Sector/asset classification
-    market_data.py     # yfinance + caching
-    portfolio.py       # Position/trade management
-    user.py            # Auth, preferences, broker
-  routers/             # REST endpoints
-    auth.py            # /v1/auth/tokens
-    market.py          # /v1/market/regimes/current
-    signals.py         # /v1/users/{id}/signals
-    trading.py         # /v1/users/{id}/trading
-    users.py           # /v1/users/{id}/preferences, broker
-    portfolios.py      # /v1/portfolios/{id}
-    orders.py          # /v1/orders
-  shared/utils/        # App utilities
-    response.py        # CamelCase JSON response
-    cache.py           # @cache_aside decorator
-shared/                # Infrastructure adapters
-  ai_clients/          # LLM client (LiteLLM)
-  utils/               # PostgresClient, RedisClient
-frontend/              # Next.js dashboard
-deploy/                # Docker Compose
+bloasis/
+  cli.py               # typer entry point
+  config/              # pydantic schema + YAML loader + --set overrides
+  storage/             # SQLAlchemy core tables (SQLite)
+  data/
+    universe/          # sp500, sp500_historical, custom_csv
+    fetchers/          # OhlcvFetcher, FundamentalsFetcher, NewsFetcher (Protocols)
+    extractor.py       # pure FeatureExtractor (look-ahead protected)
+  scoring/
+    features.py        # FeatureVector + composite computation
+    scorer.py          # Scorer Protocol
+    rule_scorer.py     # weights × composites with regime multipliers
+    ml_scorer.py       # LightGBM stub for Phase 3
+  signal.py            # ATR-based SL/TP, profit tiers
+  risk.py              # deterministic risk rules
+  backtest/
+    engine.py          # core simulator
+    walk_forward.py    # train/test split iterator
+    fills.py           # limit_with_fallback fill simulation
+    metrics.py         # Sharpe, DD, alpha, IR
+    statistical.py     # bootstrap CI, white reality check
+    attribution.py     # per-factor PnL attribution
+  allocation/
+    composer.py        # core (SPY) + satellite (strategy) blending
+  broker/
+    alpaca.py          # paper trading adapter
+configs/               # YAML strategy configs
+docs/                  # mission, roadmap, limitations, retrospectives
+tests/                 # pytest, mirrors bloasis/ structure
 ```
 
-## API Endpoints
+## Design principles
 
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | /v1/auth/tokens | Login |
-| POST | /v1/auth/tokens/refresh | Refresh token |
-| DELETE | /v1/auth/tokens | Logout |
-| GET | /v1/market/regimes/current | Current market regime |
-| GET | /v1/users/{id}/preferences | Get preferences |
-| PUT | /v1/users/{id}/preferences | Update preferences |
-| GET | /v1/users/{id}/broker | Broker status |
-| PUT | /v1/users/{id}/broker | Update broker config |
-| GET | /v1/users/{id}/signals | Get cached signals |
-| POST | /v1/users/{id}/signals | Trigger analysis |
-| GET | /v1/users/{id}/trading | Trading status |
-| POST | /v1/users/{id}/trading | Start trading |
-| DELETE | /v1/users/{id}/trading | Stop trading |
-| GET | /v1/portfolios/{id} | Portfolio summary |
-| GET | /v1/portfolios/{id}/positions | Positions |
-| GET | /v1/portfolios/{id}/trades | Trade history |
-| POST | /v1/portfolios/{id}/sync | Sync with Alpaca |
-| POST | /v1/orders | Execute order |
-
-## Testing
-
-```bash
-# Full test suite with coverage
-pytest app/ --cov=app --cov-fail-under=80
-
-# Core domain tests only (no mocks needed)
-pytest app/core/tests/ -v
-
-# Lint + format check
-ruff check app/ shared/
-ruff format --check app/ shared/
-```
-
-## Contributing
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Run `ruff check app/ shared/` and `pytest app/` (must pass)
-4. Commit: `git commit -m 'feat(scope): description'`
-5. Open a Pull Request
+1. **Mission-driven** — every feature must serve the M2 → M1 progression
+   defined in `docs/mission.md`.
+2. **Honest measurement** — all metrics report relative to SPY benchmark.
+   Walk-forward only; no full-history optimization.
+3. **Look-ahead protection at the interface level** — `ExtractionContext`
+   asserts data slicing.
+4. **Pure core, I/O at edges** — `bloasis/scoring/` has no I/O. Same
+   FeatureExtractor runs in live and backtest.
+5. **Acceptance gates** — configs declare phase gates; CLI refuses to
+   promote a config without walk-forward clearance.
 
 ## License
 
-Apache License 2.0. See [LICENSE](LICENSE) for details.
-
-## Disclaimer
-
-This software is for educational and research purposes only. The developers are not responsible for any losses from actual trading. Trade at your own risk.
+See [LICENSE](./LICENSE).

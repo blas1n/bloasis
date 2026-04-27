@@ -1,1 +1,0 @@
-"""BLOASIS test package."""
