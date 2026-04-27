@@ -2,13 +2,13 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, "refactor/**"]
   pull_request:
     branches: [main]
 
 jobs:
-  backend:
-    name: Backend (Python)
+  test:
+    name: Lint, type-check, test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -16,19 +16,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-
-      - name: Install TA-Lib C library
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends build-essential wget
-          wget -q https://prdownloads.sourceforge.net/ta-lib/ta-lib-0.4.0-src.tar.gz
-          tar -xzf ta-lib-0.4.0-src.tar.gz
-          cd ta-lib/
-          ./configure --prefix=/usr
-          make
-          sudo make install
-          cd ..
-          rm -rf ta-lib ta-lib-0.4.0-src.tar.gz
 
       - name: Install uv
         uses: astral-sh/setup-uv@v4
@@ -37,60 +24,13 @@ jobs:
         run: uv sync --extra dev
 
       - name: Lint (ruff)
-        run: uv run ruff check app/ shared/
+        run: uv run ruff check bloasis/ tests/
 
-      - name: Type check (mypy)
-        run: uv run mypy app/ shared/
+      - name: Format check (ruff)
+        run: uv run ruff format --check bloasis/ tests/
 
-      - name: Test (pytest)
-        run: uv run pytest app/ --cov=app --cov-fail-under=80
+      - name: Type check (mypy strict)
+        run: uv run mypy bloasis/
 
-  frontend:
-    name: Frontend (TypeScript)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install TA-Lib C library
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends build-essential wget
-          wget -q https://prdownloads.sourceforge.net/ta-lib/ta-lib-0.4.0-src.tar.gz
-          tar -xzf ta-lib-0.4.0-src.tar.gz
-          cd ta-lib/
-          ./configure --prefix=/usr
-          make
-          sudo make install
-          cd ..
-          rm -rf ta-lib ta-lib-0.4.0-src.tar.gz
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v4
-
-      - name: Install Python dependencies
-        run: uv sync --extra dev
-
-      - name: Generate OpenAPI schema
-        run: uv run python scripts/export_openapi.py
-        env:
-          PYTHONPATH: ${{ github.workspace }}
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-
-      - name: Install frontend dependencies
-        working-directory: frontend
-        run: npm ci
-
-      - name: Generate API types
-        working-directory: frontend
-        run: npm run generate:api
-
-      - name: Type check (tsc)
-        working-directory: frontend
-        run: npm run type-check
+      - name: Test
+        run: uv run pytest tests/

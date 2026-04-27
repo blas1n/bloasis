@@ -1,0 +1,109 @@
+# BLOASIS baseline strategy config.
+#
+# This is the canonical Phase 1 (M2) configuration. Changes here should be
+# accompanied by a fresh walk-forward backtest against the acceptance gate.
+#
+# All sections must be present. CLI rejects partial configs.
+
+universe:
+  source: sp500                  # sp500 | sp500_historical | custom_csv
+  custom_csv_path: null
+
+pre_filter:
+  # Deterministic first-pass filter applied to universe before scoring.
+  # Operates on cached fundamentals; fast.
+  min_market_cap: 1_000_000_000
+  max_pe_ratio: 25
+  min_dollar_volume: 5_000_000
+  exclude_sectors: []
+
+scorer:
+  type: rule                     # rule | ml
+  ml_model_path: null
+
+  # Composite factor weights. Auto-normalized to sum 1.0.
+  weights:
+    value: 0.18
+    quality: 0.15
+    momentum: 0.18
+    technical: 0.12
+    volatility: 0.12
+    liquidity: 0.10
+    sentiment: 0.15
+
+  # Multipliers applied to weights based on classified regime
+  # (classify_regime() function over raw VIX + SPY trend). Empty regime = no adjustment.
+  regime_multipliers:
+    crisis:
+      quality: 1.8
+      volatility: 2.0
+      momentum: 0.3
+    bear:
+      quality: 1.5
+      volatility: 1.5
+      value: 1.3
+    sideways: {}
+    recovery:
+      momentum: 1.4
+      sentiment: 1.3
+      value: 1.2
+    bull:
+      momentum: 1.5
+      sentiment: 1.4
+      volatility: 0.7
+
+  # Trigger / risk thresholds for Rationale narrative.
+  thresholds:
+    rsi_oversold: 30.0
+    rsi_overbought: 70.0
+    strong_momentum_20d: 0.10
+    high_volatility_ann: 0.40
+    elevated_vix: 25.0
+    high_leverage_de: 2.0
+    strong_trend_adx: 25.0
+
+  # Score cutoffs for entry / exit decisions (0-1 scale).
+  entry_threshold: 0.65
+  exit_threshold: 0.40
+
+signal:
+  atr_stop_multiplier: 2.0
+  atr_tp_multiplier: 3.0
+  position_size_max_pct: 0.10    # max single position as fraction of strategy capital
+
+  profit_tiers:
+    - {fraction: 0.33, type: target,   atr_mult: 1.5}
+    - {fraction: 0.33, type: target,   atr_mult: 3.0}
+    - {fraction: 0.34, type: trailing, atr_mult: 2.0}
+
+risk:
+  vix_extreme: 40.0              # block new BUYs above this
+  vix_high: 30.0                 # halve order size above this
+  max_single_order_pct: 0.10
+  max_sector_concentration: 0.30
+
+execution:
+  fill_mode: limit_with_fallback # market | limit_with_fallback
+  market_slippage_bps: 5
+  limit_offset_bps: 10
+  limit_timeout_bars: 1
+  fees_bps: 0
+  initial_capital: 10000.0
+
+allocation:
+  # Strategy composition. Weights sum to 1.0 (auto-normalized).
+  # Provides safety net: if strategy underperforms, base SPY allocation cushions.
+  strategies:
+    - name: core_spy
+      type: spy_passive
+      weight: 0.70
+    - name: bloasis_smart_beta
+      type: strategy
+      weight: 0.30
+
+acceptance_criteria:
+  # Phase 1 → Phase 2 gate. Backtest must clear all of these.
+  walk_forward_min_folds: 5
+  median_alpha_annualized: -0.005   # within 50 bps of SPY (parity)
+  median_sharpe_vs_spy: 1.0          # equal or better
+  median_max_dd_ratio_to_spy: 0.85   # ≤ 85% of SPY drawdown

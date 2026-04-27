@@ -1,103 +1,105 @@
-# BLOASIS
+# BLOASIS — Claude Working Notes
 
-AI-powered multi-asset trading platform combining LLMs and deterministic risk rules.
+CLI trading research and execution platform. Deterministic factor scoring
+on US large caps with optional ML and LLM sentiment.
+
+> Read [`docs/mission.md`](./docs/mission.md) and [`docs/roadmap.md`](./docs/roadmap.md)
+> before changing anything. Mission constrains design.
 
 ## Tech Stack
 
-- **Backend**: Python 3.11+ (FastAPI monolith)
-- **AI/ML**: Claude Haiku (via LiteLLM), deterministic risk rules, 6-factor scoring
-- **Data**: yfinance (market data), TA-Lib (technical indicators)
-- **Infra**: PostgreSQL/TimescaleDB, Redis (caching), Docker Compose
-- **Frontend**: TypeScript (React/Next.js)
-- **Tooling**: uv (package manager), ruff (lint/format), Alembic (migrations)
-
-## Project Structure
-
-```
-app/                # FastAPI monolith
-  main.py           # Application entry point + lifespan
-  config.py         # Unified Pydantic Settings
-  dependencies.py   # FastAPI dependency injection + auth
-  routers/          # API endpoints (REST)
-    auth.py         # /v1/auth/tokens
-    market.py       # /v1/market/regimes/current
-    signals.py      # /v1/users/{userId}/signals
-    trading.py      # /v1/users/{userId}/trading
-    users.py        # /v1/users/{userId}/preferences, broker
-    portfolios.py   # /v1/portfolios/{userId}
-  services/         # Business logic layer
-    strategy.py     # Analysis pipeline (regime → classification → scoring → signals)
-    executor.py     # Order execution with risk checks + Alpaca API
-    market_regime.py # Market regime classification (LLM)
-    classification.py # Sector/asset classification (LLM)
-    market_data.py  # yfinance data + caching
-    portfolio.py    # Position/trade management
-    user.py         # Supabase Auth proxy, preferences, broker config
-  core/             # Pure computation (no I/O)
-    models.py       # Pydantic domain models
-    risk_rules.py   # Deterministic risk evaluation
-    signal_generator.py # ATR-based signal generation
-    factor_scoring.py   # 6-factor stock scoring engine
-    technical_indicators.py # TA-Lib calculations
-    regime_classifier.py    # Regime response parsing
-    prompts/        # LLM prompt templates
-  repositories/     # Database access (SQLAlchemy ORM)
-    models.py       # ORM table definitions
-    user_repository.py
-    portfolio_repository.py
-    trade_repository.py
-  shared/utils/     # App-level utilities
-    response.py     # CamelCase JSON response
-    cache.py        # @cache_aside decorator
-shared/             # Shared infrastructure clients
-  ai_clients/       # LLM client (LiteLLM)
-  utils/            # PostgresClient, RedisClient
-frontend/           # Next.js frontend
-deploy/             # Docker Compose configs
-```
+- Python 3.11+ (CLI app, single user)
+- typer + rich (CLI)
+- pydantic v2 (config + domain models on API boundary)
+- SQLAlchemy core, SQLite (Postgres migration path open)
+- yfinance (OHLCV/fundamentals), Finnhub (news), Claude Haiku via LiteLLM (sentiment)
+- TA-Lib (technical indicators)
+- LightGBM + SHAP (Phase 3 ML stub now)
+- Alpaca (paper trading)
+- ruff (lint/format), mypy strict, pytest
 
 ## Quick Commands
 
 ```bash
-ruff check app/ shared/          # Lint
-ruff format app/ shared/         # Format
-mypy app/ shared/                # Type check
-pytest app/ --cov=app            # Test with coverage
-python scripts/export_openapi.py # Export OpenAPI schema
-uvicorn app.main:app --reload    # Dev server
+ruff check bloasis/ tests/        # lint
+ruff format bloasis/ tests/       # format
+mypy bloasis/                     # type check (strict)
+pytest tests/ --cov=bloasis       # tests
+bloasis init-db                   # create SQLite + tables
+bloasis config show configs/baseline.yaml
 ```
 
-## Architecture Rules (Quick Reference)
+## Architecture Rules (non-negotiable)
 
-Full rules in `.claude/rules/` — these are the non-negotiable ones:
+### 1. CLI single-process, single-user
 
-- **FastAPI REST** — single monolith, no gRPC or message brokers
-- **Repository pattern** — all DB access via `app/repositories/` (SQLAlchemy ORM, no raw SQL)
-- **Pure core/** — no I/O in `app/core/`, only computation and models
-- **Decimal** for all financial calculations (never float)
-- **Type hints** on all public functions
-- **Supabase Auth** — token verification via `bsvibe-auth` (HS256), all endpoints except `/v1/auth/*` and `/health`
-- **No sys.path.insert()** — use PYTHONPATH
-- **No hardcoded secrets** — use .env files (gitignored)
-- **Tests mandatory** — 80% minimum coverage, mock all external APIs
-- **ruff check** must pass before commit
+No web server, no message broker, no multi-user concerns. `user_id`
+column exists on user-scoped tables but always `0` in v1.
+
+### 2. Pure scoring layer
+
+`bloasis/scoring/` and `bloasis/data/extractor.py` must have **no I/O**.
+Same code runs in live and backtest paths. Any I/O lives in
+`bloasis/data/fetchers/` and `bloasis/storage/`.
+
+### 3. Look-ahead bias protection
+
+`ExtractionContext.__post_init__` asserts `ohlcv.index.max() <= timestamp`.
+Tests must include a regression case constructing an "evil" context with
+future data and verifying the assertion fires.
+
+### 4. Walk-forward only
+
+Backtests use train/test windows. Full-history optimization is forbidden
+as a CI-enforced rule once `bloasis/backtest/walk_forward.py` lands.
+
+### 5. Repository pattern
+
+All DB access goes through `bloasis/storage/` modules. No raw SQL strings
+in business logic. SQLAlchemy core (`Table()`, `select()`, `insert()`) —
+no ORM mappers in v1.
+
+### 6. Decimal for money on ledger boundary
+
+Prices/quantities flowing into `trades` and `positions` tables use
+`decimal.Decimal`. Floats are acceptable inside scoring computations.
+
+### 7. Type hints required
+
+All public functions need type hints. mypy strict must pass.
+
+### 8. No hardcoded secrets
+
+Use `.env` (gitignored) + pydantic settings. Never log API keys.
+
+### 9. Tests mandatory
+
+New code needs tests. CI enforces > 70% coverage on `bloasis/`. Mock all
+external APIs (yfinance, Finnhub, LLM, Alpaca) in tests.
+
+### 10. Acceptance gates respected
+
+Promoting a config to live trading requires walk-forward backtest passing
+the config's `acceptance_criteria`. CLI enforces this.
+
+## Feature & Schema Versioning
+
+- `feature_log.feature_version` integer column. Bump when extraction logic
+  changes. ML training filters by version.
+- DDL changes use SQLAlchemy `MetaData.create_all()` for v1. When
+  migrating to Postgres or schema gets non-trivial, introduce alembic.
 
 ## Git Conventions
 
 - No `Co-Authored-By` in commit messages
-- Format: `type(scope): short description`
+- Format: `type(scope): description`
 - Types: feat, fix, refactor, test, docs, chore
+- One PR per phase milestone (PR1..PR6 for Phase 1)
 
-## Caching Strategy (3-Tier)
+## Cost & Risk Discipline
 
-| Tier | Data | TTL | Shared? |
-|------|------|-----|---------|
-| Tier 1 | Market regime, sector candidates | 6h | All users |
-| Tier 2 | User analysis results | 1h | Per-user |
-| Tier 3 | Preferences, OHLCV, stock info | 5m-30d | Per-user/symbol |
-
-## Cost Optimization
-
-- **Hybrid 3-Tier**: Shared analysis (Tier 1) cached across users + per-user customization (Tier 2-3)
-- Claude Haiku for classification, rule-based fallback when no API key
-- Deterministic risk rules (no LLM for risk evaluation)
+- Daily LLM call budget caps in `configs/*.yaml`
+- yfinance scrapes; pinned version, parquet cache for resilience
+- Finnhub free tier rate-limited via `aiolimiter`
+- All financial calculations on the ledger use `Decimal`
+- Live trading defaults to **paper** until acceptance gate passes

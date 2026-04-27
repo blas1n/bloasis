@@ -1,118 +1,91 @@
 [project]
 name = "bloasis"
-version = "2.0.0"
-description = "BLOASIS AI Trading Platform (monolith)"
+version = "0.1.0"
+description = "BLOASIS — CLI-based deterministic + ML trading research and execution"
 requires-python = ">=3.11"
 
 dependencies = [
-    # Web framework
-    "fastapi>=0.110.0",
-    "uvicorn[standard]>=0.27.0",
+    # CLI
+    "typer>=0.12.0",
+    "rich>=13.7.0",
+
+    # Config / Validation
+    "pydantic>=2.6.0",
+    "pyyaml>=6.0.1",
 
     # Database
-    "sqlalchemy[asyncio]>=2.0.23",
-    "asyncpg>=0.29.0",
-    "psycopg2-binary>=2.9.9",
-    "alembic>=1.13.0",
-
-    # Caching
-    "redis[hiredis]>=5.0.1",
-
-    # AI / LLM
-    "litellm>=1.55.0",
-
-    # Data / Analysis
-    "yfinance>=0.2.30",
-    "pandas>=2.0.0",
-    "numpy>=1.24.0",
-    "TA-Lib>=0.4.32",
-    "vectorbt>=0.25.0",
-    "riskfolio-lib>=7.0.0",
-
-    # Validation / Config
-    "pydantic>=2.4.2",
-    "pydantic-settings>=2.0.0",
-    "python-dotenv>=1.0.0",
-
-    # Auth
-    "bsvibe-auth @ git+https://github.com/blas1n/BSVibe-Auth.git#subdirectory=python",
-    "pyjwt>=2.8.0",
-    "cryptography>=41.0.0",
-
-    # Rate limiting
-    "slowapi>=0.1.9",
-
-    # Macro data
-    "fredapi>=0.5.0",
-
-    # Logging
-    "structlog>=23.0.0",
-
-    # Utilities
-    "tenacity>=9.0.0",
-    "pyyaml>=6.0.1",
-    "httpx>=0.27.0",
+    "sqlalchemy>=2.0.25",
 ]
+
+# Heavier dependencies are split into extras so the base package installs
+# cleanly without TA-Lib system libraries. Subsequent PRs activate them.
+#   pip install bloasis[data]     # PR2 — yfinance, pandas, ta-lib, finnhub, llm
+#   pip install bloasis[ml]       # PR3+ — lightgbm, shap, scikit-learn
+#   pip install bloasis[broker]   # PR6  — alpaca paper/live
+#   pip install bloasis[dev]      # always — test/lint/typecheck
 
 [project.optional-dependencies]
+data = [
+    "yfinance==0.2.59",
+    "pandas>=2.2.0",
+    "numpy>=1.26.0",
+    "TA-Lib>=0.4.32",
+    "finnhub-python>=2.4.20",
+    "httpx>=0.27.0",
+    "aiolimiter>=1.1.0",
+    "litellm>=1.55.0",
+]
+ml = [
+    "lightgbm>=4.3.0",
+    "shap>=0.45.0",
+    "scikit-learn>=1.4.0",
+]
+broker = [
+    "alpaca-py>=0.25.0",
+]
 dev = [
     "pytest>=8.0.0",
-    "pytest-asyncio>=0.23.0",
     "pytest-cov>=4.1.0",
-    "ruff==0.15.5",
+    "ruff>=0.5.0",
     "mypy>=1.10.0",
-    "types-redis>=4.6.0",
-    "pandas-stubs>=2.0.0",
+    "pandas-stubs>=2.2.0",
     "types-PyYAML>=6.0.0",
 ]
+
+[project.scripts]
+bloasis = "bloasis.cli:app"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
-[tool.hatch.metadata]
-allow-direct-references = true
-
 [tool.hatch.build.targets.wheel]
-packages = ["app", "shared"]
+packages = ["bloasis"]
 
 [tool.pytest.ini_options]
-pythonpath = ["/workspace"]
-asyncio_mode = "auto"
-testpaths = ["app"]
+testpaths = ["tests"]
 addopts = [
     "-v",
     "--strict-markers",
-    "--cov=app",
+    "--cov=bloasis",
     "--cov-report=term-missing",
-    "--cov-fail-under=80",
-]
-
-[tool.coverage.run]
-omit = [
-    "app/main.py",
-    "app/config.py",
 ]
 
 [tool.mypy]
 python_version = "3.11"
 strict = true
 plugins = ["pydantic.mypy"]
-exclude = ["tests/", "migrations/"]
+exclude = ["tests/", "build/"]
 
 [[tool.mypy.overrides]]
 module = [
     "yfinance.*",
     "talib.*",
-    "vectorbt.*",
-    "riskfolio.*",
+    "finnhub.*",
+    "lightgbm.*",
+    "shap.*",
     "litellm.*",
-    "bsvibe_auth.*",
-    "fredapi.*",
-    "slowapi.*",
-    "slowapi.errors.*",
-    "slowapi.middleware.*",
-    "slowapi.util.*",
+    "alpaca.*",
 ]
 ignore_missing_imports = true
 
@@ -124,13 +97,6 @@ warn_required_dynamic_aliases = true
 [tool.ruff]
 target-version = "py311"
 line-length = 100
-exclude = [
-    ".git",
-    "__pycache__",
-    ".pytest_cache",
-    ".venv",
-    "services/",
-]
 
 [tool.ruff.lint]
 select = [
@@ -139,7 +105,9 @@ select = [
     "F",   # pyflakes
     "I",   # isort
     "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+    "SIM", # flake8-simplify
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["app", "shared"]
+known-first-party = ["bloasis"]
