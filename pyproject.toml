@@ -19,7 +19,8 @@ dependencies = [
 
 # Heavier dependencies are split into extras so the base package installs
 # cleanly without TA-Lib system libraries. Subsequent PRs activate them.
-#   pip install bloasis[data]     # PR2 — yfinance, pandas, ta-lib, finnhub, llm
+#   pip install bloasis[data]     # PR2 — yfinance, pandas, ta-lib, finnhub
+#   pip install bloasis[llm]      # PR2 — provider-agnostic LLM via LiteLLM
 #   pip install bloasis[ml]       # PR3+ — lightgbm, shap, scikit-learn
 #   pip install bloasis[broker]   # PR6  — alpaca paper/live
 #   pip install bloasis[dev]      # always — test/lint/typecheck
@@ -33,6 +34,8 @@ data = [
     "finnhub-python>=2.4.20",
     "httpx>=0.27.0",
     "aiolimiter>=1.1.0",
+]
+llm = [
     "litellm>=1.55.0",
 ]
 ml = [

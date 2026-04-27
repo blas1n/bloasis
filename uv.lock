@@ -240,7 +240,6 @@ data = [
     { name = "aiolimiter" },
     { name = "finnhub-python" },
     { name = "httpx" },
-    { name = "litellm" },
     { name = "numpy" },
     { name = "pandas" },
     { name = "ta-lib" },
@@ -253,6 +252,9 @@ dev = [
     { name = "pytest-cov" },
     { name = "ruff" },
     { name = "types-pyyaml" },
+]
+llm = [
+    { name = "litellm" },
 ]
 ml = [
     { name = "lightgbm" },
@@ -267,7 +269,7 @@ requires-dist = [
     { name = "finnhub-python", marker = "extra == 'data'", specifier = ">=2.4.20" },
     { name = "httpx", marker = "extra == 'data'", specifier = ">=0.27.0" },
     { name = "lightgbm", marker = "extra == 'ml'", specifier = ">=4.3.0" },
-    { name = "litellm", marker = "extra == 'data'", specifier = ">=1.55.0" },
+    { name = "litellm", marker = "extra == 'llm'", specifier = ">=1.55.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.10.0" },
     { name = "numpy", marker = "extra == 'data'", specifier = ">=1.26.0" },
     { name = "pandas", marker = "extra == 'data'", specifier = ">=2.2.0" },
@@ -286,7 +288,7 @@ requires-dist = [
     { name = "types-pyyaml", marker = "extra == 'dev'", specifier = ">=6.0.0" },
     { name = "yfinance", marker = "extra == 'data'", specifier = "==0.2.59" },
 ]
-provides-extras = ["data", "ml", "broker", "dev"]
+provides-extras = ["data", "llm", "ml", "broker", "dev"]
 
 [[package]]
 name = "build"

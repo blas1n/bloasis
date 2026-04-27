@@ -12,7 +12,10 @@ on US large caps with optional ML and LLM sentiment.
 - typer + rich (CLI)
 - pydantic v2 (config + domain models on API boundary)
 - SQLAlchemy core, SQLite (Postgres migration path open)
-- yfinance (OHLCV/fundamentals), Finnhub (news), Claude Haiku via LiteLLM (sentiment)
+- yfinance (OHLCV/fundamentals), Finnhub (news)
+- LiteLLM for sentiment scoring — provider-agnostic (Anthropic/OpenAI/Azure/Ollama).
+  Configure via `LLM_API_KEY`, `LLM_MODEL`, `LLM_BASE_URL`. Default is
+  Claude Haiku for cost; users may switch via `.env`.
 - TA-Lib (technical indicators)
 - LightGBM + SHAP (Phase 3 ML stub now)
 - Alpaca (paper trading)
