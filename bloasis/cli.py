@@ -14,6 +14,10 @@ Commands implemented:
     bloasis features <SYMBOL> [--config YAML] [--days N]
   PR4 (scorer + signals)
     bloasis analyze SYM1 SYM2 [...] [--config YAML] [--top N] [--days N]
+  PR5 (backtest)
+    bloasis backtest --config YAML --start DATE --end DATE [--symbols ...]
+    bloasis runs list [--limit N]
+    bloasis runs show <run_id>
 """
 
 from __future__ import annotations
@@ -28,6 +32,7 @@ from rich.console import Console
 from rich.table import Table as RichTable
 
 from bloasis import __version__
+from bloasis.backtest.result import BacktestResult
 from bloasis.config import StrategyConfig, config_hash, load_config
 from bloasis.scoring.features import FeatureVector
 from bloasis.storage import create_all, get_engine, metadata
@@ -42,9 +47,11 @@ app = typer.Typer(
 config_app = typer.Typer(name="config", help="Inspect and validate strategy configs.")
 universe_app = typer.Typer(name="universe", help="Show universe membership.")
 fetch_app = typer.Typer(name="fetch", help="Fetch and cache market data.")
+runs_app = typer.Typer(name="runs", help="Inspect past backtest runs.")
 app.add_typer(config_app, name="config")
 app.add_typer(universe_app, name="universe")
 app.add_typer(fetch_app, name="fetch")
+app.add_typer(runs_app, name="runs")
 
 console = Console()
 
@@ -535,6 +542,255 @@ def analyze(
         )
 
     console.print(table)
+
+
+# ---------------------------------------------------------------------------
+# Backtest (PR5)
+# ---------------------------------------------------------------------------
+
+
+@app.command("backtest")
+def backtest(
+    start: str = typer.Option(..., "--start", help="YYYY-MM-DD"),  # noqa: B008
+    end: str = typer.Option(..., "--end", help="YYYY-MM-DD"),  # noqa: B008
+    config_path: Path = typer.Option(  # noqa: B008
+        None, "--config", "-c"
+    ),
+    symbols: list[str] = typer.Option(  # noqa: B008
+        None,
+        "--symbol",
+        "-s",
+        help="Symbol to include. Repeatable. Required (universe fetching is PR6).",
+    ),
+    name: str = typer.Option(None, "--name", help="Optional run label."),  # noqa: B008
+    train_days: int = typer.Option(  # noqa: B008
+        365 * 3, "--train-days", min=30, help="Walk-forward train window."
+    ),
+    test_days: int = typer.Option(  # noqa: B008
+        180, "--test-days", min=10, help="Walk-forward test window."
+    ),
+    step_days: int = typer.Option(180, "--step-days", min=1),  # noqa: B008
+) -> None:
+    """Run a walk-forward backtest, persist the run, and print metrics."""
+    import pandas as pd
+
+    from bloasis.backtest import BacktestData, Backtester
+    from bloasis.config import config_hash as compute_config_hash
+    from bloasis.data.cache import ParquetCache
+    from bloasis.data.fetchers.yfinance_market import YfMarketContextFetcher
+    from bloasis.data.fetchers.yfinance_ohlcv import YfOhlcvFetcher
+    from bloasis.scoring.extractor import FeatureExtractor
+    from bloasis.storage import writers
+
+    if not symbols:
+        raise typer.BadParameter("at least one --symbol/-s is required")
+
+    cfg = _load_or_default_config(config_path)
+    start_d = _parse_date(start)
+    end_d = _parse_date(end)
+    if start_d is None or end_d is None:
+        raise typer.BadParameter("--start and --end are required (YYYY-MM-DD)")
+
+    # Pre-fetch OHLCV with warmup. The backtester slices per-day internally.
+    cache = ParquetCache(cfg.data.cache_dir, namespace="ohlcv")
+    ohlcv = YfOhlcvFetcher(cache=cache, max_age_hours=cfg.data.ohlcv_cache_max_age_hours)
+    market = YfMarketContextFetcher(ohlcv=ohlcv)
+
+    warmup = timedelta(days=300)
+    fetch_start = start_d - warmup
+    bars: dict[str, pd.DataFrame] = {}
+    for sym in symbols:
+        bars[sym.upper()] = ohlcv.fetch(sym.upper(), fetch_start, end_d)
+    market_ctx = market.fetch(fetch_start, end_d)
+
+    data = BacktestData(
+        symbols=[s.upper() for s in symbols],
+        bars=bars,
+        vix_series=market_ctx.vix,
+        spy_close_series=market_ctx.spy_close,
+    )
+
+    engine = get_engine()
+    create_all(engine)
+
+    cfg_hash = compute_config_hash(cfg)
+    cfg_json = cfg.model_dump_json()
+    run_id = writers.create_backtest_run(
+        engine,
+        name=name,
+        config_hash=cfg_hash,
+        config_json=cfg_json,
+        scorer_type=cfg.scorer.type,
+        feature_version=FeatureExtractor.VERSION,
+        start_date=datetime(start_d.year, start_d.month, start_d.day, tzinfo=UTC),
+        end_date=datetime(end_d.year, end_d.month, end_d.day, tzinfo=UTC),
+        initial_capital=cfg.execution.initial_capital,
+    )
+
+    try:
+        bt = Backtester(cfg, data, db_engine=engine)
+        result = bt.run(
+            start_d,
+            end_d,
+            run_id=run_id,
+            train_days=train_days,
+            test_days=test_days,
+            step_days=step_days,
+        )
+        from dataclasses import replace
+
+        result = replace(result, config_hash=cfg_hash)
+        writers.finalize_backtest_run(engine, run_id, result)
+    except Exception as exc:
+        writers.fail_backtest_run(engine, run_id, str(exc))
+        raise
+
+    _render_backtest_result(result, cfg_hash)
+
+
+@runs_app.command("list")
+def runs_list(
+    limit: int = typer.Option(20, "--limit", min=1, max=200),  # noqa: B008
+) -> None:
+    """List the most recent backtest runs."""
+    from sqlalchemy import select
+
+    from bloasis.storage import backtest_runs as br_table
+
+    engine = get_engine()
+    with engine.connect() as conn:
+        rows = conn.execute(
+            select(
+                br_table.c.run_id,
+                br_table.c.name,
+                br_table.c.config_hash,
+                br_table.c.start_date,
+                br_table.c.end_date,
+                br_table.c.status,
+                br_table.c.alpha_vs_spy,
+                br_table.c.sharpe,
+                br_table.c.n_trades,
+                br_table.c.started_at,
+            )
+            .order_by(br_table.c.started_at.desc())
+            .limit(limit)
+        ).fetchall()
+
+    table = RichTable(title=f"runs (latest {len(rows)})")
+    table.add_column("run_id", justify="right")
+    table.add_column("name")
+    table.add_column("hash", style="dim")
+    table.add_column("period")
+    table.add_column("status")
+    table.add_column("alpha", justify="right")
+    table.add_column("sharpe", justify="right")
+    table.add_column("trades", justify="right")
+    for r in rows:
+        table.add_row(
+            str(r.run_id),
+            r.name or "-",
+            r.config_hash,
+            f"{r.start_date.date()} ~ {r.end_date.date()}",
+            r.status,
+            f"{r.alpha_vs_spy:+.3f}" if r.alpha_vs_spy is not None else "-",
+            f"{r.sharpe:.2f}" if r.sharpe is not None else "-",
+            str(r.n_trades) if r.n_trades is not None else "-",
+        )
+    console.print(table)
+
+
+@runs_app.command("show")
+def runs_show(run_id: int = typer.Argument(...)) -> None:
+    """Show details + acceptance result for a single backtest run."""
+    from sqlalchemy import select
+
+    from bloasis.storage import backtest_runs as br_table
+
+    engine = get_engine()
+    with engine.connect() as conn:
+        row = conn.execute(select(br_table).where(br_table.c.run_id == run_id)).first()
+    if row is None:
+        console.print(f"[red]run_id {run_id} not found[/red]")
+        raise typer.Exit(code=1)
+
+    summary = RichTable(title=f"run {run_id} ({row.config_hash})", show_header=False)
+    summary.add_column("key", style="cyan")
+    summary.add_column("value")
+    for col, label in [
+        ("name", "name"),
+        ("scorer_type", "scorer"),
+        ("status", "status"),
+        ("start_date", "start"),
+        ("end_date", "end"),
+        ("initial_capital", "initial $"),
+        ("final_equity", "final $"),
+        ("total_return", "total return"),
+        ("annualized_return", "annualized"),
+        ("sharpe", "sharpe"),
+        ("max_drawdown", "max DD"),
+        ("alpha_vs_spy", "alpha vs SPY"),
+        ("win_rate", "win rate"),
+        ("n_trades", "trades"),
+    ]:
+        v = getattr(row, col)
+        if v is None:
+            display = "-"
+        elif isinstance(v, float):
+            display = f"{v:.4f}"
+        else:
+            display = str(v)
+        summary.add_row(label, display)
+    if row.error_message:
+        summary.add_row("[red]error[/red]", row.error_message)
+    console.print(summary)
+
+
+def _render_backtest_result(
+    result: BacktestResult,
+    cfg_hash: str,
+) -> None:
+    """Render a BacktestResult to console."""
+    table = RichTable(title=f"backtest run {result.run_id} ({cfg_hash})", show_header=True)
+    table.add_column("fold", style="dim", justify="right")
+    table.add_column("test period")
+    table.add_column("alpha", justify="right")
+    table.add_column("sharpe", justify="right")
+    table.add_column("DD/SPY", justify="right")
+    table.add_column("trades", justify="right")
+    for f in result.fold_results:
+        table.add_row(
+            str(f.fold_index),
+            f"{f.test_start} .. {f.test_end}",
+            f"{f.annualized_alpha:+.3f}",
+            f"{f.sharpe:.2f}",
+            f"{f.max_dd_ratio_to_spy:.2f}",
+            str(f.n_trades),
+        )
+    console.print(table)
+
+    summary = RichTable(title="aggregate (median)", show_header=False)
+    summary.add_column("key", style="cyan")
+    summary.add_column("value")
+    summary.add_row("median_alpha_annualized", f"{result.median_alpha_annualized:+.4f}")
+    summary.add_row("median_sharpe_vs_spy", f"{result.median_sharpe_vs_spy:.3f}")
+    summary.add_row("median_max_dd_ratio_to_spy", f"{result.median_max_dd_ratio_to_spy:.3f}")
+    summary.add_row("median_total_return", f"{result.median_total_return:+.4f}")
+    summary.add_row("median_spy_total_return", f"{result.median_spy_total_return:+.4f}")
+    summary.add_row("n_folds", str(result.n_folds))
+    summary.add_row("n_trades_total", str(result.n_trades_total))
+    summary.add_row(
+        "passed_acceptance",
+        "[green]YES[/green]" if result.passed_acceptance else "[red]NO[/red]",
+    )
+    console.print(summary)
+
+    console.print()
+    console.print("[bold]Acceptance gate:[/bold]")
+    for line in result.acceptance_reasons:
+        if line.startswith("PASS"):
+            console.print(f"  [green]{line}[/green]")
+        else:
+            console.print(f"  [red]{line}[/red]")
 
 
 if __name__ == "__main__":
