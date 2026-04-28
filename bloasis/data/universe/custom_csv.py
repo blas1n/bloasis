@@ -52,7 +52,4 @@ def _find_symbol_column(fieldnames: Iterable[str]) -> str:
     for name in names:
         if name and name.strip().lower() == "symbol":
             return name
-    raise ValueError(
-        "CSV must have a 'symbol' column (case-insensitive). "
-        f"Got columns: {names!r}"
-    )
+    raise ValueError(f"CSV must have a 'symbol' column (case-insensitive). Got columns: {names!r}")

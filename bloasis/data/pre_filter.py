@@ -62,14 +62,8 @@ def _evaluate(
     if row.market_cap is not None and row.market_cap < cfg.min_market_cap:
         return f"market_cap {row.market_cap:.2e} < min {cfg.min_market_cap:.2e}"
 
-    if (
-        row.dollar_volume_avg is not None
-        and row.dollar_volume_avg < cfg.min_dollar_volume
-    ):
-        return (
-            f"dollar_volume {row.dollar_volume_avg:.2e} < "
-            f"min {cfg.min_dollar_volume:.2e}"
-        )
+    if row.dollar_volume_avg is not None and row.dollar_volume_avg < cfg.min_dollar_volume:
+        return f"dollar_volume {row.dollar_volume_avg:.2e} < min {cfg.min_dollar_volume:.2e}"
 
     # P/E: only filter if value is positive and present. Negative P/E means
     # the company is unprofitable; that's information, not a reason to

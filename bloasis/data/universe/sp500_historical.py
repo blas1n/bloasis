@@ -106,7 +106,5 @@ def list_sp500_at(as_of: date, *, cache_dir: Path) -> list[str]:
     candidates = [r for r in rows if r[0] <= as_of]
     if not candidates:
         earliest = rows[0][0]
-        raise ValueError(
-            f"as_of={as_of} predates dataset (earliest entry {earliest})"
-        )
+        raise ValueError(f"as_of={as_of} predates dataset (earliest entry {earliest})")
     return list(candidates[-1][1])

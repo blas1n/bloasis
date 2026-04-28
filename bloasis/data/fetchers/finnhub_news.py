@@ -68,9 +68,7 @@ class FinnhubNewsFetcher:
     @staticmethod
     def _parse_item(symbol: str, entry: dict[str, Any]) -> NewsItem:
         ts = entry.get("datetime")
-        published = (
-            datetime.fromtimestamp(int(ts), tz=UTC) if ts else datetime.now(tz=UTC)
-        )
+        published = datetime.fromtimestamp(int(ts), tz=UTC) if ts else datetime.now(tz=UTC)
         return NewsItem(
             symbol=symbol.upper(),
             published_at=published,
@@ -81,6 +79,7 @@ class FinnhubNewsFetcher:
 
 
 # ----- helpers shared with sentiment scorer cache writes -----
+
 
 def serialize_headlines(items: list[NewsItem]) -> str:
     """JSON-encode items for `news_sentiment_cache.headlines_json`."""

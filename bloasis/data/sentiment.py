@@ -168,9 +168,7 @@ def _build_prompt(symbol: str, items: list[NewsItem]) -> str:
     # Keep prompt compact: top 20 headlines, oldest at bottom.
     sorted_items = sorted(items, key=lambda i: i.published_at, reverse=True)[:20]
     for i in sorted_items:
-        lines.append(
-            f"- [{i.published_at.date().isoformat()}] {i.headline}"
-        )
+        lines.append(f"- [{i.published_at.date().isoformat()}] {i.headline}")
     lines.append("")
     lines.append("Return JSON with `score` and `rationale` only.")
     return "\n".join(lines)
