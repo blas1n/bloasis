@@ -34,15 +34,15 @@ class FinnhubNewsFetcher:
         api_key: str,
         *,
         rate_per_minute: int = 60,
-        client: object | None = None,
+        client: Any = None,
     ) -> None:
         if not api_key:
             raise ValueError("FINNHUB_API_KEY is required")
-        self._client = client or self._make_client(api_key)
+        self._client: Any = client if client is not None else self._make_client(api_key)
         self._limiter = RateLimiter(max_calls=rate_per_minute, period_seconds=60)
 
     @staticmethod
-    def _make_client(api_key: str) -> object:
+    def _make_client(api_key: str) -> Any:
         import finnhub
 
         return finnhub.Client(api_key=api_key)
@@ -55,14 +55,9 @@ class FinnhubNewsFetcher:
             raise ValueError(f"since={since} is in the future")
 
         self._limiter.acquire()
-        # finnhub-python returns a list of dicts. Sync call; `getattr` to
-        # keep the type-stubless import isolated.
-        client_call = cast(
-            object, getattr(self._client, "company_news")
-        )
         raw = cast(
             list[dict[str, Any]],
-            client_call(  # type: ignore[operator]
+            self._client.company_news(
                 symbol,
                 _from=since.date().isoformat(),
                 to=now.date().isoformat(),
