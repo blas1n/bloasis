@@ -90,6 +90,16 @@ execution:
   fees_bps: 0
   initial_capital: 10000.0
 
+data:
+  # Cache directory for parquet OHLCV files and fja05680 historical dataset.
+  # `~` is expanded at load time.
+  cache_dir: ~/.cache/bloasis
+  ohlcv_cache_max_age_hours: 24
+  fundamentals_cache_max_age_hours: 24
+  sentiment_cache_max_age_hours: 6
+  finnhub_rate_per_minute: 60
+  sentiment_lookback_days: 7
+
 allocation:
   # Strategy composition. Weights sum to 1.0 (auto-normalized).
   # Provides safety net: if strategy underperforms, base SPY allocation cushions.

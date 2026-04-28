@@ -249,6 +249,35 @@ class AllocationConfig(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Data layer (cache TTLs, paths, rate limits)
+# ---------------------------------------------------------------------------
+
+
+class DataConfig(BaseModel):
+    """Tunables for the data layer.
+
+    Cache directory holds parquet OHLCV cache and the fja05680 historical
+    S&P 500 dataset. `~` is expanded at config load time.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    cache_dir: Path = Field(default=Path("~/.cache/bloasis"))
+    ohlcv_cache_max_age_hours: int = Field(default=24, ge=0)
+    fundamentals_cache_max_age_hours: int = Field(default=24, ge=0)
+    sentiment_cache_max_age_hours: int = Field(default=6, ge=0)
+    finnhub_rate_per_minute: int = Field(default=60, ge=1, le=300)
+    sentiment_lookback_days: int = Field(default=7, ge=1, le=30)
+
+    @model_validator(mode="after")
+    def _expand_user(self) -> DataConfig:
+        # Expand ~ once at validation time so downstream code can rely on
+        # an absolute path.
+        object.__setattr__(self, "cache_dir", Path(self.cache_dir).expanduser())
+        return self
+
+
+# ---------------------------------------------------------------------------
 # Acceptance criteria (phase gate)
 # ---------------------------------------------------------------------------
 
@@ -281,4 +310,5 @@ class StrategyConfig(BaseModel):
     risk: RiskConfig = Field(default_factory=RiskConfig)
     execution: ExecutionConfig = Field(default_factory=ExecutionConfig)
     allocation: AllocationConfig = Field(default_factory=AllocationConfig)
+    data: DataConfig = Field(default_factory=DataConfig)
     acceptance_criteria: AcceptanceCriteria = Field(default_factory=AcceptanceCriteria)

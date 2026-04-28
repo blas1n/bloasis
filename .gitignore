@@ -102,17 +102,12 @@ infra/keys/*.pem
 *.db
 *.sqlite
 *.sqlite3
-data/
+/data/
 *.sql
-!infra/**/*.sql
 
-# Docker
-.devcontainer/.env
-docker-compose.override.yml
-
-# Production Deployment
-deploy/.env
-deploy/backups/
+# Cache directories
+.cache/
+cache/
 
 # MacOS
 .DS_Store
