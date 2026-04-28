@@ -91,9 +91,7 @@ class RuleBasedScorer:
 
     def _adjusted_weights(self, regime: str, cv: CompositeVector) -> dict[str, float]:
         """Apply regime multipliers, drop NaN-composite factors, renormalize."""
-        mults: dict[str, float] = self._cfg.regime_multipliers.get(
-            cast(RegimeName, regime), {}
-        )
+        mults: dict[str, float] = self._cfg.regime_multipliers.get(cast(RegimeName, regime), {})
         adjusted: dict[str, float] = {}
         for name in COMPOSITE_NAMES:
             comp = float(getattr(cv, name))
