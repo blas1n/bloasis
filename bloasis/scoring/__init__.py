@@ -13,14 +13,22 @@ live and backtest (see `docs/limitations.md` L007).
 from bloasis.scoring.composites import CompositeBuilder, CompositeVector
 from bloasis.scoring.extractor import ExtractionContext, FeatureExtractor
 from bloasis.scoring.features import FEATURE_COLUMNS, FeatureVector
+from bloasis.scoring.rationale import FactorContribution, Rationale, ScoredCandidate
 from bloasis.scoring.regime import classify_regime
+from bloasis.scoring.scorer import MLScorerStub, RuleBasedScorer, Scorer
 
 __all__ = [
     "FEATURE_COLUMNS",
     "CompositeBuilder",
     "CompositeVector",
     "ExtractionContext",
+    "FactorContribution",
     "FeatureExtractor",
     "FeatureVector",
+    "MLScorerStub",
+    "Rationale",
+    "RuleBasedScorer",
+    "ScoredCandidate",
+    "Scorer",
     "classify_regime",
 ]

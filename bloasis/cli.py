@@ -12,6 +12,8 @@ Commands implemented:
     bloasis sentiment <SYMBOL> [--config YAML]
   PR3 (feature layer)
     bloasis features <SYMBOL> [--config YAML] [--days N]
+  PR4 (scorer + signals)
+    bloasis analyze SYM1 SYM2 [...] [--config YAML] [--top N] [--days N]
 """
 
 from __future__ import annotations
@@ -27,6 +29,7 @@ from rich.table import Table as RichTable
 
 from bloasis import __version__
 from bloasis.config import StrategyConfig, config_hash, load_config
+from bloasis.scoring.features import FeatureVector
 from bloasis.storage import create_all, get_engine, metadata
 
 app = typer.Typer(
@@ -386,6 +389,152 @@ def features_show(
         summary.add_row(col, display)
     summary.add_row("[bold]regime[/bold]", f"[bold]{regime}[/bold]")
     console.print(summary)
+
+
+# ---------------------------------------------------------------------------
+# Analyze (PR4)
+# ---------------------------------------------------------------------------
+
+
+@app.command("analyze")
+def analyze(
+    symbols: list[str] = typer.Argument(  # noqa: B008
+        ..., help="Two or more symbols to score in cross-section."
+    ),
+    config_path: Path = typer.Option(  # noqa: B008
+        None, "--config", "-c"
+    ),
+    days: int = typer.Option(  # noqa: B008
+        365, "--days", min=60, help="OHLCV window in days (>=60 for momentum_60d)."
+    ),
+    top: int = typer.Option(  # noqa: B008
+        10, "--top", min=1, help="Show this many top-ranked symbols."
+    ),
+) -> None:
+    """Extract features, build composites, score, and emit signals.
+
+    Cross-section z-scoring requires at least two symbols. The CLI
+    bypasses universe loading — pass the symbols you want to compare.
+    `last_close` and ATR for signal levels come from the same yfinance
+    OHLCV pull as the features.
+    """
+    from bloasis.data.cache import ParquetCache
+    from bloasis.data.fetchers.yfinance_market import YfMarketContextFetcher
+    from bloasis.data.fetchers.yfinance_ohlcv import YfOhlcvFetcher
+    from bloasis.risk import MarketState, PortfolioState, RiskEvaluator
+    from bloasis.scoring.composites import CompositeBuilder
+    from bloasis.scoring.extractor import ExtractionContext, FeatureExtractor
+    from bloasis.scoring.scorer import RuleBasedScorer
+    from bloasis.signal import CandidateData, SignalGenerator
+
+    if len(symbols) < 2:
+        raise typer.BadParameter("analyze requires at least 2 symbols for cross-section z-score")
+
+    cfg = _load_or_default_config(config_path)
+    cache = ParquetCache(cfg.data.cache_dir, namespace="ohlcv")
+    ohlcv_fetcher = YfOhlcvFetcher(cache=cache, max_age_hours=cfg.data.ohlcv_cache_max_age_hours)
+    market_fetcher = YfMarketContextFetcher(ohlcv=ohlcv_fetcher)
+    extractor = FeatureExtractor()
+
+    end = datetime.now(tz=UTC).date()
+    start = end - timedelta(days=days)
+    market = market_fetcher.fetch(start, end)
+
+    # 1. Extract per-symbol feature vectors + last close.
+    feature_vectors: list[FeatureVector] = []
+    last_closes: dict[str, float] = {}
+    for sym in symbols:
+        ohlcv = ohlcv_fetcher.fetch(sym.upper(), start, end)
+        ts = ohlcv.index[-1].to_pydatetime()
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=UTC)
+        ctx = ExtractionContext(
+            timestamp=ts,
+            symbol=sym.upper(),
+            feature_version=FeatureExtractor.VERSION,
+            sector=None,
+            ohlcv=ohlcv,
+            fundamentals={},
+            vix_series=market.vix,
+            spy_close_series=market.spy_close,
+        )
+        fv = extractor.extract(ctx)
+        feature_vectors.append(fv)
+        last_closes[fv.symbol] = float(ohlcv["close"].iloc[-1])
+
+    # 2. Cross-section composites.
+    composites = CompositeBuilder().build(feature_vectors)
+    cv_by_symbol = {c.symbol: c for c in composites}
+
+    # 3. Score.
+    scorer = RuleBasedScorer(cfg.scorer)
+    scored = [scorer.score(fv, cv_by_symbol[fv.symbol]) for fv in feature_vectors]
+    scored.sort(key=lambda s: s.score, reverse=True)
+
+    # 4. Signals (no held positions in CLI demo).
+    signal_gen = SignalGenerator(cfg.scorer, cfg.signal)
+    candidates = [
+        CandidateData(
+            scored=s,
+            feature_vector=next(fv for fv in feature_vectors if fv.symbol == s.symbol),
+            last_close=last_closes[s.symbol],
+        )
+        for s in scored
+    ]
+    signals = signal_gen.generate(candidates, held=())
+    signal_by_symbol = {s.symbol: s for s in signals}
+
+    # 5. Risk evaluation against an empty portfolio (no concentration).
+    market_vix = float(feature_vectors[0].vix) if feature_vectors else float("nan")
+    market_state = MarketState(timestamp=feature_vectors[0].timestamp, vix=market_vix)
+    portfolio = PortfolioState()
+    risk = RiskEvaluator(cfg.risk)
+
+    # 6. Render top N.
+    table = RichTable(title=f"analyze ({len(symbols)} symbols, top {top})", show_lines=True)
+    table.add_column("rank", style="dim", justify="right")
+    table.add_column("symbol", style="cyan")
+    table.add_column("score", justify="right")
+    table.add_column("signal", style="bold")
+    table.add_column("size%", justify="right")
+    table.add_column("entry", justify="right")
+    table.add_column("SL", justify="right")
+    table.add_column("TP", justify="right")
+    table.add_column("triggers / risks")
+
+    for rank, sc in enumerate(scored[:top], start=1):
+        sig = signal_by_symbol.get(sc.symbol)
+        if sig is not None and sig.action == "BUY":
+            decision = risk.evaluate(sig, portfolio, market_state)
+            applied_size = (
+                decision.adjusted_size_pct
+                if decision.adjusted_size_pct is not None
+                else sig.target_size_pct
+            )
+            sig_label = sig.action if decision.action != "REJECT" else f"{sig.action} → REJECT"
+            entry = f"{sig.entry_price:.2f}" if sig.entry_price is not None else "-"
+            sl = f"{sig.stop_loss:.2f}" if sig.stop_loss is not None else "-"
+            tp = f"{sig.take_profit:.2f}" if sig.take_profit is not None else "-"
+            size_str = f"{applied_size * 100:.2f}%"
+        else:
+            sig_label = "HOLD"
+            entry = sl = tp = "-"
+            size_str = "-"
+
+        flags = ", ".join(sc.rationale.triggers + sc.rationale.risks) or "-"
+        table.add_row(
+            str(rank),
+            sc.symbol,
+            f"{sc.score:.3f}",
+            sig_label,
+            size_str,
+            entry,
+            sl,
+            tp,
+            flags,
+        )
+
+    console.print(table)
 
 
 if __name__ == "__main__":
