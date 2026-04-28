@@ -10,6 +10,8 @@ Commands implemented:
     bloasis fetch ohlcv <SYMBOL> [--days N] [--config YAML]
     bloasis fetch fundamentals [--config YAML] [--max N]
     bloasis sentiment <SYMBOL> [--config YAML]
+  PR3 (feature layer)
+    bloasis features <SYMBOL> [--config YAML] [--days N]
 """
 
 from __future__ import annotations
@@ -312,6 +314,77 @@ def sentiment_show(
     summary.add_row("article_count", str(result.article_count))
     summary.add_row("rationale", result.rationale)
     summary.add_row("fetched_at", result.fetched_at.isoformat())
+    console.print(summary)
+
+
+# ---------------------------------------------------------------------------
+# Features (PR3)
+# ---------------------------------------------------------------------------
+
+
+@app.command("features")
+def features_show(
+    symbol: str = typer.Argument(...),
+    days: int = typer.Option(  # noqa: B008
+        365, "--days", min=60, help="OHLCV window in days (>=60 for momentum_60d)."
+    ),
+    config_path: Path = typer.Option(  # noqa: B008
+        None, "--config", "-c"
+    ),
+) -> None:
+    """Extract a FeatureVector for a symbol at the latest bar.
+
+    Live mode: pulls OHLCV via yfinance + uses default fundamentals (none
+    pre-fetched). Sentiment is NaN — run `bloasis sentiment <SYMBOL>` first
+    if you want sentiment populated.
+    """
+    from bloasis.data.cache import ParquetCache
+    from bloasis.data.fetchers.yfinance_market import YfMarketContextFetcher
+    from bloasis.data.fetchers.yfinance_ohlcv import YfOhlcvFetcher
+    from bloasis.scoring.extractor import ExtractionContext, FeatureExtractor
+    from bloasis.scoring.regime import classify_regime
+
+    cfg = _load_or_default_config(config_path)
+    cache = ParquetCache(cfg.data.cache_dir, namespace="ohlcv")
+    ohlcv_fetcher = YfOhlcvFetcher(cache=cache, max_age_hours=cfg.data.ohlcv_cache_max_age_hours)
+    market_fetcher = YfMarketContextFetcher(ohlcv=ohlcv_fetcher)
+
+    end = datetime.now(tz=UTC).date()
+    start = end - timedelta(days=days)
+
+    ohlcv = ohlcv_fetcher.fetch(symbol, start, end)
+    market = market_fetcher.fetch(start, end)
+
+    ts = ohlcv.index[-1].to_pydatetime()
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=UTC)
+
+    ctx = ExtractionContext(
+        timestamp=ts,
+        symbol=symbol.upper(),
+        feature_version=FeatureExtractor.VERSION,
+        sector=None,
+        ohlcv=ohlcv,
+        fundamentals={},
+        vix_series=market.vix,
+        spy_close_series=market.spy_close,
+        sentiment_score=None,
+        news_count=None,
+    )
+    fv = FeatureExtractor().extract(ctx)
+    regime = classify_regime(fv.vix, fv.spy_above_sma200)
+
+    summary = RichTable(title=f"features: {fv.symbol}", show_header=True)
+    summary.add_column("name", style="cyan")
+    summary.add_column("value", justify="right")
+    for col in fv.FEATURE_COLUMNS:
+        v = getattr(fv, col)
+        if isinstance(v, float) and v != v:
+            display = "[dim]NaN[/dim]"
+        else:
+            display = f"{v:+.4f}" if isinstance(v, float) else str(v)
+        summary.add_row(col, display)
+    summary.add_row("[bold]regime[/bold]", f"[bold]{regime}[/bold]")
     console.print(summary)
 
 

@@ -20,8 +20,11 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v4
 
+      - name: Install TA-Lib C library
+        run: sudo bash scripts/install-talib.sh
+
       - name: Install dependencies
-        run: uv sync --extra dev --extra data --extra llm
+        run: uv sync --extra dev --extra data --extra ta --extra llm
 
       - name: Lint (ruff)
         run: uv run ruff check bloasis/ tests/
