@@ -763,7 +763,7 @@ def runs_show(run_id: int = typer.Argument(...)) -> None:
     if row.acceptance_reasons_json:
         for line in json.loads(row.acceptance_reasons_json):
             color = "green" if line.startswith("PASS") else "red"
-            summary.add_row("  " + line[:5], f"[{color}]{line[6:]}[/{color}]")
+            summary.add_row(f"  {line[:4]}", f"[{color}]{line[5:]}[/{color}]")
     if row.error_message:
         summary.add_row("[red]error[/red]", row.error_message)
     console.print(summary)
