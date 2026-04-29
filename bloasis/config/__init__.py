@@ -4,6 +4,7 @@ from bloasis.config.loader import config_hash, load_config, resolve_overrides
 from bloasis.config.schema import (
     AcceptanceCriteria,
     AllocationConfig,
+    AllocationStrategy,
     DataConfig,
     ExecutionConfig,
     PreFilterConfig,
@@ -17,6 +18,7 @@ from bloasis.config.schema import (
 __all__ = [
     "AcceptanceCriteria",
     "AllocationConfig",
+    "AllocationStrategy",
     "DataConfig",
     "ExecutionConfig",
     "PreFilterConfig",

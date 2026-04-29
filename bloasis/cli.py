@@ -18,6 +18,11 @@ Commands implemented:
     bloasis backtest --config YAML --start DATE --end DATE [--symbols ...]
     bloasis runs list [--limit N]
     bloasis runs show <run_id>
+  PR6 (trade + composer)
+    bloasis runs compare <run_id1> <run_id2>
+    bloasis trade dry-run --config YAML -s SYM ...
+    bloasis trade paper   --config YAML -s SYM ...
+    bloasis trade live    --config YAML --from-run <id> -s SYM ... [--i-am-sure]
 """
 
 from __future__ import annotations
@@ -26,6 +31,7 @@ import json
 import os
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import typer
 from rich.console import Console
@@ -36,6 +42,10 @@ from bloasis.backtest.result import BacktestResult
 from bloasis.config import StrategyConfig, config_hash, load_config
 from bloasis.scoring.features import FeatureVector
 from bloasis.storage import create_all, get_engine, metadata
+
+if TYPE_CHECKING:
+    from bloasis.broker import BrokerAdapter
+    from bloasis.signal import CandidateData
 
 app = typer.Typer(
     name="bloasis",
@@ -48,10 +58,12 @@ config_app = typer.Typer(name="config", help="Inspect and validate strategy conf
 universe_app = typer.Typer(name="universe", help="Show universe membership.")
 fetch_app = typer.Typer(name="fetch", help="Fetch and cache market data.")
 runs_app = typer.Typer(name="runs", help="Inspect past backtest runs.")
+trade_app = typer.Typer(name="trade", help="Execute strategy signals against a broker.")
 app.add_typer(config_app, name="config")
 app.add_typer(universe_app, name="universe")
 app.add_typer(fetch_app, name="fetch")
 app.add_typer(runs_app, name="runs")
+app.add_typer(trade_app, name="trade")
 
 console = Console()
 
@@ -791,6 +803,346 @@ def _render_backtest_result(
             console.print(f"  [green]{line}[/green]")
         else:
             console.print(f"  [red]{line}[/red]")
+
+
+# ---------------------------------------------------------------------------
+# runs compare (PR6)
+# ---------------------------------------------------------------------------
+
+
+@runs_app.command("compare")
+def runs_compare(
+    run_id_a: int = typer.Argument(..., metavar="RUN_A"),  # noqa: B008
+    run_id_b: int = typer.Argument(..., metavar="RUN_B"),  # noqa: B008
+) -> None:
+    """Side-by-side metric + config diff between two backtest runs."""
+    from sqlalchemy import select
+
+    from bloasis.storage import backtest_runs as br_table
+
+    engine = get_engine()
+    with engine.connect() as conn:
+        rows = {
+            r.run_id: r
+            for r in conn.execute(
+                select(br_table).where(br_table.c.run_id.in_([run_id_a, run_id_b]))
+            ).fetchall()
+        }
+    if run_id_a not in rows or run_id_b not in rows:
+        missing = [r for r in (run_id_a, run_id_b) if r not in rows]
+        console.print(f"[red]run_id(s) not found: {missing}[/red]")
+        raise typer.Exit(code=1)
+
+    a, b = rows[run_id_a], rows[run_id_b]
+    table = RichTable(title=f"compare run {run_id_a} vs {run_id_b}")
+    table.add_column("metric", style="cyan")
+    table.add_column(f"#{run_id_a}", justify="right")
+    table.add_column(f"#{run_id_b}", justify="right")
+    table.add_column("delta", justify="right", style="bold")
+
+    for col, label in [
+        ("config_hash", "config_hash"),
+        ("scorer_type", "scorer"),
+        ("status", "status"),
+        ("total_return", "total_return"),
+        ("annualized_return", "annualized"),
+        ("sharpe", "sharpe"),
+        ("max_drawdown", "max_dd"),
+        ("alpha_vs_spy", "alpha_vs_spy"),
+        ("win_rate", "win_rate"),
+        ("n_trades", "trades"),
+    ]:
+        va, vb = getattr(a, col), getattr(b, col)
+        delta_str = "-"
+        if (
+            isinstance(va, (int, float))
+            and isinstance(vb, (int, float))
+            and (va is not None and vb is not None)
+        ):
+            delta = vb - va
+            delta_str = f"{delta:+.4f}" if isinstance(delta, float) else f"{delta:+d}"
+        table.add_row(label, _fmt_cell(va), _fmt_cell(vb), delta_str)
+    console.print(table)
+
+
+def _fmt_cell(v: object) -> str:
+    if v is None:
+        return "-"
+    if isinstance(v, float):
+        return f"{v:.4f}"
+    return str(v)
+
+
+# ---------------------------------------------------------------------------
+# trade (PR6)
+# ---------------------------------------------------------------------------
+
+
+@trade_app.command("dry-run")
+def trade_dry_run(
+    symbols: list[str] = typer.Option(  # noqa: B008
+        None, "--symbol", "-s", help="Symbol to consider. Repeatable."
+    ),
+    config_path: Path = typer.Option(None, "--config", "-c"),  # noqa: B008
+    days: int = typer.Option(  # noqa: B008
+        365, "--days", min=60, help="OHLCV window for feature extraction."
+    ),
+) -> None:
+    """Generate signals and route through InMemoryPaperBroker — no network.
+
+    Useful as a final sanity check that the wiring works before pointing
+    at a real Alpaca account.
+    """
+    from bloasis.broker import InMemoryPaperBroker
+
+    if not symbols or len(symbols) < 2:
+        raise typer.BadParameter("at least 2 --symbol/-s entries required")
+
+    cfg = _load_or_default_config(config_path)
+    candidates, last_closes = _build_live_candidates(cfg, symbols, days)
+
+    if not candidates:
+        console.print("[yellow]no candidates produced (need 2+ symbols with data)[/yellow]")
+        raise typer.Exit(code=1)
+
+    broker = InMemoryPaperBroker(
+        price_fn=lambda s: last_closes.get(s, 0.0),
+        initial_cash=cfg.execution.initial_capital,
+        slippage_bps=cfg.execution.market_slippage_bps,
+    )
+    _execute_against_broker(cfg, candidates, broker, label="dry-run")
+
+
+@trade_app.command("paper")
+def trade_paper(
+    symbols: list[str] = typer.Option(  # noqa: B008
+        None, "--symbol", "-s"
+    ),
+    config_path: Path = typer.Option(None, "--config", "-c"),  # noqa: B008
+    days: int = typer.Option(365, "--days", min=60),  # noqa: B008
+) -> None:
+    """Submit BUY/SELL signals to Alpaca paper account."""
+    from bloasis.broker import AlpacaBrokerAdapter
+
+    if not symbols or len(symbols) < 2:
+        raise typer.BadParameter("at least 2 --symbol/-s entries required")
+
+    cfg = _load_or_default_config(config_path)
+    candidates, _last_closes = _build_live_candidates(cfg, symbols, days)
+    if not candidates:
+        console.print("[yellow]no candidates produced[/yellow]")
+        raise typer.Exit(code=1)
+
+    broker = AlpacaBrokerAdapter(mode="paper")
+    _execute_against_broker(cfg, candidates, broker, label="paper")
+
+
+@trade_app.command("live")
+def trade_live(
+    symbols: list[str] = typer.Option(  # noqa: B008
+        None, "--symbol", "-s"
+    ),
+    config_path: Path = typer.Option(None, "--config", "-c"),  # noqa: B008
+    from_run: int = typer.Option(  # noqa: B008
+        ..., "--from-run", help="Backtest run_id whose acceptance gate gates this."
+    ),
+    i_am_sure: bool = typer.Option(  # noqa: B008
+        False, "--i-am-sure", help="Skip the interactive confirmation prompt."
+    ),
+    days: int = typer.Option(365, "--days", min=60),  # noqa: B008
+) -> None:
+    """Submit BUY/SELL signals to Alpaca LIVE account.
+
+    Multi-stage gate (per docs/mission.md):
+      1. ALPACA_LIVE_API_KEY must be set.
+      2. --from-run <id> required.
+      3. backtest_runs[id].passed_acceptance must be True.
+      4. Interactive 'I AM SURE' OR --i-am-sure flag.
+      5. Halt-condition reminder (PR7+).
+    """
+    from sqlalchemy import select
+
+    from bloasis.broker import AlpacaBrokerAdapter
+    from bloasis.storage import backtest_runs as br_table
+
+    if not symbols or len(symbols) < 2:
+        raise typer.BadParameter("at least 2 --symbol/-s entries required")
+
+    # Gate 1: live key present.
+    if not os.environ.get("ALPACA_LIVE_API_KEY"):
+        console.print("[red]ALPACA_LIVE_API_KEY not set; refusing live mode[/red]")
+        raise typer.Exit(code=1)
+
+    # Gate 2/3: read backtest run + acceptance.
+    engine = get_engine()
+    with engine.connect() as conn:
+        run_row = conn.execute(select(br_table).where(br_table.c.run_id == from_run)).first()
+    if run_row is None:
+        console.print(f"[red]backtest run {from_run} not found[/red]")
+        raise typer.Exit(code=1)
+    if run_row.status != "completed":
+        console.print(f"[red]run {from_run} status={run_row.status}; cannot promote[/red]")
+        raise typer.Exit(code=1)
+    # Note: passed_acceptance is not persisted in backtest_runs table yet;
+    # we use alpha_vs_spy >= acceptance threshold as a proxy for now.
+    cfg = _load_or_default_config(config_path)
+    if (run_row.alpha_vs_spy or -999) < cfg.acceptance_criteria.median_alpha_annualized:
+        console.print(
+            f"[red]run {from_run} alpha={run_row.alpha_vs_spy:+.4f} below "
+            f"acceptance threshold {cfg.acceptance_criteria.median_alpha_annualized:+.4f}[/red]"
+        )
+        raise typer.Exit(code=1)
+
+    # Gate 4: interactive confirmation.
+    if not i_am_sure:
+        console.print(
+            f"[yellow]About to submit LIVE orders. Run #{from_run} alpha "
+            f"{run_row.alpha_vs_spy:+.4f}.[/yellow]"
+        )
+        confirm = typer.prompt("Type 'I AM SURE' to proceed")
+        if confirm.strip() != "I AM SURE":
+            console.print("aborted")
+            raise typer.Exit(code=1)
+
+    # Gate 5: halt condition (deferred to PR7+).
+    console.print("[yellow]live halt-condition check deferred to PR7+[/yellow]")
+
+    candidates, _last_closes = _build_live_candidates(cfg, symbols, days)
+    if not candidates:
+        console.print("[yellow]no candidates produced[/yellow]")
+        raise typer.Exit(code=1)
+
+    broker = AlpacaBrokerAdapter(mode="live")
+    _execute_against_broker(cfg, candidates, broker, label="live")
+
+
+def _build_live_candidates(
+    cfg: StrategyConfig,
+    symbols: list[str],
+    days: int,
+) -> tuple[list[CandidateData], dict[str, float]]:
+    """Pull OHLCV + market context, build candidates ranked by score.
+
+    Returned tuple is `(candidates, last_close_by_symbol)`. Empty list
+    when fewer than 2 symbols produced features (cross-section z-score
+    requires ≥ 2).
+    """
+    from bloasis.data.cache import ParquetCache
+    from bloasis.data.fetchers.yfinance_market import YfMarketContextFetcher
+    from bloasis.data.fetchers.yfinance_ohlcv import YfOhlcvFetcher
+    from bloasis.scoring.composites import CompositeBuilder
+    from bloasis.scoring.extractor import ExtractionContext, FeatureExtractor
+    from bloasis.scoring.scorer import RuleBasedScorer
+    from bloasis.signal import CandidateData
+
+    cache = ParquetCache(cfg.data.cache_dir, namespace="ohlcv")
+    ohlcv_fetcher = YfOhlcvFetcher(cache=cache, max_age_hours=cfg.data.ohlcv_cache_max_age_hours)
+    market_fetcher = YfMarketContextFetcher(ohlcv=ohlcv_fetcher)
+    extractor = FeatureExtractor()
+
+    end = datetime.now(tz=UTC).date()
+    start = end - timedelta(days=days)
+    market = market_fetcher.fetch(start, end)
+
+    feature_vectors: list[FeatureVector] = []
+    last_closes: dict[str, float] = {}
+    for sym in symbols:
+        ohlcv = ohlcv_fetcher.fetch(sym.upper(), start, end)
+        ts = ohlcv.index[-1].to_pydatetime()
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=UTC)
+        ctx = ExtractionContext(
+            timestamp=ts,
+            symbol=sym.upper(),
+            feature_version=FeatureExtractor.VERSION,
+            sector=None,
+            ohlcv=ohlcv,
+            fundamentals={},
+            vix_series=market.vix,
+            spy_close_series=market.spy_close,
+        )
+        feature_vectors.append(extractor.extract(ctx))
+        last_closes[sym.upper()] = float(ohlcv["close"].iloc[-1])
+
+    if len(feature_vectors) < 2:
+        return [], last_closes
+    composites = CompositeBuilder().build(feature_vectors)
+    cv_by_sym = {c.symbol: c for c in composites}
+    scorer = RuleBasedScorer(cfg.scorer)
+    scored = [scorer.score(fv, cv_by_sym[fv.symbol]) for fv in feature_vectors]
+    candidates = [
+        CandidateData(
+            scored=s,
+            feature_vector=next(fv for fv in feature_vectors if fv.symbol == s.symbol),
+            last_close=last_closes[s.symbol],
+        )
+        for s in scored
+    ]
+    return candidates, last_closes
+
+
+def _execute_against_broker(
+    cfg: StrategyConfig,
+    candidates: list[CandidateData],
+    broker: BrokerAdapter,
+    *,
+    label: str,
+) -> None:
+    """Translate signals into broker orders and print the result table."""
+    from bloasis.allocation.composer import StrategyComposer
+    from bloasis.broker import BrokerAdapter, BrokerOrder
+    from bloasis.signal import SignalGenerator
+
+    assert isinstance(broker, BrokerAdapter), "broker must implement BrokerAdapter"
+
+    sig_gen = SignalGenerator(cfg.scorer, cfg.signal)
+    signals = sig_gen.generate(candidates, held=())
+
+    account = broker.get_account()
+    composer = StrategyComposer(cfg.allocation)
+    plan = composer.plan(total_capital=account.cash, spy_price=None)
+
+    table = RichTable(title=f"trade {label}")
+    table.add_column("symbol", style="cyan")
+    table.add_column("side", style="bold")
+    table.add_column("qty", justify="right")
+    table.add_column("status")
+    table.add_column("filled $", justify="right")
+    table.add_column("reason")
+
+    # Use plan.strategy_capital (slice for this strategy) to size orders.
+    capital_for_strategy = plan.strategy_capital if plan.strategy_capital > 0 else account.cash
+
+    for sig in signals:
+        if sig.action != "BUY":
+            continue
+        if sig.entry_price is None or sig.entry_price <= 0:
+            continue
+        target = capital_for_strategy * sig.target_size_pct
+        qty = target / float(sig.entry_price)
+        if qty <= 0:
+            continue
+        order = BrokerOrder(
+            symbol=sig.symbol,
+            side="buy",
+            qty=qty,
+            client_order_id=f"bloasis-{label}-{sig.symbol}-{int(sig.timestamp.timestamp())}",
+        )
+        result = broker.place_market_order(order)
+        table.add_row(
+            sig.symbol,
+            "buy",
+            f"{qty:.4f}",
+            result.status,
+            f"{result.filled_avg_price * result.filled_qty:.2f}",
+            result.reason or sig.reason,
+        )
+
+    console.print(table)
+    console.print(
+        f"[dim]broker={broker.mode} | strategy_capital=${capital_for_strategy:,.2f} | "
+        f"spy_qty={plan.spy_share_qty}[/dim]"
+    )
 
 
 if __name__ == "__main__":
