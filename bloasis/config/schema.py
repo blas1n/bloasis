@@ -183,6 +183,12 @@ class RiskConfig(BaseModel):
     max_single_order_pct: float = Field(default=0.10, gt=0.0, le=1.0)
     max_sector_concentration: float = Field(default=0.30, gt=0.0, le=1.0)
 
+    # Live-trading halt: refuse `bloasis trade live` when realized PnL over
+    # `halt_drawdown_lookback_days` falls below `-halt_drawdown_pct *
+    # initial_capital`. Set `halt_drawdown_pct=0` to disable. See L009.
+    halt_drawdown_pct: float = Field(default=0.10, ge=0.0, le=1.0)
+    halt_drawdown_lookback_days: int = Field(default=30, ge=1)
+
     @model_validator(mode="after")
     def _validate_vix_order(self) -> RiskConfig:
         if self.vix_high >= self.vix_extreme:

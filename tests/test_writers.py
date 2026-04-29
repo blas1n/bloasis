@@ -135,6 +135,47 @@ def test_finalize_backtest_run_writes_metrics(tmp_db_path: Path) -> None:
     assert row.n_trades == 40
     assert row.final_equity == 110_000.0  # last fold
     assert row.finished_at is not None
+    # Acceptance persisted (PR7 polish).
+    assert row.passed_acceptance is True
+    assert row.acceptance_reasons_json is not None
+    import json as _json
+
+    reasons = _json.loads(row.acceptance_reasons_json)
+    assert reasons == ["PASS alpha", "PASS sharpe"]
+
+
+def test_finalize_persists_failed_acceptance(tmp_db_path: Path) -> None:
+    """A run with passed_acceptance=False should be queryable as such — the
+    `bloasis trade live` gate refuses to promote runs where this is not True.
+    """
+    from dataclasses import replace
+
+    engine = get_engine(tmp_db_path)
+    create_all(engine)
+    run_id = writers.create_backtest_run(
+        engine,
+        name="r",
+        config_hash="abc",
+        config_json="{}",
+        scorer_type="rule",
+        feature_version=1,
+        start_date=datetime(2023, 7, 1, tzinfo=UTC),
+        end_date=datetime(2023, 12, 31, tzinfo=UTC),
+        initial_capital=100_000.0,
+    )
+    failed = replace(
+        _result(run_id),
+        passed_acceptance=False,
+        acceptance_reasons=("FAIL alpha < 0", "PASS sharpe"),
+    )
+    writers.finalize_backtest_run(engine, run_id, failed)
+    with engine.connect() as conn:
+        row = conn.execute(select(backtest_runs).where(backtest_runs.c.run_id == run_id)).first()
+    assert row is not None
+    assert row.passed_acceptance is False
+    import json as _json
+
+    assert _json.loads(row.acceptance_reasons_json)[0].startswith("FAIL")
 
 
 def test_fail_backtest_run_marks_failed(tmp_db_path: Path) -> None:

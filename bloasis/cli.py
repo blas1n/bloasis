@@ -23,6 +23,9 @@ Commands implemented:
     bloasis trade dry-run --config YAML -s SYM ...
     bloasis trade paper   --config YAML -s SYM ...
     bloasis trade live    --config YAML --from-run <id> -s SYM ... [--i-am-sure]
+  PR7 (polish)
+    backtest_runs.passed_acceptance + acceptance_reasons_json persisted
+    `trade live` checks passed_acceptance directly + halt-condition gate
 """
 
 from __future__ import annotations
@@ -223,7 +226,7 @@ def fetch_ohlcv(
     symbol: str = typer.Argument(...),
     days: int = typer.Option(90, "--days", min=1),  # noqa: B008
     config_path: Path = typer.Option(  # noqa: B008
-        None, "--config", "-c"
+        None, "--config", "-c", help="Strategy YAML (uses defaults if omitted)."
     ),
 ) -> None:
     """Fetch and cache daily OHLCV for a symbol."""
@@ -247,7 +250,7 @@ def fetch_ohlcv(
 @fetch_app.command("fundamentals")
 def fetch_fundamentals(
     config_path: Path = typer.Option(  # noqa: B008
-        None, "--config", "-c"
+        None, "--config", "-c", help="Strategy YAML (uses defaults if omitted)."
     ),
     max_count: int = typer.Option(1000, "--max", min=1),  # noqa: B008
 ) -> None:
@@ -301,7 +304,7 @@ def fetch_fundamentals(
 def sentiment_show(
     symbol: str = typer.Argument(...),
     config_path: Path = typer.Option(  # noqa: B008
-        None, "--config", "-c"
+        None, "--config", "-c", help="Strategy YAML (uses defaults if omitted)."
     ),
     force_refresh: bool = typer.Option(  # noqa: B008
         False, "--refresh", help="Bypass cache."
@@ -351,7 +354,7 @@ def features_show(
         365, "--days", min=60, help="OHLCV window in days (>=60 for momentum_60d)."
     ),
     config_path: Path = typer.Option(  # noqa: B008
-        None, "--config", "-c"
+        None, "--config", "-c", help="Strategy YAML (uses defaults if omitted)."
     ),
 ) -> None:
     """Extract a FeatureVector for a symbol at the latest bar.
@@ -421,7 +424,7 @@ def analyze(
         ..., help="Two or more symbols to score in cross-section."
     ),
     config_path: Path = typer.Option(  # noqa: B008
-        None, "--config", "-c"
+        None, "--config", "-c", help="Strategy YAML (uses defaults if omitted)."
     ),
     days: int = typer.Option(  # noqa: B008
         365, "--days", min=60, help="OHLCV window in days (>=60 for momentum_60d)."
@@ -566,7 +569,7 @@ def backtest(
     start: str = typer.Option(..., "--start", help="YYYY-MM-DD"),  # noqa: B008
     end: str = typer.Option(..., "--end", help="YYYY-MM-DD"),  # noqa: B008
     config_path: Path = typer.Option(  # noqa: B008
-        None, "--config", "-c"
+        None, "--config", "-c", help="Strategy YAML (uses defaults if omitted)."
     ),
     symbols: list[str] = typer.Option(  # noqa: B008
         None,
@@ -752,6 +755,15 @@ def runs_show(run_id: int = typer.Argument(...)) -> None:
         else:
             display = str(v)
         summary.add_row(label, display)
+    # Acceptance gate result.
+    accept_label = "[green]YES[/green]" if row.passed_acceptance else "[red]NO[/red]"
+    if row.passed_acceptance is None:
+        accept_label = "-"
+    summary.add_row("passed_acceptance", accept_label)
+    if row.acceptance_reasons_json:
+        for line in json.loads(row.acceptance_reasons_json):
+            color = "green" if line.startswith("PASS") else "red"
+            summary.add_row("  " + line[:5], f"[{color}]{line[6:]}[/{color}]")
     if row.error_message:
         summary.add_row("[red]error[/red]", row.error_message)
     console.print(summary)
@@ -844,6 +856,7 @@ def runs_compare(
         ("config_hash", "config_hash"),
         ("scorer_type", "scorer"),
         ("status", "status"),
+        ("passed_acceptance", "passed"),
         ("total_return", "total_return"),
         ("annualized_return", "annualized"),
         ("sharpe", "sharpe"),
@@ -883,7 +896,9 @@ def trade_dry_run(
     symbols: list[str] = typer.Option(  # noqa: B008
         None, "--symbol", "-s", help="Symbol to consider. Repeatable."
     ),
-    config_path: Path = typer.Option(None, "--config", "-c"),  # noqa: B008
+    config_path: Path = typer.Option(  # noqa: B008
+        None, "--config", "-c", help="Strategy YAML (uses defaults if omitted)."
+    ),
     days: int = typer.Option(  # noqa: B008
         365, "--days", min=60, help="OHLCV window for feature extraction."
     ),
@@ -918,7 +933,9 @@ def trade_paper(
     symbols: list[str] = typer.Option(  # noqa: B008
         None, "--symbol", "-s"
     ),
-    config_path: Path = typer.Option(None, "--config", "-c"),  # noqa: B008
+    config_path: Path = typer.Option(  # noqa: B008
+        None, "--config", "-c", help="Strategy YAML (uses defaults if omitted)."
+    ),
     days: int = typer.Option(365, "--days", min=60),  # noqa: B008
 ) -> None:
     """Submit BUY/SELL signals to Alpaca paper account."""
@@ -942,7 +959,9 @@ def trade_live(
     symbols: list[str] = typer.Option(  # noqa: B008
         None, "--symbol", "-s"
     ),
-    config_path: Path = typer.Option(None, "--config", "-c"),  # noqa: B008
+    config_path: Path = typer.Option(  # noqa: B008
+        None, "--config", "-c", help="Strategy YAML (uses defaults if omitted)."
+    ),
     from_run: int = typer.Option(  # noqa: B008
         ..., "--from-run", help="Backtest run_id whose acceptance gate gates this."
     ),
@@ -955,14 +974,16 @@ def trade_live(
 
     Multi-stage gate (per docs/mission.md):
       1. ALPACA_LIVE_API_KEY must be set.
-      2. --from-run <id> required.
-      3. backtest_runs[id].passed_acceptance must be True.
-      4. Interactive 'I AM SURE' OR --i-am-sure flag.
-      5. Halt-condition reminder (PR7+).
+      2. --from-run <id> required and run must exist.
+      3. backtest_runs[id].status == 'completed'.
+      4. backtest_runs[id].passed_acceptance is True.
+      5. Halt-condition: realized PnL over rolling window must be above floor.
+      6. Interactive 'I AM SURE' OR --i-am-sure flag.
     """
     from sqlalchemy import select
 
     from bloasis.broker import AlpacaBrokerAdapter
+    from bloasis.runtime.halt import evaluate_halt
     from bloasis.storage import backtest_runs as br_table
 
     if not symbols or len(symbols) < 2:
@@ -973,7 +994,8 @@ def trade_live(
         console.print("[red]ALPACA_LIVE_API_KEY not set; refusing live mode[/red]")
         raise typer.Exit(code=1)
 
-    # Gate 2/3: read backtest run + acceptance.
+    # Gate 2/3/4: read backtest run + acceptance.
+    cfg = _load_or_default_config(config_path)
     engine = get_engine()
     with engine.connect() as conn:
         run_row = conn.execute(select(br_table).where(br_table.c.run_id == from_run)).first()
@@ -983,17 +1005,23 @@ def trade_live(
     if run_row.status != "completed":
         console.print(f"[red]run {from_run} status={run_row.status}; cannot promote[/red]")
         raise typer.Exit(code=1)
-    # Note: passed_acceptance is not persisted in backtest_runs table yet;
-    # we use alpha_vs_spy >= acceptance threshold as a proxy for now.
-    cfg = _load_or_default_config(config_path)
-    if (run_row.alpha_vs_spy or -999) < cfg.acceptance_criteria.median_alpha_annualized:
-        console.print(
-            f"[red]run {from_run} alpha={run_row.alpha_vs_spy:+.4f} below "
-            f"acceptance threshold {cfg.acceptance_criteria.median_alpha_annualized:+.4f}[/red]"
-        )
+    if not run_row.passed_acceptance:
+        console.print(f"[red]run {from_run} did not pass acceptance gate; refusing live[/red]")
         raise typer.Exit(code=1)
 
-    # Gate 4: interactive confirmation.
+    # Gate 5: halt-condition check on recent live realized PnL.
+    halt = evaluate_halt(
+        engine,
+        cfg.risk,
+        initial_capital=cfg.execution.initial_capital,
+        now=datetime.now(tz=UTC),
+    )
+    if halt.should_halt:
+        console.print(f"[red]HALT: {halt.reason}[/red]")
+        raise typer.Exit(code=1)
+    console.print(f"[dim]halt check: {halt.reason}[/dim]")
+
+    # Gate 6: interactive confirmation.
     if not i_am_sure:
         console.print(
             f"[yellow]About to submit LIVE orders. Run #{from_run} alpha "
@@ -1003,9 +1031,6 @@ def trade_live(
         if confirm.strip() != "I AM SURE":
             console.print("aborted")
             raise typer.Exit(code=1)
-
-    # Gate 5: halt condition (deferred to PR7+).
-    console.print("[yellow]live halt-condition check deferred to PR7+[/yellow]")
 
     candidates, _last_closes = _build_live_candidates(cfg, symbols, days)
     if not candidates:
