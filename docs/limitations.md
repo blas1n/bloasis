@@ -164,6 +164,30 @@ backtests covering periods after live deployment started.
 
 ---
 
+## L009 — Halt condition is realized-only and rolling-window
+
+**Status**: open
+**Severity**: low
+**Affected components**: `bloasis/runtime/halt.py`
+
+**Impact**: `evaluate_halt` reads `trades.realized_pnl` over
+`risk.halt_drawdown_lookback_days` and refuses live submission when the
+sum drops below `-halt_drawdown_pct * initial_capital`. It does **not**
+include unrealized losses on open positions, and it does **not** consult
+the live broker's own equity curve. A strategy with one large open loss
+but no realized exits inside the window will not trip the halt; a string
+of small losing exits in a quiet stretch can trip it unnecessarily.
+
+**Current mitigation**: Conservative defaults (`halt_drawdown_pct=0.10`,
+30-day lookback). The interactive `'I AM SURE'` prompt remains the
+last-mile safety. Halt can be disabled with `halt_drawdown_pct=0`.
+
+**Planned resolution**: Wire `AlpacaBrokerAdapter.get_account()` (or a
+periodic equity snapshot table) into the halt check so MTM drawdown is
+also considered. Likely Phase 2 once live equity history accumulates.
+
+---
+
 ## How to add a limitation
 
 1. Pick next free `L00N` ID.

@@ -20,6 +20,7 @@ to coexist across multiple backtest runs (`run_id`) and feature versions.
 from __future__ import annotations
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     Column,
     DateTime,
@@ -206,6 +207,12 @@ backtest_runs = Table(
     Column("win_rate", Float, nullable=True),
     Column("n_trades", Integer, nullable=True),
     Column("alpha_vs_spy", Float, nullable=True),
+    # Acceptance gate result (machine-checked promotion criterion).
+    # `passed_acceptance` is the boolean used by `bloasis trade live --from-run`
+    # to gate live submissions; `acceptance_reasons_json` stores the per-criterion
+    # PASS/FAIL strings from `AcceptanceEvaluator` for audit and `runs show`.
+    Column("passed_acceptance", Boolean, nullable=True),  # NULL while running
+    Column("acceptance_reasons_json", Text, nullable=True),
     # Status
     Column("status", String(16), nullable=False, server_default="running"),
     Column("started_at", DateTime(timezone=True), nullable=False),

@@ -77,8 +77,9 @@ Use `.env` (gitignored) + pydantic settings. Never log API keys.
 
 ### 9. Tests mandatory
 
-New code needs tests. CI enforces > 70% coverage on `bloasis/`. Mock all
-external APIs (yfinance, Finnhub, LLM, Alpaca) in tests.
+New code needs tests. CI enforces ≥ 80% coverage on `bloasis/` via
+`--cov-fail-under=80` in `pyproject.toml`. Mock all external APIs
+(yfinance, Finnhub, LLM, Alpaca) in tests.
 
 ### 10. Acceptance gates respected
 

@@ -75,6 +75,7 @@ def finalize_backtest_run(
     final_equity = (
         result.fold_results[-1].final_equity if result.fold_results else result.initial_capital
     )
+    reasons_json = json.dumps(list(result.acceptance_reasons))
     with engine.begin() as conn:
         conn.execute(
             update(backtest_runs)
@@ -88,6 +89,8 @@ def finalize_backtest_run(
                 win_rate=result.median_win_rate,
                 n_trades=result.n_trades_total,
                 alpha_vs_spy=result.median_alpha_annualized,
+                passed_acceptance=result.passed_acceptance,
+                acceptance_reasons_json=reasons_json,
                 status="completed",
                 finished_at=now,
             )

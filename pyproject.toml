@@ -76,6 +76,7 @@ addopts = [
     "--strict-markers",
     "--cov=bloasis",
     "--cov-report=term-missing",
+    "--cov-fail-under=80",
 ]
 
 [tool.mypy]
