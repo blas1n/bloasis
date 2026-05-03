@@ -30,7 +30,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from typing import TYPE_CHECKING, cast
 
 import numpy as np
@@ -59,6 +59,8 @@ from bloasis.signal import CandidateData, HeldPosition, SignalGenerator, Trading
 
 if TYPE_CHECKING:
     from sqlalchemy import Engine
+
+    from bloasis.scoring.rationale import Rationale
 
 WARMUP_DAYS = 300  # SMA200 needs at least 200 bars; 300 leaves slack
 MIN_BARS_FOR_FEATURES = 60  # below this, features will be all-NaN — skip
@@ -190,6 +192,9 @@ class Backtester:
 
         equity_curve_strategy: list[float] = []
         equity_curve_spy: list[float] = []
+        # Per-fold fill log (with the rationale that produced each entry) so
+        # the engine can persist trades + equity_curve to the DB at fold end.
+        fold_fills: list[tuple[Fill, Rationale | None]] = []
 
         # SPY benchmark = lump-sum buy at fold start, hold to end.
         spy_initial_close = self._spy_close_at(window.test_start)
@@ -235,23 +240,30 @@ class Backtester:
                 )
 
                 if sig.action == "BUY":
-                    self._execute_buy(
+                    fill = self._execute_buy(
                         sig=sig,
                         size_pct=size_pct,
                         equity=equity_for_sizing,
                         portfolio=portfolio,
                         signal_date=today_dt,
                     )
+                    if fill is not None:
+                        fold_fills.append((fill, sig.score_breakdown))
                 elif sig.action == "SELL":
-                    self._execute_sell(sig, today_dt, portfolio)
+                    fill = self._execute_sell(sig, today_dt, portfolio)
+                    if fill is not None:
+                        fold_fills.append((fill, sig.score_breakdown))
 
             # 4. SL/TP enforcement on today's bar (after fills above).
             bars_today = self._bars_today(portfolio.held_symbols(), d)
-            portfolio.check_stops(
+            stop_fills = portfolio.check_stops(
                 bars_today,
                 today_dt,
                 slippage_bps=self._cfg.execution.market_slippage_bps,
             )
+            # Stops have no scorer rationale; persist with rationale=None.
+            for f in stop_fills:
+                fold_fills.append((f, None))
 
             # 5. Mark-to-market.
             close_today = self._closes_at(portfolio.held_symbols(), d)
@@ -267,7 +279,34 @@ class Backtester:
 
         result = self._fold_result(window, eq_strategy, eq_spy, portfolio)
         delisted_count = len(delisted_seen)
+
+        # Persist the fold's equity curve + each fill if the engine was
+        # constructed with a DB engine and the caller supplied a real run_id.
+        if self._db is not None and run_id > 0:
+            self._persist_fold(run_id, eq_strategy, fold_fills)
         return result, portfolio.trade_count, delisted_count
+
+    def _persist_fold(
+        self,
+        run_id: int,
+        eq_strategy: pd.Series,
+        fills: list[tuple[Fill, Rationale | None]],
+    ) -> None:
+        from bloasis.storage import writers
+
+        rows = [
+            {
+                "timestamp": cast(pd.Timestamp, ts).to_pydatetime().replace(tzinfo=UTC),
+                "cash": 0.0,  # not tracked separately yet; total_equity captures it
+                "invested": 0.0,
+                "total_equity": float(val),
+            }
+            for ts, val in eq_strategy.items()
+        ]
+        assert self._db is not None  # narrowed by caller
+        writers.write_equity_curve(self._db, run_id, rows)
+        for fill, rationale in fills:
+            writers.write_trade(self._db, run_id, fill, rationale)
 
     # ------------------------------------------------------------------
     # candidate construction
@@ -338,16 +377,17 @@ class Backtester:
         equity: float,
         portfolio: SimulatedPortfolio,
         signal_date: datetime,
-    ) -> None:
+    ) -> Fill | None:
+        """Returns the applied Fill (for DB write) or None if no order placed."""
         target_dollars = equity * size_pct
         if target_dollars <= 0 or sig.entry_price is None:
-            return
+            return None
         quantity = target_dollars / float(sig.entry_price)
         if quantity <= 0:
-            return
+            return None
         bars = self._data.bars.get(sig.symbol)
         if bars is None or bars.empty:
-            return
+            return None
         fill = self._fills.simulate_buy(
             symbol=sig.symbol,
             quantity=quantity,
@@ -358,34 +398,36 @@ class Backtester:
             reason=sig.reason,
         )
         if fill is None:
-            return
+            return None
         # Refuse if the fill would overdraw cash (slack from risk-eval rounding).
         cost = fill.quantity * fill.price + fill.fees
         if cost > portfolio.cash + 1e-6:
-            return
-        portfolio.apply(fill)
+            return None
+        applied = portfolio.apply(fill)
         portfolio.attach_levels(
             sig.symbol,
             stop_loss=sig.stop_loss,
             take_profit=sig.take_profit,
         )
+        return applied
 
     def _execute_sell(
         self,
         sig: TradingSignal,
         timestamp: datetime,
         portfolio: SimulatedPortfolio,
-    ) -> None:
+    ) -> Fill | None:
+        """Returns the applied SELL Fill or None if nothing to sell."""
         pos = portfolio.positions.get(sig.symbol)
         if pos is None:
-            return
+            return None
         # SELL the entire position at next-day open + slippage.
         bars = self._data.bars.get(sig.symbol)
         if bars is None:
-            return
+            return None
         forward = bars.loc[bars.index > timestamp]
         if forward.empty:
-            return
+            return None
         next_bar = forward.iloc[0]
         open_price = float(next_bar["open"])
         slippage = open_price * self._cfg.execution.market_slippage_bps / 10_000
@@ -401,7 +443,7 @@ class Backtester:
             sector=pos.sector,
             reason=sig.reason,
         )
-        portfolio.apply(fill)
+        return portfolio.apply(fill)
 
     # ------------------------------------------------------------------
     # data-access helpers
