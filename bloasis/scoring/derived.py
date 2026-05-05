@@ -19,15 +19,27 @@ if TYPE_CHECKING:
 TRADING_DAYS_PER_YEAR = 252
 
 
-def momentum(close: pd.Series, lookback: int) -> float:
-    """Pct return over `lookback` bars: (close[-1] - close[-lookback-1]) / close[-lookback-1]."""
-    if len(close) < lookback + 1:
+def momentum(close: pd.Series, lookback: int, *, skip: int = 0) -> float:
+    """Pct return over a `lookback`-bar window ending `skip` bars ago.
+
+    `skip=0` reproduces the classic trailing return:
+        (close[-1] - close[-lookback-1]) / close[-lookback-1]
+
+    `skip>0` excludes the most recent `skip` bars — this is the
+    Jegadeesh-Titman 1993 12-1 momentum convention (`lookback=252, skip=21`):
+        base = close[-(lookback+skip+1)]
+        top  = close[-(skip+1)]
+        return (top - base) / base
+    """
+    if skip < 0:
+        raise ValueError(f"skip must be >= 0, got {skip}")
+    if len(close) < lookback + skip + 1:
         return float("nan")
-    base = close.iloc[-lookback - 1]
-    last = close.iloc[-1]
+    base = close.iloc[-(lookback + skip + 1)]
+    top = close.iloc[-(skip + 1)]
     if base == 0 or (isinstance(base, float) and math.isnan(base)):
         return float("nan")
-    return float((last - base) / base)
+    return float((top - base) / base)
 
 
 def volatility_annualized(close: pd.Series, window: int = 20) -> float:
