@@ -247,6 +247,48 @@ def fetch_ohlcv(
     console.print(f"  cached at: {cache.root}")
 
 
+@fetch_app.command("fixtures")
+def fetch_fixtures(
+    symbols: list[str] = typer.Option(  # noqa: B008
+        ..., "-s", "--symbol", help="Symbol(s); pass -s repeatedly for multiple."
+    ),
+    start: str = typer.Option(..., "--start", help="YYYY-MM-DD inclusive."),  # noqa: B008
+    end: str = typer.Option(..., "--end", help="YYYY-MM-DD inclusive."),  # noqa: B008
+    out_dir: Path = typer.Option(  # noqa: B008
+        Path("tests/fixtures/ohlcv"),
+        "--out-dir",
+        help="Output directory for {symbol}.parquet files.",
+    ),
+) -> None:
+    """Snapshot real OHLCV via yfinance into committable parquet fixtures.
+
+    Writes one flat `{out_dir}/{safe_symbol}.parquet` per symbol covering the
+    full [start, end] window. `^VIX` -> `IDX_VIX.parquet`. Tests load these
+    and slice to the per-test window — no cache-key coupling.
+
+    Network-dependent. Run once locally; commit the result.
+    """
+    from bloasis.data.fetchers.yfinance_ohlcv import YfOhlcvFetcher
+
+    start_date = _parse_date(start)
+    end_date = _parse_date(end)
+    if start_date is None or end_date is None:
+        raise typer.BadParameter("--start and --end are required (YYYY-MM-DD).")
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    fetcher = YfOhlcvFetcher(cache=None)
+
+    for symbol in symbols:
+        df = fetcher.fetch(symbol, start_date, end_date)
+        safe = symbol.replace("^", "IDX_")
+        path = out_dir / f"{safe}.parquet"
+        df.to_parquet(path, index=True)
+        console.print(
+            f"[green]✓[/green] {symbol}: {len(df)} bars "
+            f"({df.index.min().date()} .. {df.index.max().date()}) -> {path}"
+        )
+
+
 @fetch_app.command("fundamentals")
 def fetch_fundamentals(
     config_path: Path = typer.Option(  # noqa: B008

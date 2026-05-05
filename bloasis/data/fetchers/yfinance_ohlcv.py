@@ -86,4 +86,15 @@ class YfOhlcvFetcher:
                 f"yfinance returned unexpected columns for {symbol!r}: "
                 f"missing {missing}, got {list(df.columns)}"
             )
-        return cast("pd.DataFrame", df[list(OHLCV_COLUMNS)].copy())
+        result = df[list(OHLCV_COLUMNS)].copy()
+        # yfinance picks the exchange's home tz: America/New_York for NYSE,
+        # America/Chicago for ^VIX (CBOE), etc. The same trading day across
+        # symbols therefore lands on different UTC times, which breaks the
+        # look-ahead check when comparing index.max() across cross-section
+        # series. Daily bars represent a date — floor to midnight after the tz
+        # strip so day N is identical for every symbol.
+        if result.index.tz is not None:
+            result.index = result.index.tz_convert("UTC").tz_localize(None)
+        result.index = result.index.normalize()
+        result.index.name = "timestamp"
+        return cast("pd.DataFrame", result)
