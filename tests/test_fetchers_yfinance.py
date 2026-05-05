@@ -117,6 +117,36 @@ def test_ohlcv_normalizes_tz_aware_index() -> None:
     assert out.index.name == "timestamp"
 
 
+def test_ohlcv_floors_index_to_midnight_for_cross_exchange_alignment() -> None:
+    """yfinance picks the exchange home tz: NYSE = America/New_York,
+    ^VIX = America/Chicago. Without flooring to midnight, the same trading
+    day lands on different UTC times across symbols (NY 00:00 -> 04:00 UTC,
+    Chicago 00:00 -> 05:00 UTC) and breaks the look-ahead invariant the
+    extractor relies on. Floor to midnight so day N is identical everywhere.
+    """
+    chicago_idx = pd.DatetimeIndex(
+        pd.date_range("2024-05-04", periods=3, freq="D", tz="America/Chicago"),
+        name="Date",
+    )
+    df = pd.DataFrame(
+        {
+            "Open": [10.0, 11, 12],
+            "High": [11, 12, 13],
+            "Low": [9, 10, 11],
+            "Close": [10.5, 11.5, 12.5],
+            "Volume": [1000.0, 1100, 1200],
+        },
+        index=chicago_idx,
+    )
+    with _patch_ticker(df):
+        out = YfOhlcvFetcher().fetch("^VIX", date(2024, 5, 4), date(2024, 5, 6))
+    assert out.index.tz is None
+    # All bars at midnight (no time component) so cross-symbol max() comparisons
+    # don't trip on tz offsets.
+    assert (out.index == out.index.normalize()).all()
+    assert out.index[0] == pd.Timestamp("2024-05-04")
+
+
 def test_ohlcv_caret_symbol_keyed_safely(tmp_path: Path) -> None:
     df = _ohlcv_df()
     cache = ParquetCache(tmp_path, namespace="ohlcv")
