@@ -189,6 +189,9 @@ def universe_show(
     custom_csv_path: Path = typer.Option(  # noqa: B008
         None, "--csv", help="Required when source=custom_csv."
     ),
+    refresh: bool = typer.Option(  # noqa: B008
+        False, "--refresh", help="Force re-download of network-backed datasets."
+    ),
 ) -> None:
     """Resolve the universe to concrete tickers and print them."""
     from bloasis.config import UniverseConfig
@@ -208,7 +211,7 @@ def universe_show(
     if universe_cfg.source == "sp500_historical" and as_of_date is None:
         raise typer.BadParameter("sp500_historical requires --as-of YYYY-MM-DD")
 
-    symbols = load_universe(universe_cfg, cfg.data, as_of=as_of_date)
+    symbols = load_universe(universe_cfg, cfg.data, as_of=as_of_date, refresh=refresh)
     if count_only:
         console.print(len(symbols))
     else:
