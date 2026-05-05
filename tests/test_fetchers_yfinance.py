@@ -93,6 +93,30 @@ def test_ohlcv_uses_cache_on_warm_call(tmp_path: Path) -> None:
     assert fake_ticker.history.call_count == 1
 
 
+def test_ohlcv_normalizes_tz_aware_index() -> None:
+    """yfinance returns tz=America/New_York, name='Date'; fetcher must
+    return naive index named 'timestamp' so all downstream code (and every
+    test mock) sees one shape."""
+    idx = pd.DatetimeIndex(
+        pd.date_range("2024-01-02", periods=3, freq="D", tz="America/New_York"),
+        name="Date",
+    )
+    df = pd.DataFrame(
+        {
+            "Open": [10.0, 11, 12],
+            "High": [11, 12, 13],
+            "Low": [9, 10, 11],
+            "Close": [10.5, 11.5, 12.5],
+            "Volume": [1000.0, 1100, 1200],
+        },
+        index=idx,
+    )
+    with _patch_ticker(df):
+        out = YfOhlcvFetcher().fetch("AAPL", date(2024, 1, 2), date(2024, 1, 4))
+    assert out.index.tz is None, "index must be tz-naive"
+    assert out.index.name == "timestamp"
+
+
 def test_ohlcv_caret_symbol_keyed_safely(tmp_path: Path) -> None:
     df = _ohlcv_df()
     cache = ParquetCache(tmp_path, namespace="ohlcv")

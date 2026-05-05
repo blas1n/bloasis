@@ -86,4 +86,11 @@ class YfOhlcvFetcher:
                 f"yfinance returned unexpected columns for {symbol!r}: "
                 f"missing {missing}, got {list(df.columns)}"
             )
-        return cast("pd.DataFrame", df[list(OHLCV_COLUMNS)].copy())
+        result = df[list(OHLCV_COLUMNS)].copy()
+        # yfinance returns a tz-aware index named "Date" (America/New_York).
+        # Every mock and downstream consumer assumes naive + "timestamp" — normalize
+        # at the source so live and test paths share one shape.
+        if result.index.tz is not None:
+            result.index = result.index.tz_convert("UTC").tz_localize(None)
+        result.index.name = "timestamp"
+        return cast("pd.DataFrame", result)
