@@ -52,7 +52,7 @@ from bloasis.backtest.result import BacktestData, BacktestResult, FoldResult
 from bloasis.backtest.walk_forward import WalkForwardWindow, generate_folds
 from bloasis.config import StrategyConfig
 from bloasis.risk import MarketState, PortfolioState, RiskEvaluator
-from bloasis.scoring.composites import CompositeBuilder
+from bloasis.scoring.composites import CompositeBuilder, CompositeVector
 from bloasis.scoring.extractor import ExtractionContext, FeatureExtractor
 from bloasis.scoring.features import FeatureVector
 from bloasis.scoring.regime_overlay import (
@@ -396,11 +396,19 @@ class Backtester:
         composites = self._composer.build(feature_vectors)
         cv_by_sym = {c.symbol: c for c in composites}
 
-        candidates: list[CandidateData] = []
+        # PR15: cross-section batch scoring (LightGBMScorer needs the full
+        # cross-section for z-score → unit-score mapping; rule scorer's
+        # default impl just iterates score()).
+        scoring_fvs: list[FeatureVector] = []
+        scoring_cvs: list[CompositeVector] = []
         for fv in feature_vectors:
-            if fv.symbol not in cv_by_sym:
-                continue
-            scored = scorer.score(fv, cv_by_sym[fv.symbol])
+            if fv.symbol in cv_by_sym:
+                scoring_fvs.append(fv)
+                scoring_cvs.append(cv_by_sym[fv.symbol])
+        scored_list = scorer.score_cross_section(scoring_fvs, scoring_cvs)
+
+        candidates: list[CandidateData] = []
+        for fv, scored in zip(scoring_fvs, scored_list, strict=True):
             candidates.append(
                 CandidateData(
                     scored=scored,
@@ -546,9 +554,22 @@ class Backtester:
     # ------------------------------------------------------------------
 
     def _build_scorer(self, train_start: date, train_end: date) -> Scorer:
-        # Phase 1 RuleBasedScorer ignores train window. Phase 3 ML scorer
-        # will fit a model here on feature_log entries in [train_start, train_end].
-        return self._scorer_factory(self._cfg.scorer)  # type: ignore[call-arg]
+        """Build the scorer for this fold.
+
+        - `cfg.scorer.type == "rule"` (or factory override) → `RuleBasedScorer`
+        - `cfg.scorer.type == "ml"` → `LightGBMScorer` (PR15) loaded from
+          `cfg.scorer.ml_model_path`. The model itself was trained
+          OUT-OF-BAND via `bloasis ml train`; per-fold retraining is a
+          PR17+ measurement-time concern.
+        """
+        # Honor explicit factory override (used by tests).
+        if self._scorer_factory is not RuleBasedScorer:
+            return self._scorer_factory(self._cfg.scorer)  # type: ignore[call-arg]
+        if self._cfg.scorer.type == "ml":
+            from bloasis.scoring.scorer import LightGBMScorer
+
+            return LightGBMScorer(cfg=self._cfg.scorer)
+        return RuleBasedScorer(self._cfg.scorer)
 
     def _fold_result(
         self,

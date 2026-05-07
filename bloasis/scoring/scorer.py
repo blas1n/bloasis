@@ -1,4 +1,4 @@
-"""Scorer Protocol + RuleBasedScorer + MLScorer stub.
+"""Scorer Protocol + RuleBasedScorer + LightGBMScorer.
 
 The `Scorer` Protocol is the single contract between the scoring layer
 and consumers (signal generator, backtest engine, CLI). Both rule-based
@@ -8,14 +8,18 @@ and ML scorers conform; swapping is a config change, not a code change.
 regime-conditioned weights. Triggers/risks are derived from raw features
 using thresholds defined in `ScorerConfig.thresholds`.
 
-`MLScorerStub` is a Protocol-conforming placeholder that fails loudly
-until a model is trained (PR5+).
+`LightGBMScorer` (PR15) loads a pickled LightGBM regressor + JSON sidecar
+written by `bloasis ml train` and converts cross-section predictions to
+unit scores via z-score + Normal CDF (so top decile of predictions maps
+to ~ top decile of unit scores). Single-row scoring uses a sigmoid
+fallback.
 """
 
 from __future__ import annotations
 
 import math
-from typing import Protocol, cast, runtime_checkable
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Protocol, cast, runtime_checkable
 
 from bloasis.config import ScorerConfig
 from bloasis.config.schema import RegimeName
@@ -24,17 +28,25 @@ from bloasis.scoring.features import FeatureVector
 from bloasis.scoring.rationale import FactorContribution, Rationale, ScoredCandidate
 from bloasis.scoring.regime import classify_regime
 
+if TYPE_CHECKING:
+    import numpy as np
+
 
 @runtime_checkable
 class Scorer(Protocol):
     """Protocol every scorer (rule-based, ML) implements.
 
-    Takes both the raw `FeatureVector` (for triggers/risks/regime) and the
-    cross-section composite scores (for weighted aggregation). Returns a
-    fully-explained `ScoredCandidate`.
+    `score()` is the per-symbol entrypoint. `score_cross_section()` is
+    the batch entrypoint preferred by the engine — ML scorers override
+    it for batch predict + cross-section z-score; rule scorers use the
+    default fallback that just iterates `score()`.
     """
 
     def score(self, fv: FeatureVector, cv: CompositeVector) -> ScoredCandidate: ...
+
+    def score_cross_section(
+        self, fvs: list[FeatureVector], cvs: list[CompositeVector]
+    ) -> list[ScoredCandidate]: ...
 
 
 class RuleBasedScorer:
@@ -49,6 +61,13 @@ class RuleBasedScorer:
     def __init__(self, cfg: ScorerConfig) -> None:
         self._cfg = cfg
         self._base_weights: dict[str, float] = cfg.weights.model_dump()
+
+    def score_cross_section(
+        self, fvs: list[FeatureVector], cvs: list[CompositeVector]
+    ) -> list[ScoredCandidate]:
+        """Default impl — iterate `score()`. Rule-based scoring has no
+        cross-section dependency so this is correct + cheap."""
+        return [self.score(fv, cv) for fv, cv in zip(fvs, cvs, strict=True)]
 
     def score(self, fv: FeatureVector, cv: CompositeVector) -> ScoredCandidate:
         regime = classify_regime(fv.vix, fv.spy_above_sma200)
@@ -137,21 +156,123 @@ class RuleBasedScorer:
         return tuple(out)
 
 
-class MLScorerStub:
-    """Placeholder for the LightGBM scorer landing in PR5+.
+class LightGBMScorer:
+    """LightGBM-backed scorer (PR15, replaces the Phase 1 `MLScorerStub`).
 
-    Conforms to the `Scorer` Protocol so config-driven swapping works
-    today, but raises if anyone actually calls `score`. This way the
-    Phase 1 wiring is complete and Phase 3 just drops in an implementation.
+    Loads a pickled LightGBM Booster + JSON sidecar written by
+    `bloasis ml train`. Uses the FeatureVector's 23-column slice as
+    input; converts cross-section raw predictions to unit scores via
+    z-score + Normal CDF (so top decile of predictions maps to ~ top
+    decile of [0, 1]).
+
+    Single-row `score()` falls back to a logistic squash of the raw
+    prediction normalized by training-time IC scale — this is a rough
+    approximation; the production path is `score_cross_section()`,
+    which the engine calls per timestep.
     """
 
-    def __init__(self, model_path: str | None = None) -> None:
-        self.model_path = model_path
+    def __init__(self, *, cfg: ScorerConfig, model_path: Path | None = None) -> None:
+        from bloasis.ml.training import load_model
+
+        path = Path(model_path or cfg.ml_model_path or "")
+        if not path.exists():
+            raise FileNotFoundError(f"ml model not found at {path}")
+
+        self._cfg = cfg
+        self._model = load_model(path)
+        # Sidecar JSON written by ml.training.save_model.
+        sidecar = path.with_suffix(".json")
+        if sidecar.exists():
+            import json
+
+            self.metadata: dict[str, Any] = json.loads(sidecar.read_text())
+        else:
+            self.metadata = {}
+        self.feature_names: list[str] = list(
+            self.metadata.get("feature_names") or self._model.feature_name()
+        )
+
+    # ------------------------------------------------------------------
+    # Cross-section batch (production path)
+    # ------------------------------------------------------------------
+
+    def score_cross_section(
+        self, fvs: list[FeatureVector], cvs: list[CompositeVector]
+    ) -> list[ScoredCandidate]:
+        if not fvs:
+            return []
+        import numpy as np
+        import pandas as pd
+
+        # Build a DataFrame matching the model's feature_names order.
+        rows: list[dict[str, float]] = []
+        for fv in fvs:
+            rows.append({name: float(getattr(fv, name)) for name in self.feature_names})
+        X = pd.DataFrame(rows, columns=self.feature_names)
+        for col in self.feature_names:
+            X[col] = pd.to_numeric(X[col], errors="coerce")
+
+        preds = np.asarray(self._model.predict(X))
+        unit_scores = _zscore_to_unit(preds)
+
+        out: list[ScoredCandidate] = []
+        for fv, cv, raw, unit in zip(fvs, cvs, preds, unit_scores, strict=True):
+            out.append(self._build_scored(fv, cv, raw=float(raw), unit=float(unit)))
+        return out
+
+    # ------------------------------------------------------------------
+    # Single-row score (Scorer protocol compatibility)
+    # ------------------------------------------------------------------
 
     def score(self, fv: FeatureVector, cv: CompositeVector) -> ScoredCandidate:
-        raise NotImplementedError(
-            "MLScorerStub is not implemented; train a LightGBM model in PR5+ "
-            "and replace this with the real scorer."
+        import pandas as pd
+
+        row = pd.DataFrame(
+            [{name: float(getattr(fv, name)) for name in self.feature_names}],
+            columns=self.feature_names,
+        )
+        for col in self.feature_names:
+            row[col] = pd.to_numeric(row[col], errors="coerce")
+        raw = float(self._model.predict(row)[0])
+        # No cross-section here — sigmoid-like squash. Production path
+        # uses score_cross_section() which has proper cross-section z-score.
+        unit = 1.0 / (1.0 + math.exp(-raw / 0.05))  # 5% return ≈ 0.73
+        return self._build_scored(fv, cv, raw=raw, unit=unit)
+
+    # ------------------------------------------------------------------
+    # internals
+    # ------------------------------------------------------------------
+
+    def _build_scored(
+        self,
+        fv: FeatureVector,
+        cv: CompositeVector,
+        *,
+        raw: float,
+        unit: float,
+    ) -> ScoredCandidate:
+        unit = max(0.0, min(1.0, unit))
+        # Surface ML prediction as a single FactorContribution so the
+        # downstream rationale display still works; SHAP per-feature
+        # contributions are PR16.
+        contributions: tuple[FactorContribution, ...] = (
+            FactorContribution(
+                name="ml_prediction",
+                composite_score=raw,
+                weight=1.0,
+                contribution=raw,
+                inputs={},
+            ),
+        )
+        return ScoredCandidate(
+            symbol=fv.symbol,
+            timestamp=fv.timestamp,
+            score=unit,
+            rationale=Rationale(
+                contributions=contributions,
+                triggers=(),
+                risks=(),
+            ),
         )
 
 
@@ -178,3 +299,28 @@ def _inputs_for(composite_name: str, fv: FeatureVector) -> dict[str, float]:
 
 def _isnan(v: float) -> bool:
     return v != v
+
+
+def _zscore_to_unit(preds: np.ndarray) -> np.ndarray:
+    """Map raw cross-section predictions to [0, 1] via z-score → Normal CDF.
+
+    This preserves cross-section RANKING while spreading values across the
+    whole [0, 1] range — important for entry/exit thresholding (otherwise
+    LightGBM's tightly-clustered regression outputs would all sit near
+    sigmoid(0) ≈ 0.5).
+    """
+    import numpy as np
+
+    arr = np.asarray(preds, dtype=np.float64).ravel()
+    if arr.size == 0:
+        return arr
+    mu = float(np.nanmean(arr))
+    sd = float(np.nanstd(arr, ddof=1)) if arr.size >= 2 else 0.0
+    if sd <= 0 or not math.isfinite(sd):
+        # Degenerate cross-section (single symbol or all-equal preds) →
+        # neutral 0.5 for everyone.
+        return np.full_like(arr, 0.5, dtype=np.float64)
+    z = (arr - mu) / sd
+    # Normal CDF without scipy: 0.5 * (1 + erf(z / sqrt(2)))
+    cdf = 0.5 * (1.0 + np.vectorize(math.erf)(z / math.sqrt(2.0)))
+    return np.asarray(cdf, dtype=np.float64)

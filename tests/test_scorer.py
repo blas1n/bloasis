@@ -1,4 +1,6 @@
-"""Tests for `bloasis.scoring.scorer` — RuleBasedScorer + MLScorerStub."""
+"""Tests for `bloasis.scoring.scorer` — RuleBasedScorer.
+
+(LightGBMScorer tests live in `test_ml_scorer.py`.)"""
 
 from __future__ import annotations
 
@@ -10,7 +12,7 @@ import pytest
 from bloasis.config import ScorerConfig
 from bloasis.scoring.composites import COMPOSITE_NAMES, CompositeVector
 from bloasis.scoring.features import FeatureVector
-from bloasis.scoring.scorer import MLScorerStub, RuleBasedScorer
+from bloasis.scoring.scorer import RuleBasedScorer
 
 NOW = datetime.now(tz=UTC)
 
@@ -179,22 +181,6 @@ def test_bull_regime_amplifies_momentum() -> None:
     sc = scorer.score(_fv(vix=12.0, spy_above_sma200=1.0), _cv())
     weights = {c.name: c.weight for c in sc.rationale.contributions}
     assert weights["momentum"] > weights["volatility"]
-
-
-# ---------------------------------------------------------------------------
-# MLScorerStub
-# ---------------------------------------------------------------------------
-
-
-def test_ml_scorer_stub_raises_not_implemented() -> None:
-    stub = MLScorerStub()
-    with pytest.raises(NotImplementedError, match="train"):
-        stub.score(_fv(), _cv())
-
-
-def test_ml_scorer_stub_accepts_optional_path() -> None:
-    stub = MLScorerStub(model_path="path/to/model.lgb")
-    assert stub.model_path == "path/to/model.lgb"
 
 
 # ---------------------------------------------------------------------------
