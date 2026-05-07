@@ -62,11 +62,13 @@ universe_app = typer.Typer(name="universe", help="Show universe membership.")
 fetch_app = typer.Typer(name="fetch", help="Fetch and cache market data.")
 runs_app = typer.Typer(name="runs", help="Inspect past backtest runs.")
 trade_app = typer.Typer(name="trade", help="Execute strategy signals against a broker.")
+ml_app = typer.Typer(name="ml", help="Phase 2 ML pipeline (training, prediction).")
 app.add_typer(config_app, name="config")
 app.add_typer(universe_app, name="universe")
 app.add_typer(fetch_app, name="fetch")
 app.add_typer(runs_app, name="runs")
 app.add_typer(trade_app, name="trade")
+app.add_typer(ml_app, name="ml")
 
 console = Console()
 
@@ -194,6 +196,96 @@ def label_features(
 
     n = label_unlabeled_features(engine, ohlcv_provider=_load_widest_for_symbol)
     console.print(f"[green]✓[/green] labeled [bold]{n}[/bold] feature_log rows")
+
+
+@ml_app.command("train")
+def ml_train(
+    feature_version: int = typer.Option(  # noqa: B008
+        2, "--feature-version", help="feature_log version to train on (default: 2)."
+    ),
+    label: str = typer.Option(  # noqa: B008
+        "forward_return_20d",
+        "--label",
+        help="Label column: forward_return_5d/20d/60d.",
+    ),
+    n_folds: int = typer.Option(5, "--n-folds", min=2, help="Walk-forward CV folds."),  # noqa: B008
+    embargo_days: int = typer.Option(  # noqa: B008
+        21, "--embargo-days", min=0, help="Train/test gap to prevent label leakage."
+    ),
+    output: Path = typer.Option(  # noqa: B008
+        Path("~/.cache/bloasis/models/lightgbm.pkl"),
+        "--output",
+        help="Where to save model.pkl (sidecar .json gets written next to it).",
+    ),
+    db_path: Path = typer.Option(  # noqa: B008
+        None,
+        "--db-path",
+        help="SQLite database path. Defaults to BLOASIS_DB_PATH or ./bloasis.db.",
+    ),
+) -> None:
+    """Train a LightGBM regressor on labeled feature_log rows.
+
+    Reads `feature_log` rows where `feature_version=<N>` AND
+    `label_filled_at IS NOT NULL` AND `<label> IS NOT NULL`. Runs purged
+    walk-forward CV (default 5 folds, 21-day embargo), reports per-fold
+    Information Coefficient, refits on all data, and saves the model
+    pickle + metadata sidecar.
+
+    Pre-requisite: `bloasis backtest` runs (populates feature_log) +
+    `bloasis label-features` (fills forward returns).
+    """
+    from bloasis.ml.training import save_model, train_walk_forward
+    from bloasis.scoring.features import FEATURE_COLUMNS
+    from bloasis.storage.readers import VALID_LABEL_COLUMNS, load_labeled_feature_log
+
+    if label not in VALID_LABEL_COLUMNS:
+        raise typer.BadParameter(f"--label must be one of {VALID_LABEL_COLUMNS}, got {label!r}")
+
+    output = output.expanduser()
+    engine = get_engine(db_path)
+    create_all(engine)
+
+    df = load_labeled_feature_log(engine, feature_version=feature_version, label_column=label)
+    if df.empty:
+        console.print(
+            "[red]✗[/red] no labeled rows for "
+            f"feature_version={feature_version}, label={label}. "
+            "Run `bloasis backtest` then `bloasis label-features` first."
+        )
+        raise typer.Exit(code=1)
+
+    console.print(
+        f"[cyan]loaded[/cyan] {len(df)} labeled rows, "
+        f"feature_version={feature_version}, label={label}"
+    )
+
+    X = df[list(FEATURE_COLUMNS)]
+    y = df[label]
+    ts = df["timestamp"]
+    result = train_walk_forward(X, y, ts, n_folds=n_folds, embargo_days=embargo_days)
+
+    summary = RichTable(title=f"LightGBM walk-forward CV ({len(result.fold_ics)} folds)")
+    summary.add_column("fold", style="cyan")
+    summary.add_column("IC", justify="right")
+    for i, ic in enumerate(result.fold_ics):
+        summary.add_row(str(i), f"{ic:+.4f}")
+    summary.add_row("[bold]mean[/bold]", f"[bold]{result.mean_ic:+.4f}[/bold]")
+    console.print(summary)
+
+    save_model(
+        result,
+        output,
+        feature_version=feature_version,
+        label_name=label,
+        extra={
+            "n_folds": n_folds,
+            "embargo_days": embargo_days,
+            "n_labeled_rows": len(df),
+        },
+    )
+    console.print(f"[green]✓[/green] saved model to [bold]{output}[/bold]")
+    console.print(f"  metadata sidecar: {output.with_suffix('.json')}")
+    console.print(f"  mean IC: [bold]{result.mean_ic:+.4f}[/bold]")
 
 
 @config_app.command("show")
