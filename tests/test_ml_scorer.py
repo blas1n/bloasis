@@ -187,3 +187,99 @@ def test_rule_scorer_score_cross_section_iterates() -> None:
     for fv, cv, sc in zip(fvs, cvs, out, strict=True):
         single = scorer.score(fv, cv)
         assert sc.score == single.score
+
+
+# ---------------------------------------------------------------------------
+# PR16 — SHAP rationale
+# ---------------------------------------------------------------------------
+
+
+def test_shap_contributions_populated_in_cross_section(tiny_model: Path) -> None:
+    """Every ScoredCandidate carries top-K SHAP contributors as FactorContributions.
+
+    The `per` feature (which the model learned strongly) should appear in
+    the top contributions for at least one symbol.
+    """
+    cfg = ScorerConfig(type="ml", ml_model_path=tiny_model)
+    scorer = LightGBMScorer(cfg=cfg, model_path=tiny_model)
+    fvs = [_fv(s, per=p) for s, p in zip("ABCDE", [-2.0, -1.0, 0.0, 1.0, 2.0], strict=True)]
+    cvs = [_cv(s) for s in "ABCDE"]
+    out = scorer.score_cross_section(fvs, cvs)
+
+    # Each rationale has at least one FactorContribution.
+    for sc in out:
+        assert sc.rationale is not None
+        assert len(sc.rationale.contributions) > 0
+        # Every contribution name is a feature name (not the legacy
+        # "ml_prediction" placeholder from PR15).
+        for c in sc.rationale.contributions:
+            assert c.name in FEATURE_COLUMNS
+
+    # `per` should appear in top contributions for at least one symbol —
+    # we trained y = 2 * per + noise, so SHAP should attribute most of
+    # the variance to `per`.
+    top_features_per_symbol = {
+        sc.symbol: {c.name for c in sc.rationale.contributions[:3]} for sc in out
+    }
+    appearances = sum(1 for top in top_features_per_symbol.values() if "per" in top)
+    assert appearances >= 3, (
+        f"`per` (the learned signal) should be a top-3 contributor for "
+        f"most symbols, got {appearances}/5"
+    )
+
+
+def test_shap_contributions_signed_per_feature(tiny_model: Path) -> None:
+    """SHAP values can be negative (feature pushes prediction down)."""
+    cfg = ScorerConfig(type="ml", ml_model_path=tiny_model)
+    scorer = LightGBMScorer(cfg=cfg, model_path=tiny_model)
+    # Mix of high-per (positive contribution) and low-per (negative)
+    fvs = [_fv(s, per=p) for s, p in zip("AB", [-3.0, 3.0], strict=True)]
+    cvs = [_cv(s) for s in "AB"]
+    out = scorer.score_cross_section(fvs, cvs)
+
+    by_sym = {sc.symbol: sc for sc in out}
+    a_per = next(c.contribution for c in by_sym["A"].rationale.contributions if c.name == "per")
+    b_per = next(c.contribution for c in by_sym["B"].rationale.contributions if c.name == "per")
+    # A had per=-3 (low), B had per=+3 (high). SHAP for `per` should be
+    # negative for A, positive for B.
+    assert a_per < 0
+    assert b_per > 0
+
+
+def test_shap_contributions_top_k_limit(tiny_model: Path) -> None:
+    """Default top-K = 5 (Phase 2 design §PR16)."""
+    cfg = ScorerConfig(type="ml", ml_model_path=tiny_model)
+    scorer = LightGBMScorer(cfg=cfg, model_path=tiny_model)
+    fvs = [_fv("X", per=1.0)]
+    cvs = [_cv("X")]
+    out = scorer.score_cross_section(fvs, cvs)
+    assert len(out[0].rationale.contributions) <= 5
+
+
+def test_shap_contributions_sorted_by_abs_contribution(tiny_model: Path) -> None:
+    cfg = ScorerConfig(type="ml", ml_model_path=tiny_model)
+    scorer = LightGBMScorer(cfg=cfg, model_path=tiny_model)
+    fvs = [_fv(s, per=p) for s, p in zip("ABC", [-1.0, 0.0, 1.0], strict=True)]
+    cvs = [_cv(s) for s in "ABC"]
+    out = scorer.score_cross_section(fvs, cvs)
+    for sc in out:
+        contribs = sc.rationale.contributions
+        magnitudes = [abs(c.contribution) for c in contribs]
+        assert magnitudes == sorted(magnitudes, reverse=True), (
+            f"contributions should be sorted by |contribution| desc, got {magnitudes}"
+        )
+
+
+def test_shap_inputs_carry_raw_feature_value(tiny_model: Path) -> None:
+    """`inputs` dict on each FactorContribution exposes the row's raw
+    feature value — useful for `bloasis runs show` debug display."""
+    cfg = ScorerConfig(type="ml", ml_model_path=tiny_model)
+    scorer = LightGBMScorer(cfg=cfg, model_path=tiny_model)
+    fvs = [_fv("Z", per=2.5, momentum_252_21=0.3)]
+    cvs = [_cv("Z")]
+    out = scorer.score_cross_section(fvs, cvs)
+    for c in out[0].rationale.contributions:
+        # Each contribution carries the raw value of its named feature.
+        assert c.name in c.inputs
+        if c.name == "per":
+            assert c.inputs["per"] == pytest.approx(2.5)

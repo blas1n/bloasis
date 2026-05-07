@@ -30,6 +30,7 @@ from bloasis.scoring.regime import classify_regime
 
 if TYPE_CHECKING:
     import numpy as np
+    import pandas as pd
 
 
 @runtime_checkable
@@ -171,6 +172,9 @@ class LightGBMScorer:
     which the engine calls per timestep.
     """
 
+    # PR16: top-K SHAP contributors surfaced per `Rationale`.
+    SHAP_TOP_K = 5
+
     def __init__(self, *, cfg: ScorerConfig, model_path: Path | None = None) -> None:
         from bloasis.ml.training import load_model
 
@@ -191,6 +195,11 @@ class LightGBMScorer:
         self.feature_names: list[str] = list(
             self.metadata.get("feature_names") or self._model.feature_name()
         )
+        # PR16: SHAP TreeExplainer for per-feature contributions. Cheap to
+        # construct, expensive to call per-row → we batch in cross-section.
+        import shap
+
+        self._shap_explainer = shap.TreeExplainer(self._model)
 
     # ------------------------------------------------------------------
     # Cross-section batch (production path)
@@ -214,10 +223,22 @@ class LightGBMScorer:
 
         preds = np.asarray(self._model.predict(X))
         unit_scores = _zscore_to_unit(preds)
+        # PR16: batch SHAP for the whole cross-section (much cheaper than
+        # one explainer call per row).
+        shap_values = np.asarray(self._shap_explainer.shap_values(X))
 
         out: list[ScoredCandidate] = []
-        for fv, cv, raw, unit in zip(fvs, cvs, preds, unit_scores, strict=True):
-            out.append(self._build_scored(fv, cv, raw=float(raw), unit=float(unit)))
+        for i, (fv, cv, raw, unit) in enumerate(zip(fvs, cvs, preds, unit_scores, strict=True)):
+            out.append(
+                self._build_scored(
+                    fv,
+                    cv,
+                    raw=float(raw),
+                    unit=float(unit),
+                    shap_row=shap_values[i],
+                    feature_row=X.iloc[i],
+                )
+            )
         return out
 
     # ------------------------------------------------------------------
@@ -225,6 +246,7 @@ class LightGBMScorer:
     # ------------------------------------------------------------------
 
     def score(self, fv: FeatureVector, cv: CompositeVector) -> ScoredCandidate:
+        import numpy as np
         import pandas as pd
 
         row = pd.DataFrame(
@@ -237,7 +259,10 @@ class LightGBMScorer:
         # No cross-section here — sigmoid-like squash. Production path
         # uses score_cross_section() which has proper cross-section z-score.
         unit = 1.0 / (1.0 + math.exp(-raw / 0.05))  # 5% return ≈ 0.73
-        return self._build_scored(fv, cv, raw=raw, unit=unit)
+        shap_row = np.asarray(self._shap_explainer.shap_values(row))[0]
+        return self._build_scored(
+            fv, cv, raw=raw, unit=unit, shap_row=shap_row, feature_row=row.iloc[0]
+        )
 
     # ------------------------------------------------------------------
     # internals
@@ -250,19 +275,29 @@ class LightGBMScorer:
         *,
         raw: float,
         unit: float,
+        shap_row: np.ndarray,
+        feature_row: pd.Series,
     ) -> ScoredCandidate:
         unit = max(0.0, min(1.0, unit))
-        # Surface ML prediction as a single FactorContribution so the
-        # downstream rationale display still works; SHAP per-feature
-        # contributions are PR16.
-        contributions: tuple[FactorContribution, ...] = (
+        # PR16: top-K SHAP contributors, sorted by |SHAP value| desc.
+        # Each FactorContribution.name is a feature name, .contribution is
+        # the SHAP value (can be negative — the feature pushed the
+        # prediction down), .composite_score is the feature's raw value
+        # (so display can show "per=2.5 → SHAP +0.34").
+        idx_by_abs = sorted(
+            range(len(shap_row)),
+            key=lambda i: abs(float(shap_row[i])),
+            reverse=True,
+        )[: self.SHAP_TOP_K]
+        contributions: tuple[FactorContribution, ...] = tuple(
             FactorContribution(
-                name="ml_prediction",
-                composite_score=raw,
+                name=str(self.feature_names[i]),
+                composite_score=float(feature_row.iloc[i]),
                 weight=1.0,
-                contribution=raw,
-                inputs={},
-            ),
+                contribution=float(shap_row[i]),
+                inputs={str(self.feature_names[i]): float(feature_row.iloc[i])},
+            )
+            for i in idx_by_abs
         )
         return ScoredCandidate(
             symbol=fv.symbol,
