@@ -54,6 +54,7 @@ from bloasis.config import StrategyConfig
 from bloasis.risk import MarketState, PortfolioState, RiskEvaluator
 from bloasis.scoring.composites import CompositeBuilder
 from bloasis.scoring.extractor import ExtractionContext, FeatureExtractor
+from bloasis.scoring.features import FeatureVector
 from bloasis.scoring.regime_overlay import (
     RegimeOverlayParams,
     compute_regime_scale,
@@ -211,6 +212,9 @@ class Backtester:
         # Per-fold fill log (with the rationale that produced each entry) so
         # the engine can persist trades + equity_curve to the DB at fold end.
         fold_fills: list[tuple[Fill, Rationale | None]] = []
+        # PR13: per-fold extracted feature vectors → feature_log at fold end
+        # (Phase 2 ML training input). Buffer to keep DB writes batched.
+        fold_feature_vectors: list[FeatureVector] = []
 
         # SPY benchmark = lump-sum buy at fold start, hold to end.
         spy_initial_close = self._spy_close_at(window.test_start)
@@ -220,7 +224,8 @@ class Backtester:
 
         for d in trading_days:
             # 1. Build candidates for today.
-            candidates = self._build_candidates(d, scorer)
+            candidates, day_features = self._build_candidates(d, scorer)
+            fold_feature_vectors.extend(day_features)
 
             # 2. Generate signals.
             held = [
@@ -309,7 +314,7 @@ class Backtester:
         # Persist the fold's equity curve + each fill if the engine was
         # constructed with a DB engine and the caller supplied a real run_id.
         if self._db is not None and run_id > 0:
-            self._persist_fold(run_id, eq_strategy, fold_fills)
+            self._persist_fold(run_id, eq_strategy, fold_fills, fold_feature_vectors)
         return result, portfolio.trade_count, delisted_count
 
     def _persist_fold(
@@ -317,6 +322,7 @@ class Backtester:
         run_id: int,
         eq_strategy: pd.Series,
         fills: list[tuple[Fill, Rationale | None]],
+        feature_vectors: list[FeatureVector],
     ) -> None:
         from bloasis.storage import writers
 
@@ -333,16 +339,30 @@ class Backtester:
         writers.write_equity_curve(self._db, run_id, rows)
         for fill, rationale in fills:
             writers.write_trade(self._db, run_id, fill, rationale)
+        # PR13: persist extracted features so `bloasis label-features` can
+        # populate forward-return labels for ML training (Phase 2).
+        if feature_vectors:
+            writers.write_feature_log_batch(self._db, run_id, feature_vectors)
 
     # ------------------------------------------------------------------
     # candidate construction
     # ------------------------------------------------------------------
 
-    def _build_candidates(self, d: date, scorer: Scorer) -> list[CandidateData]:
+    def _build_candidates(
+        self, d: date, scorer: Scorer
+    ) -> tuple[list[CandidateData], list[FeatureVector]]:
+        """Returns `(candidates, feature_vectors)`.
+
+        `feature_vectors` is the full extracted set for THIS day before
+        any cross-section filtering — the engine persists these to
+        `feature_log` for the Phase 2 ML labeling job (PR13). When the
+        cross-section is too sparse (<2 symbols) the candidates list is
+        empty, but the feature vectors are still useful for ML training.
+        """
         ts = _to_dt(d)
         universe = self._data.universe_at(d)
 
-        feature_vectors = []
+        feature_vectors: list[FeatureVector] = []
         last_closes: dict[str, float] = {}
         ts_pd = cast(pd.Timestamp, ts)
         for sym in universe:
@@ -371,7 +391,7 @@ class Backtester:
             last_closes[sym] = float(sliced["close"].iloc[-1])
 
         if len(feature_vectors) < 2:
-            return []  # cross-section z-score needs ≥2
+            return [], feature_vectors  # cross-section z-score needs ≥2
 
         composites = self._composer.build(feature_vectors)
         cv_by_sym = {c.symbol: c for c in composites}
@@ -389,7 +409,7 @@ class Backtester:
                     sector=fv.sector,
                 )
             )
-        return candidates
+        return candidates, feature_vectors
 
     # ------------------------------------------------------------------
     # order execution helpers

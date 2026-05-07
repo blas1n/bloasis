@@ -14,11 +14,13 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import insert, update
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from bloasis.backtest.portfolio import Fill
 from bloasis.backtest.result import BacktestResult
+from bloasis.scoring.features import FeatureVector
 from bloasis.scoring.rationale import Rationale
-from bloasis.storage import backtest_runs, equity_curve, trades
+from bloasis.storage import backtest_runs, equity_curve, feature_log, trades
 
 if TYPE_CHECKING:
     from sqlalchemy import Engine
@@ -157,6 +159,57 @@ def write_trade(
                 realized_pnl=fill.realized_pnl,
             )
         )
+
+
+def write_feature_log_batch(
+    engine: Engine,
+    run_id: int,
+    vectors: list[FeatureVector],
+) -> None:
+    """Bulk-insert (upsert) extracted feature vectors keyed by run_id.
+
+    PR13 adds this so the Phase 2 ML labeling job has data to label.
+    Idempotent — re-running the same fold replaces existing rows on the
+    composite primary key (timestamp, symbol, run_id, feature_version).
+
+    Labels (`forward_return_*`, `label_filled_at`) are left untouched.
+    """
+    if not vectors:
+        return
+    now = datetime.now(tz=UTC)
+    payload: list[dict[str, object | None]] = []
+    for fv in vectors:
+        row: dict[str, object | None] = dict(fv.to_db_row())
+        row["run_id"] = run_id
+        row["created_at"] = now
+        payload.append(row)
+
+    # SQLite ON CONFLICT REPLACE keyed on the PK so retried folds don't
+    # raise IntegrityError. Postgres migration: same syntax via
+    # `postgresql.insert`.
+    stmt = sqlite_insert(feature_log).values(payload)
+    update_cols = {
+        c.name: stmt.excluded[c.name]
+        for c in feature_log.columns
+        if c.name
+        not in {
+            "timestamp",
+            "symbol",
+            "run_id",
+            "feature_version",
+            # Don't clobber labels populated by `bloasis label-features`.
+            "forward_return_5d",
+            "forward_return_20d",
+            "forward_return_60d",
+            "label_filled_at",
+        }
+    }
+    stmt = stmt.on_conflict_do_update(
+        index_elements=["timestamp", "symbol", "run_id", "feature_version"],
+        set_=update_cols,
+    )
+    with engine.begin() as conn:
+        conn.execute(stmt)
 
 
 # ---------------------------------------------------------------------------
