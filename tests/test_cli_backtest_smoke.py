@@ -203,6 +203,62 @@ def test_cli_backtest_smoke_writes_equity_curve(
     assert len(ec_count) > 0, "equity_curve should be populated for a completed run"
 
 
+def test_cli_backtest_skips_unfetchable_symbols(
+    smoke_db: Path,
+    baseline_config_path: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A delisted/404 symbol shouldn't crash the run — it gets skipped with a warning."""
+
+    def fake_fetch(self: object, symbol: str, start: date, end: date) -> pd.DataFrame:
+        if symbol == "DEAD":
+            raise ValueError(f"yfinance 404 for {symbol}")
+        return _synthetic_ohlcv(symbol, start, end)
+
+    monkeypatch.setattr(yfinance_ohlcv.YfOhlcvFetcher, "fetch", fake_fetch)
+    runner.invoke(app, ["init-db"])
+    cfg = _smoke_config(baseline_config_path, tmp_path)
+
+    result = runner.invoke(
+        app,
+        [
+            "backtest",
+            "--config",
+            str(cfg),
+            "--start",
+            "2022-06-01",
+            "--end",
+            "2024-12-31",
+            "-s",
+            "AAA",
+            "-s",
+            "DEAD",
+            "-s",
+            "BBB",
+            "-s",
+            "CCC",
+            "-s",
+            "DDD",
+            "--train-days",
+            "180",
+            "--test-days",
+            "60",
+            "--step-days",
+            "60",
+            "--name",
+            "skip-dead",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "DEAD" in result.output
+    engine = get_engine(smoke_db)
+    with engine.connect() as conn:
+        row = conn.execute(select(backtest_runs).where(backtest_runs.c.name == "skip-dead")).first()
+    assert row is not None
+    assert row.status == "completed"
+
+
 def test_cli_runs_show_after_smoke_backtest(
     smoke_db: Path,
     patched_yfinance: None,

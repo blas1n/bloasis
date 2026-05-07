@@ -189,6 +189,9 @@ def universe_show(
     custom_csv_path: Path = typer.Option(  # noqa: B008
         None, "--csv", help="Required when source=custom_csv."
     ),
+    refresh: bool = typer.Option(  # noqa: B008
+        False, "--refresh", help="Force re-download of network-backed datasets."
+    ),
 ) -> None:
     """Resolve the universe to concrete tickers and print them."""
     from bloasis.config import UniverseConfig
@@ -208,7 +211,7 @@ def universe_show(
     if universe_cfg.source == "sp500_historical" and as_of_date is None:
         raise typer.BadParameter("sp500_historical requires --as-of YYYY-MM-DD")
 
-    symbols = load_universe(universe_cfg, cfg.data, as_of=as_of_date)
+    symbols = load_universe(universe_cfg, cfg.data, as_of=as_of_date, refresh=refresh)
     if count_only:
         console.print(len(symbols))
     else:
@@ -656,12 +659,27 @@ def backtest(
     warmup = timedelta(days=300)
     fetch_start = start_d - warmup
     bars: dict[str, pd.DataFrame] = {}
+    skipped: list[tuple[str, str]] = []
     for sym in symbols:
-        bars[sym.upper()] = ohlcv.fetch(sym.upper(), fetch_start, end_d)
+        upper = sym.upper()
+        try:
+            bars[upper] = ohlcv.fetch(upper, fetch_start, end_d)
+        except Exception as exc:  # noqa: BLE001 — yfinance/network errors vary
+            skipped.append((upper, str(exc)))
+            console.print(f"[yellow]skipping {upper}: {exc}[/yellow]")
+    if skipped:
+        console.print(
+            f"[yellow]skipped {len(skipped)}/{len(symbols)} symbols "
+            "(delisted, renamed, or unavailable in yfinance)[/yellow]"
+        )
+    if not bars:
+        raise typer.BadParameter(
+            "every symbol failed to fetch — check connectivity / ticker validity"
+        )
     market_ctx = market.fetch(fetch_start, end_d)
 
     data = BacktestData(
-        symbols=[s.upper() for s in symbols],
+        symbols=list(bars.keys()),
         bars=bars,
         vix_series=market_ctx.vix,
         spy_close_series=market_ctx.spy_close,

@@ -40,6 +40,29 @@ def test_momentum_zero_base_nan() -> None:
     assert math.isnan(momentum(close, lookback=20))
 
 
+def test_momentum_skip_jegadeesh_titman_12_1() -> None:
+    """`skip=21` excludes the most recent 21 bars (12-1 momentum)."""
+    # 30-bar series: index -29 (oldest) ... 0 (newest)
+    # With lookback=5, skip=2: window is close[-8 .. -3], i.e. base=close[-8], top=close[-3]
+    values = list(range(100, 130))  # 30 bars: 100, 101, ..., 129
+    close = _series(values)
+    m = momentum(close, lookback=5, skip=2)
+    # base = close[-(5+2+1)] = close[-8] = 122; top = close[-(2+1)] = close[-3] = 127
+    assert m == pytest.approx((127 - 122) / 122)
+
+
+def test_momentum_skip_zero_matches_default() -> None:
+    """`skip=0` should be identical to omitting `skip`."""
+    close = _series([100.0] + [101 + i for i in range(20)])
+    assert momentum(close, lookback=20, skip=0) == pytest.approx(momentum(close, lookback=20))
+
+
+def test_momentum_skip_insufficient_history_nan() -> None:
+    """Need at least lookback+skip+1 bars; otherwise NaN."""
+    close = _series([100.0] * 10)
+    assert math.isnan(momentum(close, lookback=5, skip=10))
+
+
 # ---------------------------------------------------------------------------
 # volatility
 # ---------------------------------------------------------------------------

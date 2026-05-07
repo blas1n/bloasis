@@ -13,6 +13,15 @@ from pathlib import Path
 from bloasis.data.universe.sp500_historical import list_sp500_at
 
 
-def list_sp500(*, cache_dir: Path, as_of: date | None = None) -> list[str]:
+def list_sp500(
+    *,
+    cache_dir: Path,
+    as_of: date | None = None,
+    refresh: bool = False,
+) -> list[str]:
     """Return current (or `as_of`) S&P 500 tickers."""
-    return list_sp500_at(as_of or datetime.now(tz=UTC).date(), cache_dir=cache_dir)
+    return list_sp500_at(
+        as_of or datetime.now(tz=UTC).date(),
+        cache_dir=cache_dir,
+        refresh=refresh,
+    )
