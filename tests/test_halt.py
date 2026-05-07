@@ -30,7 +30,7 @@ def _seed_run(engine: object) -> int:
                 config_hash="abc",
                 config_json="{}",
                 scorer_type="rule",
-                feature_version=1,
+                feature_version=2,
                 start_date=now - timedelta(days=400),
                 end_date=now - timedelta(days=300),
                 initial_capital=100_000.0,

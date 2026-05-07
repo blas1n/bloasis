@@ -88,7 +88,7 @@ def seeded_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
             config_hash="abcd1234" if passed else "deadbeef",
             config_json="{}",
             scorer_type="rule",
-            feature_version=1,
+            feature_version=2,
             start_date=datetime(2023, 7, 1, tzinfo=UTC),
             end_date=datetime(2023, 12, 31, tzinfo=UTC),
             initial_capital=100_000.0,

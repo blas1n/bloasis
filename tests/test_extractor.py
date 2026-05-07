@@ -50,7 +50,7 @@ def test_evil_context_with_future_ohlcv_rejected() -> None:
         ExtractionContext(
             timestamp=timestamp,
             symbol="EVIL",
-            feature_version=1,
+            feature_version=2,
             sector="Technology",
             ohlcv=df,
         )
@@ -71,7 +71,7 @@ def test_evil_context_with_future_vix_rejected() -> None:
         ExtractionContext(
             timestamp=timestamp,
             symbol="X",
-            feature_version=1,
+            feature_version=2,
             sector=None,
             ohlcv=df_sliced,
             vix_series=vix,
@@ -92,7 +92,7 @@ def test_evil_context_with_future_spy_rejected() -> None:
         ExtractionContext(
             timestamp=timestamp,
             symbol="X",
-            feature_version=1,
+            feature_version=2,
             sector=None,
             ohlcv=df_sliced,
             spy_close_series=spy,
@@ -105,7 +105,7 @@ def test_clean_context_with_proper_slice_succeeds() -> None:
     ctx = ExtractionContext(
         timestamp=timestamp,
         symbol="OK",
-        feature_version=1,
+        feature_version=2,
         sector="Technology",
         ohlcv=df,
     )
@@ -117,7 +117,7 @@ def test_empty_ohlcv_rejected() -> None:
         ExtractionContext(
             timestamp=datetime.now(tz=UTC),
             symbol="X",
-            feature_version=1,
+            feature_version=2,
             sector=None,
             ohlcv=pd.DataFrame(),
         )
@@ -134,7 +134,7 @@ def test_extract_populates_technicals() -> None:
     ctx = ExtractionContext(
         timestamp=timestamp,
         symbol="AAPL",
-        feature_version=1,
+        feature_version=2,
         sector="Technology",
         ohlcv=df,
     )
@@ -156,7 +156,7 @@ def test_extract_short_window_yields_nan_technicals() -> None:
     ctx = ExtractionContext(
         timestamp=timestamp,
         symbol="X",
-        feature_version=1,
+        feature_version=2,
         sector=None,
         ohlcv=df,
     )
@@ -172,7 +172,7 @@ def test_extract_missing_fundamentals_become_nan() -> None:
     ctx = ExtractionContext(
         timestamp=timestamp,
         symbol="X",
-        feature_version=1,
+        feature_version=2,
         sector=None,
         ohlcv=df,
         fundamentals={"per": 15.0, "roe": None},  # mixed
@@ -191,7 +191,7 @@ def test_extract_with_market_context_computes_vix_and_spy_above() -> None:
     ctx = ExtractionContext(
         timestamp=timestamp,
         symbol="X",
-        feature_version=1,
+        feature_version=2,
         sector=None,
         ohlcv=df,
         vix_series=vix,
@@ -208,7 +208,7 @@ def test_extract_with_sentiment_inputs() -> None:
     ctx = ExtractionContext(
         timestamp=timestamp,
         symbol="X",
-        feature_version=1,
+        feature_version=2,
         sector=None,
         ohlcv=df,
         sentiment_score=0.4,

@@ -300,6 +300,39 @@ class AcceptanceCriteria(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Regime overlay (PR12)
+# ---------------------------------------------------------------------------
+
+
+class RegimeOverlayConfig(BaseModel):
+    """Barroso-Santa-Clara constant-vol scaling + Daniel-Moskowitz bear gate.
+
+    When enabled, multiplies per-trade position size_pct by a scale factor
+    derived from SPY's recent realized vol and 24-month return state. See
+    `bloasis/scoring/regime_overlay.py` for math + ~/Docs/bloasis/
+    Research_DM_Dynamic_Momentum.md for derivation.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    sigma_target: float = Field(default=0.12, gt=0.0, le=1.0)
+    vol_lookback_days: int = Field(default=126, ge=20)
+    bear_lookback_days: int = Field(default=504, ge=60)
+    bear_scale: float = Field(default=0.5, ge=0.0, le=1.0)
+    scale_clip: tuple[float, float] = (0.0, 1.5)
+
+    @model_validator(mode="after")
+    def _validate_clip(self) -> RegimeOverlayConfig:
+        lo, hi = self.scale_clip
+        if not (0.0 <= lo < hi):
+            raise ValueError(
+                f"scale_clip must be (low, high) with 0 <= low < high; got {self.scale_clip}"
+            )
+        return self
+
+
+# ---------------------------------------------------------------------------
 # Top-level
 # ---------------------------------------------------------------------------
 
@@ -317,4 +350,5 @@ class StrategyConfig(BaseModel):
     execution: ExecutionConfig = Field(default_factory=ExecutionConfig)
     allocation: AllocationConfig = Field(default_factory=AllocationConfig)
     data: DataConfig = Field(default_factory=DataConfig)
+    regime_overlay: RegimeOverlayConfig = Field(default_factory=RegimeOverlayConfig)
     acceptance_criteria: AcceptanceCriteria = Field(default_factory=AcceptanceCriteria)

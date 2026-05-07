@@ -54,6 +54,10 @@ from bloasis.config import StrategyConfig
 from bloasis.risk import MarketState, PortfolioState, RiskEvaluator
 from bloasis.scoring.composites import CompositeBuilder
 from bloasis.scoring.extractor import ExtractionContext, FeatureExtractor
+from bloasis.scoring.regime_overlay import (
+    RegimeOverlayParams,
+    compute_regime_scale,
+)
 from bloasis.scoring.scorer import RuleBasedScorer, Scorer
 from bloasis.signal import CandidateData, HeldPosition, SignalGenerator, TradingSignal
 
@@ -101,6 +105,18 @@ class Backtester:
         self._signal_gen = SignalGenerator(cfg.scorer, cfg.signal)
         self._risk = RiskEvaluator(cfg.risk)
         self._fills = FillSimulator(cfg.execution)
+        # Pre-compute SPY pct daily returns once; sliced per timestep for
+        # the regime overlay (PR12, BSC + DM bear gate).
+        spy = self._data.spy_close_series.sort_index()
+        self._spy_daily_returns = spy.pct_change().dropna()
+        self._overlay_params = RegimeOverlayParams(
+            enabled=cfg.regime_overlay.enabled,
+            sigma_target=cfg.regime_overlay.sigma_target,
+            vol_lookback_days=cfg.regime_overlay.vol_lookback_days,
+            bear_lookback_days=cfg.regime_overlay.bear_lookback_days,
+            bear_scale=cfg.regime_overlay.bear_scale,
+            scale_clip=cfg.regime_overlay.scale_clip,
+        )
 
     # ------------------------------------------------------------------
     # public entry point
@@ -225,6 +241,13 @@ class Backtester:
             market_state = MarketState(timestamp=today_dt, vix=vix_today)
             equity_for_sizing = portfolio.total_equity()
 
+            # PR12: regime overlay scales BUY size_pct (BSC constant-vol +
+            # DM bear gate). Computed once per timestep using SPY returns
+            # up to today (no look-ahead — pct_change already excludes today
+            # if today's bar isn't yet in the series; we slice <= today_dt).
+            spy_returns_to_date = self._spy_daily_returns.loc[: cast(pd.Timestamp, today_dt)]
+            regime_scale = compute_regime_scale(spy_returns_to_date, params=self._overlay_params)
+
             for sig in signals:
                 portfolio_state = PortfolioState(
                     total_value=equity_for_sizing,
@@ -240,9 +263,12 @@ class Backtester:
                 )
 
                 if sig.action == "BUY":
+                    # Regime overlay applies only to entries; SELLs always
+                    # exit fully (no size adjustment).
+                    sized = size_pct * regime_scale
                     fill = self._execute_buy(
                         sig=sig,
-                        size_pct=size_pct,
+                        size_pct=sized,
                         equity=equity_for_sizing,
                         portfolio=portfolio,
                         signal_date=today_dt,

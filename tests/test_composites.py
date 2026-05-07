@@ -20,7 +20,7 @@ NOW = datetime.now(tz=UTC)
 
 
 def _fv(symbol: str, **kwargs: float | str) -> FeatureVector:
-    return FeatureVector(timestamp=NOW, symbol=symbol, feature_version=1, **kwargs)  # type: ignore[arg-type]
+    return FeatureVector(timestamp=NOW, symbol=symbol, feature_version=2, **kwargs)  # type: ignore[arg-type]
 
 
 # ---------------------------------------------------------------------------

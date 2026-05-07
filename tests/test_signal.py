@@ -39,7 +39,7 @@ def _candidate(
     fv = FeatureVector(
         timestamp=NOW,
         symbol=symbol,
-        feature_version=1,
+        feature_version=2,
         atr_14=atr,
     )
     return CandidateData(

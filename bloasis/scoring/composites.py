@@ -55,11 +55,17 @@ COMPOSITE_SPEC: dict[str, tuple[tuple[str, int], ...]] = {
         ("momentum_20d", +1),
         ("momentum_60d", +1),
         ("rsi_14", +1),
+        # PR12 — Jegadeesh-Titman 12-1 + 6-month ROC fill the long-term gap.
+        ("momentum_252_21", +1),
+        ("roc_120", +1),
     ),
     "technical": (
         ("macd_hist", +1),
         ("adx_14", +1),
         ("bb_width", +1),
+        # PR12 — qlib KBAR microstructure (body + close position).
+        ("kbar_kmid2", +1),
+        ("kbar_ksft2", +1),
     ),
     "volatility": (
         ("volatility_20d", -1),
@@ -68,6 +74,8 @@ COMPOSITE_SPEC: dict[str, tuple[tuple[str, int], ...]] = {
     "liquidity": (
         ("market_cap_log", +1),  # synthesized — see _prepare()
         ("volume_ratio_20d", +1),
+        # PR12 — qlib informed-trading proxy (Llorente et al. 2002).
+        ("corr_pv_20", +1),
     ),
     "sentiment": (
         ("sentiment_score", +1),
