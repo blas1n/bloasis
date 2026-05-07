@@ -103,3 +103,55 @@ def test_load_empty_db_returns_empty_df(tmp_path: Path) -> None:
     # Still has expected columns even when empty (callers can branch on shape).
     assert "timestamp" in df.columns
     assert "forward_return_20d" in df.columns
+
+
+# ---------------------------------------------------------------------------
+# PR17 — date filters for honest train/test split
+# ---------------------------------------------------------------------------
+
+
+def test_load_respects_start_date(tmp_path: Path) -> None:
+    engine = get_engine(tmp_path / "db")
+    create_all(engine)
+    _seed_row(engine, timestamp=datetime(2023, 6, 1, tzinfo=UTC), symbol="EARLY")
+    _seed_row(engine, timestamp=datetime(2024, 1, 5, tzinfo=UTC), symbol="LATE")
+
+    df = load_labeled_feature_log(
+        engine,
+        feature_version=2,
+        label_column="forward_return_20d",
+        start_date=datetime(2024, 1, 1, tzinfo=UTC),
+    )
+    assert list(df["symbol"]) == ["LATE"]
+
+
+def test_load_respects_end_date(tmp_path: Path) -> None:
+    engine = get_engine(tmp_path / "db")
+    create_all(engine)
+    _seed_row(engine, timestamp=datetime(2023, 6, 1, tzinfo=UTC), symbol="EARLY")
+    _seed_row(engine, timestamp=datetime(2024, 1, 5, tzinfo=UTC), symbol="LATE")
+
+    df = load_labeled_feature_log(
+        engine,
+        feature_version=2,
+        label_column="forward_return_20d",
+        end_date=datetime(2023, 12, 31, tzinfo=UTC),
+    )
+    assert list(df["symbol"]) == ["EARLY"]
+
+
+def test_load_respects_both_dates(tmp_path: Path) -> None:
+    engine = get_engine(tmp_path / "db")
+    create_all(engine)
+    _seed_row(engine, timestamp=datetime(2022, 1, 1, tzinfo=UTC), symbol="OLD")
+    _seed_row(engine, timestamp=datetime(2023, 6, 1, tzinfo=UTC), symbol="MID")
+    _seed_row(engine, timestamp=datetime(2024, 6, 1, tzinfo=UTC), symbol="NEW")
+
+    df = load_labeled_feature_log(
+        engine,
+        feature_version=2,
+        label_column="forward_return_20d",
+        start_date=datetime(2023, 1, 1, tzinfo=UTC),
+        end_date=datetime(2023, 12, 31, tzinfo=UTC),
+    )
+    assert list(df["symbol"]) == ["MID"]

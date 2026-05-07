@@ -4,10 +4,15 @@ PR14: pulls labeled `feature_log` rows into a `pd.DataFrame` shaped for
 the LightGBM trainer. Filters by `feature_version` and label-non-null;
 excludes rows where the labeling job couldn't compute the requested
 forward horizon.
+
+PR17 adds optional `start_date` / `end_date` so callers can carve a
+training window distinct from a held-out test window (avoids
+in-sample bias when measuring the ML scorer).
 """
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 import pandas as pd
@@ -27,12 +32,17 @@ def load_labeled_feature_log(
     *,
     feature_version: int,
     label_column: str,
+    start_date: datetime | None = None,
+    end_date: datetime | None = None,
 ) -> pd.DataFrame:
     """Load `feature_log` rows ready for ML training.
 
     Returns a DataFrame with columns `[timestamp, symbol, *FEATURE_COLUMNS,
     <label_column>]` for every row matching `feature_version`, with
     `label_filled_at IS NOT NULL`, AND `<label_column> IS NOT NULL`.
+
+    `start_date` / `end_date` (inclusive) bound the timestamp window — used
+    by PR17 to train on early history and evaluate on later periods.
     """
     if label_column not in VALID_LABEL_COLUMNS:
         raise ValueError(f"label_column must be one of {VALID_LABEL_COLUMNS}, got {label_column!r}")
@@ -50,6 +60,10 @@ def load_labeled_feature_log(
         .where(feature_log.c[label_column].is_not(None))
         .order_by(feature_log.c.timestamp.asc(), feature_log.c.symbol.asc())
     )
+    if start_date is not None:
+        stmt = stmt.where(feature_log.c.timestamp >= start_date)
+    if end_date is not None:
+        stmt = stmt.where(feature_log.c.timestamp <= end_date)
     with engine.connect() as conn:
         rows = conn.execute(stmt).all()
 

@@ -222,6 +222,17 @@ def ml_train(
         "--db-path",
         help="SQLite database path. Defaults to BLOASIS_DB_PATH or ./bloasis.db.",
     ),
+    train_start: str = typer.Option(  # noqa: B008
+        None,
+        "--train-start",
+        help="(PR17) Earliest feature_log timestamp to train on, YYYY-MM-DD.",
+    ),
+    train_end: str = typer.Option(  # noqa: B008
+        None,
+        "--train-end",
+        help="(PR17) Latest feature_log timestamp to train on, YYYY-MM-DD. "
+        "Use this to hold out a later evaluation window.",
+    ),
 ) -> None:
     """Train a LightGBM regressor on labeled feature_log rows.
 
@@ -245,7 +256,26 @@ def ml_train(
     engine = get_engine(db_path)
     create_all(engine)
 
-    df = load_labeled_feature_log(engine, feature_version=feature_version, label_column=label)
+    train_start_dt = _parse_date(train_start)
+    train_end_dt = _parse_date(train_end)
+    start_arg = (
+        datetime(train_start_dt.year, train_start_dt.month, train_start_dt.day, tzinfo=UTC)
+        if train_start_dt is not None
+        else None
+    )
+    end_arg = (
+        datetime(train_end_dt.year, train_end_dt.month, train_end_dt.day, tzinfo=UTC)
+        if train_end_dt is not None
+        else None
+    )
+
+    df = load_labeled_feature_log(
+        engine,
+        feature_version=feature_version,
+        label_column=label,
+        start_date=start_arg,
+        end_date=end_arg,
+    )
     if df.empty:
         console.print(
             "[red]✗[/red] no labeled rows for "
@@ -254,9 +284,12 @@ def ml_train(
         )
         raise typer.Exit(code=1)
 
+    window_msg = ""
+    if start_arg or end_arg:
+        window_msg = f" (window {train_start or '...'} .. {train_end or '...'})"
     console.print(
         f"[cyan]loaded[/cyan] {len(df)} labeled rows, "
-        f"feature_version={feature_version}, label={label}"
+        f"feature_version={feature_version}, label={label}{window_msg}"
     )
 
     X = df[list(FEATURE_COLUMNS)]
