@@ -395,6 +395,65 @@ def test_cli_backtest_skips_unfetchable_symbols(
     assert row.status == "completed"
 
 
+def test_cli_backtest_persists_feature_log(
+    smoke_db: Path,
+    patched_yfinance: None,
+    baseline_config_path: Path,
+    tmp_path: Path,
+) -> None:
+    """PR13: engine writes extracted FeatureVectors to feature_log per fold,
+    so the labeling job (`bloasis label-features`) has data to label."""
+    from bloasis.storage import feature_log
+
+    runner.invoke(app, ["init-db"])
+    cfg = _smoke_config(baseline_config_path, tmp_path)
+
+    result = runner.invoke(
+        app,
+        [
+            "backtest",
+            "--config",
+            str(cfg),
+            "--start",
+            "2022-06-01",
+            "--end",
+            "2024-12-31",
+            "-s",
+            "AAA",
+            "-s",
+            "BBB",
+            "-s",
+            "CCC",
+            "-s",
+            "DDD",
+            "-s",
+            "EEE",
+            "--train-days",
+            "180",
+            "--test-days",
+            "60",
+            "--step-days",
+            "60",
+            "--name",
+            "fl-persist",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+
+    engine = get_engine(smoke_db)
+    with engine.connect() as conn:
+        run_row = conn.execute(
+            select(backtest_runs).where(backtest_runs.c.name == "fl-persist")
+        ).first()
+        assert run_row is not None
+        run_id = run_row.run_id
+        fl_rows = conn.execute(select(feature_log).where(feature_log.c.run_id == run_id)).fetchall()
+    assert len(fl_rows) > 0, "feature_log should be populated for the run"
+    # Labels untouched — `bloasis label-features` is a separate cron job.
+    assert all(r.label_filled_at is None for r in fl_rows)
+    assert all(r.feature_version >= 1 for r in fl_rows)
+
+
 def test_cli_runs_show_after_smoke_backtest(
     smoke_db: Path,
     patched_yfinance: None,

@@ -282,3 +282,110 @@ def test_write_trade_serializes_rationale(tmp_db_path: Path) -> None:
     assert row.side == "buy"
     assert row.rationale_json is not None
     assert "momentum_z" in row.rationale_json
+
+
+# ---------------------------------------------------------------------------
+# write_feature_log_batch — PR13 (Phase 2 ML labeling input)
+# ---------------------------------------------------------------------------
+
+
+def test_write_feature_log_batch_inserts_rows(tmp_db_path: Path) -> None:
+    """Batch insert FeatureVectors with run_id; rows show up unlabeled."""
+    from bloasis.scoring.features import FeatureVector
+    from bloasis.storage import feature_log
+
+    engine = get_engine(tmp_db_path)
+    create_all(engine)
+    run_id = writers.create_backtest_run(
+        engine,
+        name="fl-batch",
+        config_hash="x" * 12,
+        config_json="{}",
+        scorer_type="rule",
+        feature_version=2,
+        start_date=datetime(2024, 1, 1, tzinfo=UTC),
+        end_date=datetime(2024, 12, 31, tzinfo=UTC),
+        initial_capital=10_000.0,
+    )
+    fvs = [
+        FeatureVector(
+            timestamp=datetime(2024, 1, 5, tzinfo=UTC),
+            symbol="AAPL",
+            feature_version=2,
+            sector="Tech",
+            per=10.0,
+            momentum_252_21=0.42,
+        ),
+        FeatureVector(
+            timestamp=datetime(2024, 1, 5, tzinfo=UTC),
+            symbol="MSFT",
+            feature_version=2,
+            sector="Tech",
+            per=15.0,
+            momentum_252_21=0.18,
+        ),
+    ]
+    writers.write_feature_log_batch(engine, run_id, fvs)
+
+    with engine.connect() as conn:
+        rows = conn.execute(select(feature_log).where(feature_log.c.run_id == run_id)).fetchall()
+    assert len(rows) == 2
+    by_sym = {r.symbol: r for r in rows}
+    assert by_sym["AAPL"].per == 10.0
+    assert by_sym["AAPL"].momentum_252_21 == 0.42
+    assert by_sym["MSFT"].per == 15.0
+    # Labels untouched on insert
+    assert by_sym["AAPL"].label_filled_at is None
+    assert by_sym["AAPL"].forward_return_5d is None
+
+
+def test_write_feature_log_batch_no_op_on_empty(tmp_db_path: Path) -> None:
+    engine = get_engine(tmp_db_path)
+    create_all(engine)
+    writers.write_feature_log_batch(engine, run_id=999, vectors=[])  # no-op
+
+
+def test_write_feature_log_batch_idempotent_replace_on_pk_collision(
+    tmp_db_path: Path,
+) -> None:
+    """Re-running same fold (same PK) — second write should not error.
+
+    PK is (timestamp, symbol, run_id, feature_version). Engine retries
+    after partial fold failure shouldn't raise IntegrityError.
+    """
+    from bloasis.scoring.features import FeatureVector
+    from bloasis.storage import feature_log
+
+    engine = get_engine(tmp_db_path)
+    create_all(engine)
+    run_id = writers.create_backtest_run(
+        engine,
+        name="fl-dup",
+        config_hash="x" * 12,
+        config_json="{}",
+        scorer_type="rule",
+        feature_version=2,
+        start_date=datetime(2024, 1, 1, tzinfo=UTC),
+        end_date=datetime(2024, 12, 31, tzinfo=UTC),
+        initial_capital=10_000.0,
+    )
+    fv = FeatureVector(
+        timestamp=datetime(2024, 1, 5, tzinfo=UTC),
+        symbol="AAPL",
+        feature_version=2,
+        per=10.0,
+    )
+    writers.write_feature_log_batch(engine, run_id, [fv])
+    # Same PK, different value — should upsert (replace), not raise.
+    fv2 = FeatureVector(
+        timestamp=datetime(2024, 1, 5, tzinfo=UTC),
+        symbol="AAPL",
+        feature_version=2,
+        per=99.0,
+    )
+    writers.write_feature_log_batch(engine, run_id, [fv2])
+
+    with engine.connect() as conn:
+        rows = conn.execute(select(feature_log).where(feature_log.c.run_id == run_id)).fetchall()
+    assert len(rows) == 1
+    assert rows[0].per == 99.0  # replaced

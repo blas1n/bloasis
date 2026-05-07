@@ -123,6 +123,79 @@ def init_db(
     console.print(f"  tables: {', '.join(table_names)}")
 
 
+@app.command("label-features")
+def label_features(
+    config_path: Path = typer.Option(  # noqa: B008
+        None, "--config", "-c", help="Strategy YAML (uses defaults if omitted)."
+    ),
+    db_path: Path = typer.Option(  # noqa: B008
+        None,
+        "--db-path",
+        help="SQLite database path. Defaults to BLOASIS_DB_PATH or ./bloasis.db.",
+    ),
+) -> None:
+    """Fill `forward_return_5d/20d/60d` for all unlabeled `feature_log` rows.
+
+    Reads close-series from the local OHLCV parquet cache (whichever cache
+    file for a symbol covers the latest forward bar). Symbols with no
+    cached OHLCV are skipped — re-run after fetching to pick them up.
+
+    Idempotent + cron-friendly: rows with `label_filled_at IS NOT NULL`
+    are not retouched. Rows whose forward window doesn't fit in the cache
+    still get `label_filled_at` set (NULL labels) so they don't replay.
+    """
+    import pandas as pd
+
+    from bloasis.ml.labeling import label_unlabeled_features
+
+    cfg = _load_or_default_config(config_path)
+    engine = get_engine(db_path)
+    create_all(engine)
+
+    parquet_dir = cfg.data.cache_dir / "parquet" / "ohlcv"
+
+    def _load_widest_for_symbol(symbol: str) -> pd.Series | None:
+        """Pick the parquet file for `symbol` covering the longest date
+        span. Same symbol can have multiple cache windows from different
+        backtest fetches (e.g. `<sym>_2013-03_2019-12`, `<sym>_2018-03_2024-12`,
+        `<sym>_2025-05-05_2026-05-05` — a 1-day fresh fetch).
+
+        Picking by row count alone is wrong (1-day file has 1 row, but a
+        7-year file has ~1750 — both can lose to a 5-year file by raw count
+        if compression varies). Picking by `index.max()` is also wrong
+        (a 1-day file dated tomorrow wins). Picking by **span** (max - min
+        in days) correctly prefers the 7-year file in every case.
+
+        Returns the close series (tz-naive), or None when no cache hit.
+        """
+        if not parquet_dir.exists():
+            return None
+        candidates = list(parquet_dir.glob(f"{symbol}_*.parquet"))
+        if not candidates:
+            return None
+        best_df: pd.DataFrame | None = None
+        best_span_days = -1
+        for p in candidates:
+            try:
+                df = pd.read_parquet(p)
+            except Exception:  # noqa: BLE001 — corrupt parquet, skip
+                continue
+            if "close" not in df.columns or df.empty:
+                continue
+            span = (pd.Timestamp(df.index.max()) - pd.Timestamp(df.index.min())).days
+            if span > best_span_days:
+                best_df = df
+                best_span_days = span
+        if best_df is None:
+            return None
+        s = best_df["close"].sort_index()
+        s.index = pd.DatetimeIndex(s.index).tz_localize(None)
+        return s
+
+    n = label_unlabeled_features(engine, ohlcv_provider=_load_widest_for_symbol)
+    console.print(f"[green]✓[/green] labeled [bold]{n}[/bold] feature_log rows")
+
+
 @config_app.command("show")
 def config_show(
     path: Path = typer.Argument(..., exists=True, dir_okay=False, readable=True),  # noqa: B008
