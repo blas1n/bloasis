@@ -1,0 +1,89 @@
+# Same as pilot-mom-only-v2.yaml but with regime_overlay disabled.
+# Isolates the effect of PR12 features (momentum_252_21 + roc_120 in momentum
+# composite + KBAR + corr_pv_20) from the overlay.
+
+universe:
+  source: sp500
+  custom_csv_path: null
+
+pre_filter:
+  min_market_cap: 1_000_000_000
+  max_pe_ratio: 25
+  min_dollar_volume: 5_000_000
+  exclude_sectors: []
+
+scorer:
+  type: rule
+  ml_model_path: null
+
+  weights:
+    value: 0.0
+    quality: 0.0
+    momentum: 1.0
+    technical: 0.0
+    volatility: 0.0
+    liquidity: 0.0
+    sentiment: 0.0
+
+  regime_multipliers: {}
+
+  thresholds:
+    rsi_oversold: 30.0
+    rsi_overbought: 70.0
+    strong_momentum_20d: 0.10
+    high_volatility_ann: 0.40
+    elevated_vix: 25.0
+    high_leverage_de: 2.0
+    strong_trend_adx: 25.0
+
+  entry_threshold: 0.65
+  exit_threshold: 0.40
+
+regime_overlay:
+  enabled: false  # OFF — isolate effect of PR12 features alone
+
+signal:
+  atr_stop_multiplier: 2.0
+  atr_tp_multiplier: 3.0
+  position_size_max_pct: 0.10
+  profit_tiers:
+    - {fraction: 0.33, type: target,   atr_mult: 1.5}
+    - {fraction: 0.33, type: target,   atr_mult: 3.0}
+    - {fraction: 0.34, type: trailing, atr_mult: 2.0}
+
+risk:
+  vix_extreme: 40.0
+  vix_high: 30.0
+  max_single_order_pct: 0.10
+  max_sector_concentration: 0.30
+
+execution:
+  fill_mode: limit_with_fallback
+  market_slippage_bps: 5
+  limit_offset_bps: 10
+  limit_timeout_bars: 1
+  fees_bps: 0
+  initial_capital: 10000.0
+
+data:
+  cache_dir: ~/.cache/bloasis
+  ohlcv_cache_max_age_hours: 24
+  fundamentals_cache_max_age_hours: 24
+  sentiment_cache_max_age_hours: 6
+  finnhub_rate_per_minute: 60
+  sentiment_lookback_days: 7
+
+allocation:
+  strategies:
+    - name: core_spy
+      type: spy_passive
+      weight: 0.70
+    - name: bloasis_smart_beta
+      type: strategy
+      weight: 0.30
+
+acceptance_criteria:
+  walk_forward_min_folds: 5
+  median_alpha_annualized: -0.005
+  median_sharpe_vs_spy: 1.0
+  median_max_dd_ratio_to_spy: 0.85

@@ -52,6 +52,12 @@ FEATURE_COLUMNS: tuple[str, ...] = (
     # Sentiment (live only; NaN in backtest periods predating live deployment)
     "sentiment_score",
     "news_count",
+    # PR12 — long-term momentum + qlib microstructure / interaction (feature_version=2)
+    "momentum_252_21",
+    "roc_120",
+    "kbar_kmid2",
+    "kbar_ksft2",
+    "corr_pv_20",
 )
 
 
@@ -100,6 +106,13 @@ class FeatureVector:
     # Sentiment
     sentiment_score: float = field(default_factory=_nan)
     news_count: float = field(default_factory=_nan)
+
+    # PR12 — long-term momentum + qlib microstructure / interaction
+    momentum_252_21: float = field(default_factory=_nan)
+    roc_120: float = field(default_factory=_nan)
+    kbar_kmid2: float = field(default_factory=_nan)
+    kbar_ksft2: float = field(default_factory=_nan)
+    corr_pv_20: float = field(default_factory=_nan)
 
     FEATURE_COLUMNS: ClassVar[tuple[str, ...]] = FEATURE_COLUMNS
 

@@ -87,6 +87,12 @@ feature_log = Table(
     # Sentiment (live only; NULL for backtest periods)
     Column("sentiment_score", Float, nullable=True),
     Column("news_count", Integer, nullable=True),
+    # PR12 — long-term momentum + qlib microstructure (feature_version >= 2)
+    Column("momentum_252_21", Float, nullable=True),
+    Column("roc_120", Float, nullable=True),
+    Column("kbar_kmid2", Float, nullable=True),
+    Column("kbar_ksft2", Float, nullable=True),
+    Column("corr_pv_20", Float, nullable=True),
     # Forward labels (filled async by labeling job)
     Column("forward_return_5d", Float, nullable=True),
     Column("forward_return_20d", Float, nullable=True),

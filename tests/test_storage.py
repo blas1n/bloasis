@@ -209,7 +209,7 @@ def test_backtest_runs_status_check(tmp_db_path: Path) -> None:
                 config_hash="abc",
                 config_json="{}",
                 scorer_type="rule",
-                feature_version=1,
+                feature_version=2,
                 start_date=datetime(2024, 1, 1, tzinfo=UTC),
                 end_date=datetime(2024, 1, 31, tzinfo=UTC),
                 initial_capital=10000.0,

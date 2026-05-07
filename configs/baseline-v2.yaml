@@ -1,0 +1,117 @@
+# BLOASIS baseline strategy config — PR12 v2.
+#
+# Built on top of baseline.yaml. Two material changes:
+#
+#   1. Composite weights re-balanced per AQR style-investing literature
+#      (Asness, Frazzini, Israel, Moskowitz 2014; QMJ Asness-Frazzini-Pedersen
+#      2019). Core 80% (value/quality/momentum/volatility) / aux 20%
+#      (technical/liquidity/sentiment).
+#
+#   2. NEW `regime_overlay` block — Barroso-Santa-Clara constant-vol scaling
+#      with Daniel-Moskowitz bear gate. Targets 12% annualized vol; halves
+#      exposure during bear states (24-month negative SPY return).
+#
+# Composite definitions themselves changed in code (composites.py) — momentum
+# now includes momentum_252_21 (J-T 12-1) + roc_120, technical includes
+# qlib KBAR microstructure features, liquidity includes corr_pv_20.
+# `feature_version: 2` extracted features, see FEATURE_COLUMNS.
+#
+# See ~/Docs/bloasis/PR12_Design_Lockin_2026-05-07.md for full rationale.
+
+universe:
+  source: sp500
+  custom_csv_path: null
+
+pre_filter:
+  min_market_cap: 1_000_000_000
+  max_pe_ratio: 25
+  min_dollar_volume: 5_000_000
+  exclude_sectors: []
+
+scorer:
+  type: rule
+  ml_model_path: null
+
+  # AQR-recommended core/aux split for long-only multi-factor.
+  # Core 80% = value 0.22 + quality 0.22 + momentum 0.22 + volatility 0.14.
+  # Aux 20%  = technical 0.08 + liquidity 0.04 + sentiment 0.08.
+  weights:
+    value: 0.22
+    quality: 0.22
+    momentum: 0.22
+    technical: 0.08
+    volatility: 0.14
+    liquidity: 0.04
+    sentiment: 0.08
+
+  # Empty regime_multipliers — vol overlay is more precise. Future: re-add if
+  # regime classifier proves useful AFTER overlay measurement.
+  regime_multipliers: {}
+
+  thresholds:
+    rsi_oversold: 30.0
+    rsi_overbought: 70.0
+    strong_momentum_20d: 0.10
+    high_volatility_ann: 0.40
+    elevated_vix: 25.0
+    high_leverage_de: 2.0
+    strong_trend_adx: 25.0
+
+  entry_threshold: 0.65
+  exit_threshold: 0.40
+
+# Barroso-Santa-Clara constant-vol overlay + Daniel-Moskowitz bear gate.
+# Multiplies position size_pct at entry. See bloasis/scoring/regime_overlay.py.
+regime_overlay:
+  enabled: true
+  sigma_target: 0.12        # annualized vol target
+  vol_lookback_days: 126    # ~6 months realized vol window (BSC default)
+  bear_lookback_days: 504   # ~24 months for bear gate (DM 2016)
+  bear_scale: 0.5           # additional ×0.5 derisk in bear state
+  scale_clip: [0.0, 1.5]    # cap leverage at 1.5x (no shorts)
+
+signal:
+  atr_stop_multiplier: 2.0
+  atr_tp_multiplier: 3.0
+  position_size_max_pct: 0.10
+  profit_tiers:
+    - {fraction: 0.33, type: target,   atr_mult: 1.5}
+    - {fraction: 0.33, type: target,   atr_mult: 3.0}
+    - {fraction: 0.34, type: trailing, atr_mult: 2.0}
+
+risk:
+  vix_extreme: 40.0
+  vix_high: 30.0
+  max_single_order_pct: 0.10
+  max_sector_concentration: 0.30
+
+execution:
+  fill_mode: limit_with_fallback
+  market_slippage_bps: 5
+  limit_offset_bps: 10
+  limit_timeout_bars: 1
+  fees_bps: 0
+  initial_capital: 10000.0
+
+data:
+  cache_dir: ~/.cache/bloasis
+  ohlcv_cache_max_age_hours: 24
+  fundamentals_cache_max_age_hours: 24
+  sentiment_cache_max_age_hours: 6
+  finnhub_rate_per_minute: 60
+  sentiment_lookback_days: 7
+
+allocation:
+  strategies:
+    - name: core_spy
+      type: spy_passive
+      weight: 0.70
+    - name: bloasis_smart_beta
+      type: strategy
+      weight: 0.30
+
+acceptance_criteria:
+  walk_forward_min_folds: 5
+  median_alpha_annualized: -0.005
+  median_sharpe_vs_spy: 1.0
+  median_max_dd_ratio_to_spy: 0.85

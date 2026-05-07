@@ -16,6 +16,9 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 from bloasis.scoring.derived import (
+    corr_price_volume,
+    kbar_kmid2,
+    kbar_ksft2,
     momentum,
     vix_zscore_60d,
     volatility_annualized,
@@ -106,7 +109,7 @@ def _to_naive_utc(value: object) -> datetime:
 class FeatureExtractor:
     """Extract a `FeatureVector` from a properly-sliced context."""
 
-    VERSION = 1
+    VERSION = 2
 
     def extract(self, ctx: ExtractionContext) -> FeatureVector:
         if ctx.feature_version != self.VERSION:
@@ -115,6 +118,7 @@ class FeatureExtractor:
             )
 
         ohlcv = ctx.ohlcv
+        open_ = ohlcv["open"]
         close = ohlcv["close"]
         high = ohlcv["high"]
         low = ohlcv["low"]
@@ -171,6 +175,12 @@ class FeatureExtractor:
             if ctx.sentiment_score is not None
             else float("nan"),
             news_count=float(ctx.news_count) if ctx.news_count is not None else float("nan"),
+            # PR12 — long-term momentum + qlib microstructure / interaction
+            momentum_252_21=momentum(close, lookback=252, skip=21),
+            roc_120=momentum(close, lookback=120),
+            kbar_kmid2=kbar_kmid2(open_, high, low, close),
+            kbar_ksft2=kbar_ksft2(high, low, close),
+            corr_pv_20=corr_price_volume(close, volume, window=20),
         )
 
 

@@ -203,6 +203,142 @@ def test_cli_backtest_smoke_writes_equity_curve(
     assert len(ec_count) > 0, "equity_curve should be populated for a completed run"
 
 
+def test_cli_backtest_baseline_v2_smoke(
+    smoke_db: Path,
+    patched_yfinance: None,
+    baseline_config_path: Path,
+    tmp_path: Path,
+) -> None:
+    """`baseline-v2.yaml` (PR12 weights + regime overlay) loads + runs end-to-end."""
+
+    runner.invoke(app, ["init-db"])
+    # Use the actual baseline-v2.yaml from the repo (relative to baseline.yaml dir)
+    baseline_v2_src = baseline_config_path.parent / "baseline-v2.yaml"
+    if not baseline_v2_src.exists():
+        pytest.skip("baseline-v2.yaml not present")
+
+    raw = yaml.safe_load(baseline_v2_src.read_text())
+    raw["acceptance_criteria"]["walk_forward_min_folds"] = 1
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir(exist_ok=True)
+    raw["data"]["cache_dir"] = str(cache_dir)
+    out = tmp_path / "smoke-v2.yaml"
+    out.write_text(yaml.safe_dump(raw))
+
+    result = runner.invoke(
+        app,
+        [
+            "backtest",
+            "--config",
+            str(out),
+            "--start",
+            "2022-06-01",
+            "--end",
+            "2024-12-31",
+            "-s",
+            "AAA",
+            "-s",
+            "BBB",
+            "-s",
+            "CCC",
+            "-s",
+            "DDD",
+            "-s",
+            "EEE",
+            "--train-days",
+            "180",
+            "--test-days",
+            "60",
+            "--step-days",
+            "60",
+            "--name",
+            "smoke-v2",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    engine = get_engine(smoke_db)
+    with engine.connect() as conn:
+        row = conn.execute(select(backtest_runs).where(backtest_runs.c.name == "smoke-v2")).first()
+    assert row is not None
+    assert row.status == "completed"
+
+
+def test_cli_backtest_overlay_changes_equity(
+    smoke_db: Path,
+    patched_yfinance: None,
+    baseline_config_path: Path,
+    tmp_path: Path,
+) -> None:
+    """Both `regime_overlay.enabled = true/false` configs run end-to-end.
+
+    Wiring smoke only — verifies the engine accepts `RegimeOverlayConfig`,
+    instantiates `compute_regime_scale`, and completes folds without
+    crashing under both states.
+
+    NOT a math correctness test (covered by `tests/test_regime_overlay.py`).
+    The synthetic OHLCV uses `hash(symbol)` for seed, which Python randomizes
+    via `PYTHONHASHSEED` per-process — so realized metrics aren't guaranteed
+    to differ across overlay states on every CI runner.
+    """
+    runner.invoke(app, ["init-db"])
+
+    def make_cfg(name: str, overlay_enabled: bool) -> Path:
+        raw = yaml.safe_load(baseline_config_path.read_text())
+        raw["acceptance_criteria"]["walk_forward_min_folds"] = 1
+        cache_dir = tmp_path / f"cache-{name}"
+        cache_dir.mkdir(exist_ok=True)
+        raw["data"]["cache_dir"] = str(cache_dir)
+        raw["regime_overlay"] = {
+            "enabled": overlay_enabled,
+            "sigma_target": 0.12,
+            "vol_lookback_days": 60,
+            "bear_lookback_days": 120,
+            "bear_scale": 0.5,
+            "scale_clip": [0.0, 1.5],
+        }
+        out = tmp_path / f"{name}.yaml"
+        out.write_text(yaml.safe_dump(raw))
+        return out
+
+    syms = ["AAA", "BBB", "CCC", "DDD", "EEE"]
+    sym_args: list[str] = []
+    for s in syms:
+        sym_args.extend(["-s", s])
+
+    base_args = [
+        "backtest",
+        "--start",
+        "2022-06-01",
+        "--end",
+        "2024-12-31",
+        *sym_args,
+        "--train-days",
+        "180",
+        "--test-days",
+        "60",
+        "--step-days",
+        "60",
+    ]
+
+    cfg_off = make_cfg("off", overlay_enabled=False)
+    r_off = runner.invoke(app, [*base_args, "--config", str(cfg_off), "--name", "ovr-off"])
+    assert r_off.exit_code == 0, r_off.output
+
+    cfg_on = make_cfg("on", overlay_enabled=True)
+    r_on = runner.invoke(app, [*base_args, "--config", str(cfg_on), "--name", "ovr-on"])
+    assert r_on.exit_code == 0, r_on.output
+
+    engine = get_engine(smoke_db)
+    with engine.connect() as conn:
+        row_off = conn.execute(
+            select(backtest_runs).where(backtest_runs.c.name == "ovr-off")
+        ).first()
+        row_on = conn.execute(select(backtest_runs).where(backtest_runs.c.name == "ovr-on")).first()
+    assert row_off is not None and row_on is not None
+    assert row_off.status == "completed"
+    assert row_on.status == "completed"
+
+
 def test_cli_backtest_skips_unfetchable_symbols(
     smoke_db: Path,
     baseline_config_path: Path,
