@@ -184,32 +184,38 @@ def write_feature_log_batch(
         row["created_at"] = now
         payload.append(row)
 
-    # SQLite ON CONFLICT REPLACE keyed on the PK so retried folds don't
-    # raise IntegrityError. Postgres migration: same syntax via
-    # `postgresql.insert`.
-    stmt = sqlite_insert(feature_log).values(payload)
-    update_cols = {
-        c.name: stmt.excluded[c.name]
-        for c in feature_log.columns
-        if c.name
-        not in {
-            "timestamp",
-            "symbol",
-            "run_id",
-            "feature_version",
-            # Don't clobber labels populated by `bloasis label-features`.
-            "forward_return_5d",
-            "forward_return_20d",
-            "forward_return_60d",
-            "label_filled_at",
-        }
+    # SQLite caps the number of host parameters per statement at 32766
+    # (older builds: 999). feature_log has ~33 columns × bulk insert
+    # cardinality (a fold can be 60k+ rows on full S&P 500), which
+    # blows past the limit. Chunk by row-count derived from the
+    # column count to stay safely under the cap.
+    n_cols = len(feature_log.columns)
+    rows_per_chunk = max(1, 30_000 // n_cols)  # leave headroom under 32766
+    update_skip = {
+        "timestamp",
+        "symbol",
+        "run_id",
+        "feature_version",
+        # Don't clobber labels populated by `bloasis label-features`.
+        "forward_return_5d",
+        "forward_return_20d",
+        "forward_return_60d",
+        "label_filled_at",
     }
-    stmt = stmt.on_conflict_do_update(
-        index_elements=["timestamp", "symbol", "run_id", "feature_version"],
-        set_=update_cols,
-    )
     with engine.begin() as conn:
-        conn.execute(stmt)
+        for i in range(0, len(payload), rows_per_chunk):
+            chunk = payload[i : i + rows_per_chunk]
+            stmt = sqlite_insert(feature_log).values(chunk)
+            update_cols = {
+                c.name: stmt.excluded[c.name]
+                for c in feature_log.columns
+                if c.name not in update_skip
+            }
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["timestamp", "symbol", "run_id", "feature_version"],
+                set_=update_cols,
+            )
+            conn.execute(stmt)
 
 
 # ---------------------------------------------------------------------------
