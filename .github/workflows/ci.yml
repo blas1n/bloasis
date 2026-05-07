@@ -24,7 +24,7 @@ jobs:
         run: sudo bash scripts/install-talib.sh
 
       - name: Install dependencies
-        run: uv sync --extra dev --extra data --extra ta --extra llm --extra broker
+        run: uv sync --extra dev --extra data --extra ta --extra llm --extra broker --extra ml
 
       - name: Lint (ruff)
         run: uv run ruff check bloasis/ tests/
