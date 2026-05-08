@@ -64,6 +64,10 @@ class LLMFundamentalScorer:
         self._cache_dir = Path(cache_dir).expanduser()
         self._cache_dir.mkdir(parents=True, exist_ok=True)
         self._llm = llm or LLMConfig()
+        # In-memory cache for backtest hot loops — disk lookups dominate
+        # when the engine queries the same (symbol, fy_end) every trading
+        # day across ~250 days × 500 symbols.
+        self._memo: dict[str, float] = {}
 
     def score(
         self,
@@ -76,13 +80,17 @@ class LLMFundamentalScorer:
         if all(v != v for v in fundamentals.values()):
             return float("nan")
         key = self._cache_key(symbol, quarter_end, fundamentals)
+        if key in self._memo:
+            return self._memo[key]
         cached = self._cache_get(key)
         if cached is not None:
+            self._memo[key] = cached
             return cached
 
         score = self._call_llm(symbol, quarter_end, fundamentals)
         if not math.isnan(score):
             self._cache_put(key, score)
+            self._memo[key] = score
         return score
 
     def _cache_key(

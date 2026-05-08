@@ -894,7 +894,7 @@ def backtest(
 
     # Phase 3 LLM fundamental: fetch quarterly statements per symbol.
     quarterly_financials: dict[str, pd.DataFrame] = {}
-    if cfg.scorer.type == "fundamental_llm":
+    if cfg.scorer.type in ("fundamental_llm", "fundamental_llm_jt_intersect"):
         from bloasis.data.fetchers.yfinance_financials import YfFinancialsFetcher
 
         fin_cache = ParquetCache(cfg.data.cache_dir, namespace="financials")

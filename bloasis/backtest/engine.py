@@ -120,7 +120,7 @@ class Backtester:
         )
         # Phase 3 LLM fundamental scorer (lazy: only constructed when needed).
         self._llm_fundamental_scorer = None
-        if cfg.scorer.type == "fundamental_llm":
+        if cfg.scorer.type in ("fundamental_llm", "fundamental_llm_jt_intersect"):
             from bloasis.scoring.llm_fundamental import LLMConfig, LLMFundamentalScorer
 
             cache_dir = (cfg.data.cache_dir / "fundamental_llm").expanduser()
@@ -407,7 +407,7 @@ class Backtester:
                         # short-circuits on NaN inputs, prompt expects every
                         # field present.
                         s = self._llm_fundamental_scorer.score(
-                            sym, last_qe, {k: float(v) for k, v in last_row.items()}
+                            sym, last_qe, {str(k): float(v) for k, v in last_row.items()}
                         )
                         llm_score = s if s == s else None  # NaN → None
             try:
@@ -653,6 +653,27 @@ class Backtester:
             return FundamentalLLMScorer(
                 self._cfg.scorer,
                 top_pct=self._cfg.scorer.fundamental_llm_top_pct,
+            )
+        if self._cfg.scorer.type == "fundamental_llm_jt_intersect":
+            from bloasis.scoring.scorer import (
+                FundamentalLLMScorer,
+                IntersectScorer,
+                JTMomentumScorer,
+            )
+
+            return IntersectScorer(
+                self._cfg.scorer,
+                sub_scorers=[
+                    JTMomentumScorer(
+                        self._cfg.scorer,
+                        top_pct=self._cfg.scorer.jt_top_pct,
+                        vol_scale=self._cfg.scorer.jt_vol_scale,
+                    ),
+                    FundamentalLLMScorer(
+                        self._cfg.scorer,
+                        top_pct=self._cfg.scorer.fundamental_llm_top_pct,
+                    ),
+                ],
             )
         return RuleBasedScorer(self._cfg.scorer)
 

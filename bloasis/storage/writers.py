@@ -190,7 +190,10 @@ def write_feature_log_batch(
     # blows past the limit. Chunk by row-count derived from the
     # column count to stay safely under the cap.
     n_cols = len(feature_log.columns)
-    rows_per_chunk = max(1, 30_000 // n_cols)  # leave headroom under 32766
+    # ON CONFLICT DO UPDATE adds another set of bind params per chunk; keep
+    # headroom well below SQLite's 32766 host-param cap. Using 15_000 lets
+    # us add new columns without re-tuning.
+    rows_per_chunk = max(1, 15_000 // n_cols)
     update_skip = {
         "timestamp",
         "symbol",

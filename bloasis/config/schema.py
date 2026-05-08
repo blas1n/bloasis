@@ -69,7 +69,15 @@ class PreFilterConfig(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-ScorerType = Literal["rule", "ml", "jt_momentum", "pead", "pead_jt_intersect", "fundamental_llm"]
+ScorerType = Literal[
+    "rule",
+    "ml",
+    "jt_momentum",
+    "pead",
+    "pead_jt_intersect",
+    "fundamental_llm",
+    "fundamental_llm_jt_intersect",
+]
 RegimeName = Literal["crisis", "bear", "sideways", "recovery", "bull"]
 
 
