@@ -72,6 +72,12 @@ class ExtractionContext:
     # __post_init__ enforces look-ahead protection.
     earnings_history: pd.DataFrame | None = None
 
+    # Phase 3 LLM fundamental health: scalar score in [-1, 1] for the most
+    # recent quarter as-of `timestamp`. Optional; backtest paths that don't
+    # invoke the LLM scorer pass None → feature stays NaN. Caller is
+    # responsible for ensuring the underlying quarter_end < timestamp.
+    fundamental_llm_score: float | None = None
+
     def __post_init__(self) -> None:
         if self.ohlcv is None or self.ohlcv.empty:
             raise ValueError(f"empty ohlcv for {self.symbol} @ {self.timestamp}")
@@ -212,6 +218,12 @@ class FeatureExtractor:
             # Phase 3 PEAD
             last_eps_surprise_pct=last_eps_surprise,
             days_since_earnings=days_since_earn,
+            # Phase 3 LLM fundamental health
+            fundamental_llm_score=(
+                float("nan")
+                if ctx.fundamental_llm_score is None
+                else float(ctx.fundamental_llm_score)
+            ),
         )
 
 

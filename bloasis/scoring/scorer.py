@@ -408,6 +408,72 @@ class JTMomentumScorer:
         )
 
 
+class FundamentalLLMScorer:
+    """Phase 3 Candidate B-modern — LLM-rated fundamental health.
+
+    Cross-section ranking on `fundamental_llm_score` (already populated
+    in FeatureVector by upstream LLM pass). Top `top_pct` get score 0.99,
+    rest 0.0. NaN scores excluded.
+
+    The LLM call itself happens before `score_cross_section` — this scorer
+    is pure compute (matches bloasis architectural rule §2). The pipeline:
+    `bloasis.scoring.llm_fundamental.LLMFundamentalScorer` populates
+    `ExtractionContext.fundamental_llm_score`, extractor copies it into
+    FeatureVector, this scorer reads it.
+    """
+
+    def __init__(self, cfg: ScorerConfig, *, top_pct: float = 0.10) -> None:
+        if not 0.0 < top_pct <= 1.0:
+            raise ValueError(f"top_pct must be in (0, 1], got {top_pct}")
+        self._cfg = cfg
+        self._top_pct = top_pct
+
+    def score_cross_section(
+        self, fvs: list[FeatureVector], cvs: list[CompositeVector]
+    ) -> list[ScoredCandidate]:
+        if not fvs:
+            return []
+        eligibles: list[tuple[int, float]] = []
+        for i, fv in enumerate(fvs):
+            v = float(fv.fundamental_llm_score)
+            if not math.isnan(v):
+                eligibles.append((i, v))
+        n_select = max(1, int(len(eligibles) * self._top_pct)) if eligibles else 0
+        eligibles_sorted = sorted(eligibles, key=lambda t: t[1], reverse=True)
+        top_indices = {idx for idx, _v in eligibles_sorted[:n_select]}
+
+        out: list[ScoredCandidate] = []
+        for i, fv in enumerate(fvs):
+            score = 0.99 if i in top_indices else 0.0
+            out.append(self._build_scored(fv, score=score))
+        return out
+
+    def score(self, fv: FeatureVector, cv: CompositeVector) -> ScoredCandidate:
+        return self._build_scored(fv, score=0.5)
+
+    @staticmethod
+    def _build_scored(fv: FeatureVector, *, score: float) -> ScoredCandidate:
+        v = float(fv.fundamental_llm_score)
+        return ScoredCandidate(
+            symbol=fv.symbol,
+            timestamp=fv.timestamp,
+            score=score,
+            rationale=Rationale(
+                contributions=(
+                    FactorContribution(
+                        name="fundamental_llm_score",
+                        composite_score=v,
+                        weight=1.0,
+                        contribution=v,
+                        inputs={"fundamental_llm_score": v},
+                    ),
+                ),
+                triggers=(),
+                risks=(),
+            ),
+        )
+
+
 class IntersectScorer:
     """Phase 3 Candidate A4 — combine N orthogonal alpha signals via AND.
 

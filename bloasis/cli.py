@@ -892,12 +892,29 @@ def backtest(
             except Exception as exc:  # noqa: BLE001
                 console.print(f"[yellow]skipping earnings for {sym}: {exc}[/yellow]")
 
+    # Phase 3 LLM fundamental: fetch quarterly statements per symbol.
+    quarterly_financials: dict[str, pd.DataFrame] = {}
+    if cfg.scorer.type == "fundamental_llm":
+        from bloasis.data.fetchers.yfinance_financials import YfFinancialsFetcher
+
+        fin_cache = ParquetCache(cfg.data.cache_dir, namespace="financials")
+        fin_fetcher = YfFinancialsFetcher(
+            cache=fin_cache,
+            max_age_hours=cfg.data.fundamentals_cache_max_age_hours,
+        )
+        for sym in bars:
+            try:
+                quarterly_financials[sym] = fin_fetcher.fetch(sym)
+            except Exception as exc:  # noqa: BLE001
+                console.print(f"[yellow]skipping financials for {sym}: {exc}[/yellow]")
+
     data = BacktestData(
         symbols=list(bars.keys()),
         bars=bars,
         vix_series=market_ctx.vix,
         spy_close_series=market_ctx.spy_close,
         earnings_history=earnings_history,
+        quarterly_financials=quarterly_financials,
     )
 
     engine = get_engine()

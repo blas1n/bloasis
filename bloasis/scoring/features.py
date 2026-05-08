@@ -61,6 +61,8 @@ FEATURE_COLUMNS: tuple[str, ...] = (
     # Phase 3 PEAD (feature_version=3)
     "last_eps_surprise_pct",
     "days_since_earnings",
+    # Phase 3 LLM fundamental health (feature_version=3)
+    "fundamental_llm_score",
 )
 
 
@@ -120,6 +122,9 @@ class FeatureVector:
     # Phase 3 PEAD
     last_eps_surprise_pct: float = field(default_factory=_nan)
     days_since_earnings: float = field(default_factory=_nan)
+
+    # Phase 3 LLM fundamental health
+    fundamental_llm_score: float = field(default_factory=_nan)
 
     FEATURE_COLUMNS: ClassVar[tuple[str, ...]] = FEATURE_COLUMNS
 

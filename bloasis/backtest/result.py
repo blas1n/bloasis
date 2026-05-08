@@ -39,6 +39,9 @@ class BacktestData:
     # Phase 3 PEAD: optional earnings history per symbol. Empty dict =
     # unavailable (PEAD features stay NaN). DataFrame indexed by date.
     earnings_history: dict[str, pd.DataFrame] = field(default_factory=dict)
+    # Phase 3 LLM fundamental: optional quarterly statements per symbol.
+    # DataFrame indexed by quarter-end date with CANONICAL_FIELDS columns.
+    quarterly_financials: dict[str, pd.DataFrame] = field(default_factory=dict)
 
     def universe_at(self, d: date) -> list[str]:
         """Return symbols tradable on `d`. Falls back to `self.symbols` if no

@@ -118,6 +118,19 @@ class Backtester:
             bear_scale=cfg.regime_overlay.bear_scale,
             scale_clip=cfg.regime_overlay.scale_clip,
         )
+        # Phase 3 LLM fundamental scorer (lazy: only constructed when needed).
+        self._llm_fundamental_scorer = None
+        if cfg.scorer.type == "fundamental_llm":
+            from bloasis.scoring.llm_fundamental import LLMConfig, LLMFundamentalScorer
+
+            cache_dir = (cfg.data.cache_dir / "fundamental_llm").expanduser()
+            self._llm_fundamental_scorer = LLMFundamentalScorer(
+                cache_dir=cache_dir,
+                llm=LLMConfig(
+                    model=cfg.scorer.fundamental_llm_model,
+                    api_base=cfg.scorer.fundamental_llm_api_base,
+                ),
+            )
 
     # ------------------------------------------------------------------
     # public entry point
@@ -376,6 +389,27 @@ class Backtester:
             full_earnings = self._data.earnings_history.get(sym)
             if full_earnings is not None and not full_earnings.empty:
                 earnings_slice = full_earnings.loc[full_earnings.index < ts_pd]
+
+            # Phase 3 LLM fundamental: pull last annual statement before
+            # timestamp (with 90-day filing lag for PIT correctness — 10-K
+            # is typically released 60-90 days after fiscal year-end), score
+            # via LLM (cached).
+            llm_score: float | None = None
+            if self._llm_fundamental_scorer is not None:
+                fin = self._data.quarterly_financials.get(sym)
+                if fin is not None and not fin.empty:
+                    pit_cutoff = ts_pd - pd.Timedelta(days=90)
+                    past = fin.loc[fin.index <= pit_cutoff]
+                    if not past.empty:
+                        last_row = past.iloc[-1]
+                        last_qe = past.index[-1].to_pydatetime()
+                        # Preserve all canonical fields incl. NaN — scorer
+                        # short-circuits on NaN inputs, prompt expects every
+                        # field present.
+                        s = self._llm_fundamental_scorer.score(
+                            sym, last_qe, {k: float(v) for k, v in last_row.items()}
+                        )
+                        llm_score = s if s == s else None  # NaN → None
             try:
                 ctx = ExtractionContext(
                     timestamp=ts,
@@ -387,6 +421,7 @@ class Backtester:
                     vix_series=self._data.vix_series.loc[:ts_pd],
                     spy_close_series=self._data.spy_close_series.loc[:ts_pd],
                     earnings_history=earnings_slice,
+                    fundamental_llm_score=llm_score,
                 )
             except ValueError:
                 # Skip symbols that fail look-ahead assertions (data weirdness).
@@ -611,6 +646,13 @@ class Backtester:
                         drift_days=self._cfg.scorer.pead_drift_days,
                     ),
                 ],
+            )
+        if self._cfg.scorer.type == "fundamental_llm":
+            from bloasis.scoring.scorer import FundamentalLLMScorer
+
+            return FundamentalLLMScorer(
+                self._cfg.scorer,
+                top_pct=self._cfg.scorer.fundamental_llm_top_pct,
             )
         return RuleBasedScorer(self._cfg.scorer)
 

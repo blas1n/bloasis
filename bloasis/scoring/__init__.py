@@ -16,6 +16,7 @@ from bloasis.scoring.features import FEATURE_COLUMNS, FeatureVector
 from bloasis.scoring.rationale import FactorContribution, Rationale, ScoredCandidate
 from bloasis.scoring.regime import classify_regime
 from bloasis.scoring.scorer import (
+    FundamentalLLMScorer,
     IntersectScorer,
     JTMomentumScorer,
     LightGBMScorer,
@@ -32,6 +33,7 @@ __all__ = [
     "FactorContribution",
     "FeatureExtractor",
     "FeatureVector",
+    "FundamentalLLMScorer",
     "IntersectScorer",
     "JTMomentumScorer",
     "LightGBMScorer",

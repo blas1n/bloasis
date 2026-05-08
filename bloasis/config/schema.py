@@ -69,7 +69,7 @@ class PreFilterConfig(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-ScorerType = Literal["rule", "ml", "jt_momentum", "pead", "pead_jt_intersect"]
+ScorerType = Literal["rule", "ml", "jt_momentum", "pead", "pead_jt_intersect", "fundamental_llm"]
 RegimeName = Literal["crisis", "bear", "sideways", "recovery", "bull"]
 
 
@@ -129,6 +129,10 @@ class ScorerConfig(BaseModel):
 
     pead_top_pct: float = Field(default=0.10, gt=0.0, le=1.0)
     pead_drift_days: int = Field(default=60, gt=0)
+
+    fundamental_llm_top_pct: float = Field(default=0.10, gt=0.0, le=1.0)
+    fundamental_llm_model: str = "ollama_chat/llama3.2:3b"
+    fundamental_llm_api_base: str = "http://localhost:11434"
 
     @model_validator(mode="after")
     def _validate_thresholds(self) -> ScorerConfig:
