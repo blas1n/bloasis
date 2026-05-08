@@ -78,6 +78,13 @@ class ExtractionContext:
     # responsible for ensuring the underlying quarter_end < timestamp.
     fundamental_llm_score: float | None = None
 
+    # Phase 3D — Cohen-Malloy 10-K Risk Factors disclosure-change signals.
+    # Measured at the most recent 10-K filing < (timestamp - 90d) PIT lag
+    # vs the immediately prior 10-K. Caller (engine) computes these from
+    # cached EDGAR text and supplies the scalar value.
+    risk_factors_cosine: float | None = None
+    risk_factors_len_change: float | None = None
+
     def __post_init__(self) -> None:
         if self.ohlcv is None or self.ohlcv.empty:
             raise ValueError(f"empty ohlcv for {self.symbol} @ {self.timestamp}")
@@ -223,6 +230,15 @@ class FeatureExtractor:
                 float("nan")
                 if ctx.fundamental_llm_score is None
                 else float(ctx.fundamental_llm_score)
+            ),
+            # Phase 3D — 10-K text-diff
+            risk_factors_cosine=(
+                float("nan") if ctx.risk_factors_cosine is None else float(ctx.risk_factors_cosine)
+            ),
+            risk_factors_len_change=(
+                float("nan")
+                if ctx.risk_factors_len_change is None
+                else float(ctx.risk_factors_len_change)
             ),
         )
 

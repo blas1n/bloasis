@@ -63,6 +63,9 @@ FEATURE_COLUMNS: tuple[str, ...] = (
     "days_since_earnings",
     # Phase 3 LLM fundamental health (feature_version=3)
     "fundamental_llm_score",
+    # Phase 3D — Cohen-Malloy 10-K disclosure-change signals
+    "risk_factors_cosine",
+    "risk_factors_len_change",
 )
 
 
@@ -125,6 +128,10 @@ class FeatureVector:
 
     # Phase 3 LLM fundamental health
     fundamental_llm_score: float = field(default_factory=_nan)
+
+    # Phase 3D — 10-K Risk Factors text-diff signals
+    risk_factors_cosine: float = field(default_factory=_nan)
+    risk_factors_len_change: float = field(default_factory=_nan)
 
     FEATURE_COLUMNS: ClassVar[tuple[str, ...]] = FEATURE_COLUMNS
 

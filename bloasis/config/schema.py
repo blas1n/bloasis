@@ -77,6 +77,8 @@ ScorerType = Literal[
     "pead_jt_intersect",
     "fundamental_llm",
     "fundamental_llm_jt_intersect",
+    "edgar_textdiff",
+    "edgar_textdiff_jt_intersect",
 ]
 RegimeName = Literal["crisis", "bear", "sideways", "recovery", "bull"]
 
@@ -141,6 +143,9 @@ class ScorerConfig(BaseModel):
     fundamental_llm_top_pct: float = Field(default=0.10, gt=0.0, le=1.0)
     fundamental_llm_model: str = "ollama_chat/llama3.2:3b"
     fundamental_llm_api_base: str = "http://localhost:11434"
+
+    edgar_textdiff_top_pct: float = Field(default=0.10, gt=0.0, le=1.0)
+    edgar_filing_lag_days: int = Field(default=90, ge=0)
 
     @model_validator(mode="after")
     def _validate_thresholds(self) -> ScorerConfig:

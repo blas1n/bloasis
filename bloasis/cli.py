@@ -908,6 +908,28 @@ def backtest(
             except Exception as exc:  # noqa: BLE001
                 console.print(f"[yellow]skipping financials for {sym}: {exc}[/yellow]")
 
+    # Phase 3D — 10-K Risk Factors text per (symbol, filed_date).
+    risk_factors_history: dict[str, list[tuple[date, date, str]]] = {}
+    if cfg.scorer.type in ("edgar_textdiff", "edgar_textdiff_jt_intersect"):
+        from bloasis.data.fetchers.sec_edgar import EdgarClient
+
+        edgar = EdgarClient(cache_dir=cfg.data.cache_dir)
+        for sym in bars:
+            try:
+                filings = edgar.list_10k(sym)
+            except Exception as exc:  # noqa: BLE001
+                console.print(f"[yellow]skipping EDGAR list for {sym}: {exc}[/yellow]")
+                continue
+            history: list[tuple[date, date, str]] = []
+            for f in filings[:6]:  # last ~6 fiscal years
+                txt = edgar.risk_factors(sym, f)
+                if txt is None:
+                    continue
+                history.append((f["filed"], f["period"], txt))
+            history.sort(key=lambda t: t[0])  # ascending by filed_date
+            if history:
+                risk_factors_history[sym] = history
+
     data = BacktestData(
         symbols=list(bars.keys()),
         bars=bars,
@@ -915,6 +937,7 @@ def backtest(
         spy_close_series=market_ctx.spy_close,
         earnings_history=earnings_history,
         quarterly_financials=quarterly_financials,
+        risk_factors_history=risk_factors_history,
     )
 
     engine = get_engine()

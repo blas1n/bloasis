@@ -408,6 +408,76 @@ class JTMomentumScorer:
         )
 
 
+class EDGARTextDiffScorer:
+    """Phase 3 Candidate D-textdiff — Cohen-Malloy "Lazy Prices" 2020 inverted.
+
+    Academic finding: large 10-K disclosure changes (low cosine similarity,
+    big length changes) predict NEGATIVE future returns. We're long-only
+    so we invert: HIGH cosine similarity = stable disclosure = our long
+    candidate.
+
+    Top `top_pct` by `risk_factors_cosine` get score 0.99. NaN cosine
+    excluded. Score is pure cross-section rank, no compute beyond.
+
+    LLM-free — `risk_factors_cosine` is a TF cosine on tokenized Item 1A,
+    populated upstream by the engine prefetch (see
+    `bloasis.scoring.edgar_textdiff`).
+    """
+
+    def __init__(self, cfg: ScorerConfig, *, top_pct: float = 0.10) -> None:
+        if not 0.0 < top_pct <= 1.0:
+            raise ValueError(f"top_pct must be in (0, 1], got {top_pct}")
+        self._cfg = cfg
+        self._top_pct = top_pct
+
+    def score_cross_section(
+        self, fvs: list[FeatureVector], cvs: list[CompositeVector]
+    ) -> list[ScoredCandidate]:
+        if not fvs:
+            return []
+        eligibles: list[tuple[int, float]] = []
+        for i, fv in enumerate(fvs):
+            v = float(fv.risk_factors_cosine)
+            if not math.isnan(v):
+                eligibles.append((i, v))
+        n_select = max(1, int(len(eligibles) * self._top_pct)) if eligibles else 0
+        eligibles_sorted = sorted(eligibles, key=lambda t: t[1], reverse=True)
+        top_indices = {idx for idx, _v in eligibles_sorted[:n_select]}
+        out: list[ScoredCandidate] = []
+        for i, fv in enumerate(fvs):
+            score = 0.99 if i in top_indices else 0.0
+            out.append(self._build_scored(fv, score=score))
+        return out
+
+    def score(self, fv: FeatureVector, cv: CompositeVector) -> ScoredCandidate:
+        return self._build_scored(fv, score=0.5)
+
+    @staticmethod
+    def _build_scored(fv: FeatureVector, *, score: float) -> ScoredCandidate:
+        cos = float(fv.risk_factors_cosine)
+        return ScoredCandidate(
+            symbol=fv.symbol,
+            timestamp=fv.timestamp,
+            score=score,
+            rationale=Rationale(
+                contributions=(
+                    FactorContribution(
+                        name="risk_factors_cosine",
+                        composite_score=cos,
+                        weight=1.0,
+                        contribution=cos,
+                        inputs={
+                            "risk_factors_cosine": cos,
+                            "risk_factors_len_change": float(fv.risk_factors_len_change),
+                        },
+                    ),
+                ),
+                triggers=(),
+                risks=(),
+            ),
+        )
+
+
 class FundamentalLLMScorer:
     """Phase 3 Candidate B-modern — LLM-rated fundamental health.
 

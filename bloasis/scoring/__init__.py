@@ -16,6 +16,7 @@ from bloasis.scoring.features import FEATURE_COLUMNS, FeatureVector
 from bloasis.scoring.rationale import FactorContribution, Rationale, ScoredCandidate
 from bloasis.scoring.regime import classify_regime
 from bloasis.scoring.scorer import (
+    EDGARTextDiffScorer,
     FundamentalLLMScorer,
     IntersectScorer,
     JTMomentumScorer,
@@ -29,6 +30,7 @@ __all__ = [
     "FEATURE_COLUMNS",
     "CompositeBuilder",
     "CompositeVector",
+    "EDGARTextDiffScorer",
     "ExtractionContext",
     "FactorContribution",
     "FeatureExtractor",

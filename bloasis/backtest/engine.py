@@ -410,6 +410,33 @@ class Backtester:
                             sym, last_qe, {str(k): float(v) for k, v in last_row.items()}
                         )
                         llm_score = s if s == s else None  # NaN → None
+
+            # Phase 3D — 10-K text-diff (cosine + length change) at most
+            # recent filing ≤ ts_pd - filing_lag (PIT correctness).
+            rf_cosine: float | None = None
+            rf_len_change: float | None = None
+            rf_history = self._data.risk_factors_history.get(sym)
+            if rf_history and len(rf_history) >= 2:
+                from bloasis.scoring.edgar_textdiff import (
+                    cosine_similarity,
+                    length_change_pct,
+                )
+
+                lag = pd.Timedelta(days=self._cfg.scorer.edgar_filing_lag_days)
+                pit_cutoff = ts_pd - lag
+                # Find the most recent filing ≤ pit_cutoff and its prior.
+                eligible = [
+                    (filed, period, text)
+                    for filed, period, text in rf_history
+                    if pd.Timestamp(filed) <= pit_cutoff
+                ]
+                if len(eligible) >= 2:
+                    cur_filed, _cur_period, cur_text = eligible[-1]
+                    _prr_filed, _prr_period, prr_text = eligible[-2]
+                    cos = cosine_similarity(cur_text, prr_text)
+                    lc = length_change_pct(cur_text, prr_text)
+                    rf_cosine = cos if cos == cos else None
+                    rf_len_change = lc if lc == lc else None
             try:
                 ctx = ExtractionContext(
                     timestamp=ts,
@@ -422,6 +449,8 @@ class Backtester:
                     spy_close_series=self._data.spy_close_series.loc[:ts_pd],
                     earnings_history=earnings_slice,
                     fundamental_llm_score=llm_score,
+                    risk_factors_cosine=rf_cosine,
+                    risk_factors_len_change=rf_len_change,
                 )
             except ValueError:
                 # Skip symbols that fail look-ahead assertions (data weirdness).
@@ -653,6 +682,34 @@ class Backtester:
             return FundamentalLLMScorer(
                 self._cfg.scorer,
                 top_pct=self._cfg.scorer.fundamental_llm_top_pct,
+            )
+        if self._cfg.scorer.type == "edgar_textdiff":
+            from bloasis.scoring.scorer import EDGARTextDiffScorer
+
+            return EDGARTextDiffScorer(
+                self._cfg.scorer,
+                top_pct=self._cfg.scorer.edgar_textdiff_top_pct,
+            )
+        if self._cfg.scorer.type == "edgar_textdiff_jt_intersect":
+            from bloasis.scoring.scorer import (
+                EDGARTextDiffScorer,
+                IntersectScorer,
+                JTMomentumScorer,
+            )
+
+            return IntersectScorer(
+                self._cfg.scorer,
+                sub_scorers=[
+                    JTMomentumScorer(
+                        self._cfg.scorer,
+                        top_pct=self._cfg.scorer.jt_top_pct,
+                        vol_scale=self._cfg.scorer.jt_vol_scale,
+                    ),
+                    EDGARTextDiffScorer(
+                        self._cfg.scorer,
+                        top_pct=self._cfg.scorer.edgar_textdiff_top_pct,
+                    ),
+                ],
             )
         if self._cfg.scorer.type == "fundamental_llm_jt_intersect":
             from bloasis.scoring.scorer import (

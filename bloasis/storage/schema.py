@@ -98,6 +98,9 @@ feature_log = Table(
     Column("days_since_earnings", Float, nullable=True),
     # Phase 3 LLM fundamental health (feature_version >= 3)
     Column("fundamental_llm_score", Float, nullable=True),
+    # Phase 3D — 10-K text-diff signals
+    Column("risk_factors_cosine", Float, nullable=True),
+    Column("risk_factors_len_change", Float, nullable=True),
     # Forward labels (filled async by labeling job)
     Column("forward_return_5d", Float, nullable=True),
     Column("forward_return_20d", Float, nullable=True),
