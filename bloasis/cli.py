@@ -921,7 +921,13 @@ def backtest(
                 console.print(f"[yellow]skipping EDGAR list for {sym}: {exc}[/yellow]")
                 continue
             history: list[tuple[date, date, str]] = []
-            for f in filings[:6]:  # last ~6 fiscal years
+            # Filter filings to those usable for the backtest window:
+            #  - filed within (start_d - 5y, end_d) so we have ≥2 priors
+            #    available even at the earliest test date.
+            #  - keep at most 12 filings per stock (~12 fiscal years)
+            window_start = start_d - timedelta(days=5 * 365)
+            relevant = [f for f in filings if window_start <= f["filed"] <= end_d]
+            for f in relevant[:12]:
                 txt = edgar.risk_factors(sym, f)
                 if txt is None:
                     continue
