@@ -876,11 +876,28 @@ def backtest(
         )
     market_ctx = market.fetch(fetch_start, end_d)
 
+    # Phase 3 PEAD: only fetch earnings if the scorer requires them.
+    earnings_history: dict[str, pd.DataFrame] = {}
+    if cfg.scorer.type in ("pead", "pead_jt_intersect"):
+        from bloasis.data.fetchers.yfinance_earnings import YfEarningsFetcher
+
+        earnings_cache = ParquetCache(cfg.data.cache_dir, namespace="earnings")
+        earnings_fetcher = YfEarningsFetcher(
+            cache=earnings_cache,
+            max_age_hours=cfg.data.fundamentals_cache_max_age_hours,
+        )
+        for sym in bars:
+            try:
+                earnings_history[sym] = earnings_fetcher.fetch(sym)
+            except Exception as exc:  # noqa: BLE001
+                console.print(f"[yellow]skipping earnings for {sym}: {exc}[/yellow]")
+
     data = BacktestData(
         symbols=list(bars.keys()),
         bars=bars,
         vix_series=market_ctx.vix,
         spy_close_series=market_ctx.spy_close,
+        earnings_history=earnings_history,
     )
 
     engine = get_engine()

@@ -36,6 +36,9 @@ class BacktestData:
     spy_close_series: pd.Series
     sectors: dict[str, str | None] = field(default_factory=dict)
     universe_by_date: dict[date, list[str]] | None = None
+    # Phase 3 PEAD: optional earnings history per symbol. Empty dict =
+    # unavailable (PEAD features stay NaN). DataFrame indexed by date.
+    earnings_history: dict[str, pd.DataFrame] = field(default_factory=dict)
 
     def universe_at(self, d: date) -> list[str]:
         """Return symbols tradable on `d`. Falls back to `self.symbols` if no

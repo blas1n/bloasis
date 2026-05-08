@@ -58,6 +58,9 @@ FEATURE_COLUMNS: tuple[str, ...] = (
     "kbar_kmid2",
     "kbar_ksft2",
     "corr_pv_20",
+    # Phase 3 PEAD (feature_version=3)
+    "last_eps_surprise_pct",
+    "days_since_earnings",
 )
 
 
@@ -113,6 +116,10 @@ class FeatureVector:
     kbar_kmid2: float = field(default_factory=_nan)
     kbar_ksft2: float = field(default_factory=_nan)
     corr_pv_20: float = field(default_factory=_nan)
+
+    # Phase 3 PEAD
+    last_eps_surprise_pct: float = field(default_factory=_nan)
+    days_since_earnings: float = field(default_factory=_nan)
 
     FEATURE_COLUMNS: ClassVar[tuple[str, ...]] = FEATURE_COLUMNS
 

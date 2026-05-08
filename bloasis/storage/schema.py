@@ -93,6 +93,9 @@ feature_log = Table(
     Column("kbar_kmid2", Float, nullable=True),
     Column("kbar_ksft2", Float, nullable=True),
     Column("corr_pv_20", Float, nullable=True),
+    # Phase 3 PEAD (feature_version >= 3; NULL for v2 rows)
+    Column("last_eps_surprise_pct", Float, nullable=True),
+    Column("days_since_earnings", Float, nullable=True),
     # Forward labels (filled async by labeling job)
     Column("forward_return_5d", Float, nullable=True),
     Column("forward_return_20d", Float, nullable=True),

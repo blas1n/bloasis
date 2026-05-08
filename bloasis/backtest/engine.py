@@ -372,6 +372,10 @@ class Backtester:
             sliced = bars.loc[:ts_pd]
             if len(sliced) < MIN_BARS_FOR_FEATURES:
                 continue
+            earnings_slice: pd.DataFrame | None = None
+            full_earnings = self._data.earnings_history.get(sym)
+            if full_earnings is not None and not full_earnings.empty:
+                earnings_slice = full_earnings.loc[full_earnings.index < ts_pd]
             try:
                 ctx = ExtractionContext(
                     timestamp=ts,
@@ -382,6 +386,7 @@ class Backtester:
                     fundamentals={},
                     vix_series=self._data.vix_series.loc[:ts_pd],
                     spy_close_series=self._data.spy_close_series.loc[:ts_pd],
+                    earnings_history=earnings_slice,
                 )
             except ValueError:
                 # Skip symbols that fail look-ahead assertions (data weirdness).
@@ -569,6 +574,44 @@ class Backtester:
             from bloasis.scoring.scorer import LightGBMScorer
 
             return LightGBMScorer(cfg=self._cfg.scorer)
+        if self._cfg.scorer.type == "jt_momentum":
+            from bloasis.scoring.scorer import JTMomentumScorer
+
+            return JTMomentumScorer(
+                self._cfg.scorer,
+                top_pct=self._cfg.scorer.jt_top_pct,
+                vol_scale=self._cfg.scorer.jt_vol_scale,
+            )
+        if self._cfg.scorer.type == "pead":
+            from bloasis.scoring.scorer import PEADScorer
+
+            return PEADScorer(
+                self._cfg.scorer,
+                top_pct=self._cfg.scorer.pead_top_pct,
+                drift_days=self._cfg.scorer.pead_drift_days,
+            )
+        if self._cfg.scorer.type == "pead_jt_intersect":
+            from bloasis.scoring.scorer import (
+                IntersectScorer,
+                JTMomentumScorer,
+                PEADScorer,
+            )
+
+            return IntersectScorer(
+                self._cfg.scorer,
+                sub_scorers=[
+                    JTMomentumScorer(
+                        self._cfg.scorer,
+                        top_pct=self._cfg.scorer.jt_top_pct,
+                        vol_scale=self._cfg.scorer.jt_vol_scale,
+                    ),
+                    PEADScorer(
+                        self._cfg.scorer,
+                        top_pct=self._cfg.scorer.pead_top_pct,
+                        drift_days=self._cfg.scorer.pead_drift_days,
+                    ),
+                ],
+            )
         return RuleBasedScorer(self._cfg.scorer)
 
     def _fold_result(

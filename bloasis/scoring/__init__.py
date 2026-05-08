@@ -15,7 +15,14 @@ from bloasis.scoring.extractor import ExtractionContext, FeatureExtractor
 from bloasis.scoring.features import FEATURE_COLUMNS, FeatureVector
 from bloasis.scoring.rationale import FactorContribution, Rationale, ScoredCandidate
 from bloasis.scoring.regime import classify_regime
-from bloasis.scoring.scorer import LightGBMScorer, RuleBasedScorer, Scorer
+from bloasis.scoring.scorer import (
+    IntersectScorer,
+    JTMomentumScorer,
+    LightGBMScorer,
+    PEADScorer,
+    RuleBasedScorer,
+    Scorer,
+)
 
 __all__ = [
     "FEATURE_COLUMNS",
@@ -25,7 +32,10 @@ __all__ = [
     "FactorContribution",
     "FeatureExtractor",
     "FeatureVector",
+    "IntersectScorer",
+    "JTMomentumScorer",
     "LightGBMScorer",
+    "PEADScorer",
     "Rationale",
     "RuleBasedScorer",
     "ScoredCandidate",

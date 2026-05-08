@@ -69,7 +69,7 @@ class PreFilterConfig(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-ScorerType = Literal["rule", "ml"]
+ScorerType = Literal["rule", "ml", "jt_momentum", "pead", "pead_jt_intersect"]
 RegimeName = Literal["crisis", "bear", "sideways", "recovery", "bull"]
 
 
@@ -123,6 +123,12 @@ class ScorerConfig(BaseModel):
 
     entry_threshold: float = Field(default=0.65, ge=0.0, le=1.0)
     exit_threshold: float = Field(default=0.40, ge=0.0, le=1.0)
+
+    jt_top_pct: float = Field(default=0.10, gt=0.0, le=1.0)
+    jt_vol_scale: bool = False
+
+    pead_top_pct: float = Field(default=0.10, gt=0.0, le=1.0)
+    pead_drift_days: int = Field(default=60, gt=0)
 
     @model_validator(mode="after")
     def _validate_thresholds(self) -> ScorerConfig:

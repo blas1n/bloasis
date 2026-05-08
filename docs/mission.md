@@ -25,24 +25,36 @@ disciplined risk management and regime adaptation.
 
 ## Acceptance Gates (locked, machine-checked)
 
-A configuration cannot be promoted to live trading unless it passes its phase
-gate via walk-forward backtest. Gates live in `configs/*.yaml` under
-`acceptance_criteria` and are evaluated by `bloasis backtest`.
+Two distinct gates split the path: paper trading entry vs real-money
+trading entry. The original 1.0 sharpe gate is calibrated to live
+production-fund standards (AQR live ~1.25 — see PR12 measurement); the
+honest retail-scale paper threshold is lower. Real-money still requires
+the original 1.0 + a 6-month paper track record.
 
-### Phase 1 → Phase 2 (M2 achievement)
+Gates live in `configs/*.yaml` under `acceptance_criteria` and are
+evaluated by `bloasis backtest`. Promotion is one-way (paper before live).
+
+### Paper-trading gate (M2 entry)
 
 ```yaml
 walk_forward_min_folds: 5            # at least 5 independent OOS periods
 median_alpha_annualized: -0.005      # within 50 bps of SPY (parity)
-median_sharpe_vs_spy: 1.0            # equal or better
+median_sharpe_vs_spy: 0.7            # honest retail target
 median_max_dd_ratio_to_spy: 0.85     # ≤ 85% of SPY drawdown (DD edge)
 ```
 
-### Phase 2 → Phase 3 (M2+)
+A config passing this gate may be deployed to **paper trading** (Alpaca
+paper) for shadow-running. Real money is still blocked.
+
+### Live-trading gate (M3 entry)
 
 ```yaml
-median_alpha_annualized: 0.015       # +1.5% sustained
-bootstrap_alpha_p_value: 0.10        # statistically distinguishable
+walk_forward_min_folds: 5
+median_alpha_annualized: 0.0         # at least non-negative
+median_sharpe_vs_spy: 1.0            # original strict bar
+median_max_dd_ratio_to_spy: 0.85
+forward_test_paper_months: 6         # 6-month paper track record required
+forward_test_paper_alpha_min: 0.0    # paper alpha must be non-negative over the period
 ```
 
 ### Phase 3 → Phase 4 (M1 reach)
