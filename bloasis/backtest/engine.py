@@ -684,143 +684,17 @@ class Backtester:
     def _build_scorer(self, train_start: date, train_end: date) -> Scorer:
         """Build the scorer for this fold.
 
-        - `cfg.scorer.type == "rule"` (or factory override) → `RuleBasedScorer`
-        - `cfg.scorer.type == "ml"` → `LightGBMScorer` (PR15) loaded from
-          `cfg.scorer.ml_model_path`. The model itself was trained
-          OUT-OF-BAND via `bloasis ml train`; per-fold retraining is a
-          PR17+ measurement-time concern.
+        - test factory override (passed to constructor) takes precedence
+        - otherwise delegates to `bloasis.scoring.factory.build_scorer`
+          which is shared with the live trade path so paper trading
+          actually runs the strategy that the backtester measures.
         """
         # Honor explicit factory override (used by tests).
         if self._scorer_factory is not RuleBasedScorer:
             return self._scorer_factory(self._cfg.scorer)  # type: ignore[call-arg]
-        if self._cfg.scorer.type == "ml":
-            from bloasis.scoring.scorer import LightGBMScorer
+        from bloasis.scoring.factory import build_scorer
 
-            return LightGBMScorer(cfg=self._cfg.scorer)
-        if self._cfg.scorer.type == "jt_momentum":
-            from bloasis.scoring.scorer import JTMomentumScorer
-
-            return JTMomentumScorer(
-                self._cfg.scorer,
-                top_pct=self._cfg.scorer.jt_top_pct,
-                vol_scale=self._cfg.scorer.jt_vol_scale,
-                residual=self._cfg.scorer.jt_residual,
-            )
-        if self._cfg.scorer.type == "pead":
-            from bloasis.scoring.scorer import PEADScorer
-
-            return PEADScorer(
-                self._cfg.scorer,
-                top_pct=self._cfg.scorer.pead_top_pct,
-                drift_days=self._cfg.scorer.pead_drift_days,
-            )
-        if self._cfg.scorer.type == "pead_jt_intersect":
-            from bloasis.scoring.scorer import (
-                IntersectScorer,
-                JTMomentumScorer,
-                PEADScorer,
-            )
-
-            return IntersectScorer(
-                self._cfg.scorer,
-                sub_scorers=[
-                    JTMomentumScorer(
-                        self._cfg.scorer,
-                        top_pct=self._cfg.scorer.jt_top_pct,
-                        vol_scale=self._cfg.scorer.jt_vol_scale,
-                        residual=self._cfg.scorer.jt_residual,
-                        continuous_score=self._cfg.scorer.continuous_score,
-                    ),
-                    PEADScorer(
-                        self._cfg.scorer,
-                        top_pct=self._cfg.scorer.pead_top_pct,
-                        drift_days=self._cfg.scorer.pead_drift_days,
-                    ),
-                ],
-            )
-        if self._cfg.scorer.type == "fundamental_llm":
-            from bloasis.scoring.scorer import FundamentalLLMScorer
-
-            return FundamentalLLMScorer(
-                self._cfg.scorer,
-                top_pct=self._cfg.scorer.fundamental_llm_top_pct,
-            )
-        if self._cfg.scorer.type == "edgar_textdiff":
-            from bloasis.scoring.scorer import EDGARTextDiffScorer
-
-            return EDGARTextDiffScorer(
-                self._cfg.scorer,
-                top_pct=self._cfg.scorer.edgar_textdiff_top_pct,
-                continuous_score=self._cfg.scorer.continuous_score,
-                signal_mode=self._cfg.scorer.edgar_signal_mode,
-                length_blend_weight=self._cfg.scorer.edgar_length_blend_weight,
-            )
-        if self._cfg.scorer.type == "edgar_textdiff_jt_intersect":
-            from bloasis.scoring.scorer import (
-                EDGARTextDiffScorer,
-                IntersectScorer,
-                JTMomentumScorer,
-            )
-
-            return IntersectScorer(
-                self._cfg.scorer,
-                sub_scorers=[
-                    JTMomentumScorer(
-                        self._cfg.scorer,
-                        top_pct=self._cfg.scorer.jt_top_pct,
-                        vol_scale=self._cfg.scorer.jt_vol_scale,
-                        residual=self._cfg.scorer.jt_residual,
-                        continuous_score=self._cfg.scorer.continuous_score,
-                    ),
-                    EDGARTextDiffScorer(
-                        self._cfg.scorer,
-                        top_pct=self._cfg.scorer.edgar_textdiff_top_pct,
-                        continuous_score=self._cfg.scorer.continuous_score,
-                        signal_mode=self._cfg.scorer.edgar_signal_mode,
-                        length_blend_weight=self._cfg.scorer.edgar_length_blend_weight,
-                    ),
-                ],
-            )
-        if self._cfg.scorer.type == "insider_cluster":
-            from bloasis.scoring.scorer import InsiderClusterScorer
-
-            return InsiderClusterScorer(
-                self._cfg.scorer,
-                top_pct=self._cfg.scorer.insider_top_pct,
-                continuous_score=self._cfg.scorer.continuous_score,
-            )
-        if self._cfg.scorer.type == "form_8k_event":
-            from bloasis.scoring.scorer import Form8KEventScorer
-
-            return Form8KEventScorer(
-                self._cfg.scorer,
-                top_pct=self._cfg.scorer.form_8k_top_pct,
-                continuous_score=self._cfg.scorer.continuous_score,
-            )
-        if self._cfg.scorer.type == "fundamental_llm_jt_intersect":
-            from bloasis.scoring.scorer import (
-                FundamentalLLMScorer,
-                IntersectScorer,
-                JTMomentumScorer,
-            )
-
-            return IntersectScorer(
-                self._cfg.scorer,
-                sub_scorers=[
-                    JTMomentumScorer(
-                        self._cfg.scorer,
-                        top_pct=self._cfg.scorer.jt_top_pct,
-                        vol_scale=self._cfg.scorer.jt_vol_scale,
-                        residual=self._cfg.scorer.jt_residual,
-                        continuous_score=self._cfg.scorer.continuous_score,
-                    ),
-                    FundamentalLLMScorer(
-                        self._cfg.scorer,
-                        top_pct=self._cfg.scorer.fundamental_llm_top_pct,
-                    ),
-                ],
-            )
-        return RuleBasedScorer(self._cfg.scorer)
+        return build_scorer(self._cfg)
 
     def _fold_result(
         self,

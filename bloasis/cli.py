@@ -1308,64 +1308,43 @@ def _build_live_candidates(
     symbols: list[str],
     days: int,
 ) -> tuple[list[CandidateData], dict[str, float]]:
-    """Pull OHLCV + market context, build candidates ranked by score.
+    """Pull OHLCV + scorer-specific data, build candidates ranked by score.
+
+    PR48 — runs the **same scoring pipeline as the backtester** by
+    delegating to `prefetch_backtest_data` (so EDGAR / earnings /
+    financials prefetch happen exactly as in backtest) and then to
+    `Backtester._build_candidates(latest_bar_date, scorer)` which uses
+    the shared scorer factory + cross-section scoring. Without this, the
+    live path silently fell back to a per-symbol RuleBasedScorer
+    regardless of `cfg.scorer.type`, so paper trading never tested the
+    actual strategy that backtests measure.
 
     Returned tuple is `(candidates, last_close_by_symbol)`. Empty list
     when fewer than 2 symbols produced features (cross-section z-score
     requires ≥ 2).
     """
-    from bloasis.data.cache import ParquetCache
-    from bloasis.data.fetchers.yfinance_market import YfMarketContextFetcher
-    from bloasis.data.fetchers.yfinance_ohlcv import YfOhlcvFetcher
-    from bloasis.scoring.composites import CompositeBuilder
-    from bloasis.scoring.extractor import ExtractionContext, FeatureExtractor
-    from bloasis.scoring.scorer import RuleBasedScorer
-    from bloasis.signal import CandidateData
-
-    cache = ParquetCache(cfg.data.cache_dir, namespace="ohlcv")
-    ohlcv_fetcher = YfOhlcvFetcher(cache=cache, max_age_hours=cfg.data.ohlcv_cache_max_age_hours)
-    market_fetcher = YfMarketContextFetcher(ohlcv=ohlcv_fetcher)
-    extractor = FeatureExtractor()
+    from bloasis.backtest.engine import Backtester
+    from bloasis.backtest.prefetch import prefetch_backtest_data
 
     end = datetime.now(tz=UTC).date()
     start = end - timedelta(days=days)
-    market = market_fetcher.fetch(start, end)
+    upper_syms = [s.upper() for s in symbols]
+    data = prefetch_backtest_data(cfg, upper_syms, start, end)
 
-    feature_vectors: list[FeatureVector] = []
-    last_closes: dict[str, float] = {}
-    for sym in symbols:
-        ohlcv = ohlcv_fetcher.fetch(sym.upper(), start, end)
-        ts = ohlcv.index[-1].to_pydatetime()
-        if ts.tzinfo is None:
-            ts = ts.replace(tzinfo=UTC)
-        ctx = ExtractionContext(
-            timestamp=ts,
-            symbol=sym.upper(),
-            feature_version=FeatureExtractor.VERSION,
-            sector=None,
-            ohlcv=ohlcv,
-            fundamentals={},
-            vix_series=market.vix,
-            spy_close_series=market.spy_close,
-        )
-        feature_vectors.append(extractor.extract(ctx))
-        last_closes[sym.upper()] = float(ohlcv["close"].iloc[-1])
+    if not data.bars:
+        return [], {}
 
-    if len(feature_vectors) < 2:
-        return [], last_closes
-    composites = CompositeBuilder().build(feature_vectors)
-    cv_by_sym = {c.symbol: c for c in composites}
-    scorer = RuleBasedScorer(cfg.scorer)
-    scored = [scorer.score(fv, cv_by_sym[fv.symbol]) for fv in feature_vectors]
-    candidates = [
-        CandidateData(
-            scored=s,
-            feature_vector=next(fv for fv in feature_vectors if fv.symbol == s.symbol),
-            last_close=last_closes[s.symbol],
-        )
-        for s in scored
-    ]
-    return candidates, last_closes
+    # The latest bar present in the prefetched panel — yfinance can be
+    # 1-2 trading days behind for some symbols, so use the max across
+    # everything we got.
+    latest = max(df.index[-1] for df in data.bars.values())
+    latest_date = latest.to_pydatetime().date()
+
+    bt = Backtester(cfg, data)
+    scorer = bt._build_scorer(start, end)
+    candidates, _fvs = bt._build_candidates(latest_date, scorer)
+    last_closes = {c.feature_vector.symbol: c.last_close for c in candidates}
+    return list(candidates), last_closes
 
 
 def _execute_against_broker(

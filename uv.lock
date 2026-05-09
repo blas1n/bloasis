@@ -225,10 +225,12 @@ name = "bloasis"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "lightgbm" },
     { name = "lxml" },
     { name = "pydantic" },
     { name = "pyyaml" },
     { name = "rich" },
+    { name = "shap" },
     { name = "sqlalchemy" },
     { name = "typer" },
 ]
@@ -272,6 +274,7 @@ requires-dist = [
     { name = "alpaca-py", marker = "extra == 'broker'", specifier = ">=0.25.0" },
     { name = "finnhub-python", marker = "extra == 'data'", specifier = ">=2.4.20" },
     { name = "httpx", marker = "extra == 'data'", specifier = ">=0.27.0" },
+    { name = "lightgbm", specifier = ">=4.6.0" },
     { name = "lightgbm", marker = "extra == 'ml'", specifier = ">=4.3.0" },
     { name = "litellm", marker = "extra == 'llm'", specifier = ">=1.55.0" },
     { name = "lxml", specifier = ">=6.1.0" },
@@ -287,6 +290,7 @@ requires-dist = [
     { name = "rich", specifier = ">=13.7.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.5.0" },
     { name = "scikit-learn", marker = "extra == 'ml'", specifier = ">=1.4.0" },
+    { name = "shap", specifier = ">=0.51.0" },
     { name = "shap", marker = "extra == 'ml'", specifier = ">=0.45.0" },
     { name = "sqlalchemy", specifier = ">=2.0.25" },
     { name = "ta-lib", marker = "extra == 'ta'", specifier = ">=0.4.32" },
