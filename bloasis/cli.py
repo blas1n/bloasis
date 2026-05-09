@@ -34,7 +34,7 @@ import json
 import os
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import typer
 from rich.console import Console
@@ -936,6 +936,35 @@ def backtest(
             if history:
                 risk_factors_history[sym] = history
 
+    # PR20 — SEC Form 4 / 8-K filing dates (count-based scorers).
+    insider_filings_dates: dict[str, list[date]] = {}
+    form_8k_filings_dates: dict[str, list[date]] = {}
+    if cfg.scorer.type in ("insider_cluster", "form_8k_event"):
+        from bloasis.data.fetchers.sec_edgar import EdgarClient
+
+        edgar = EdgarClient(cache_dir=cfg.data.cache_dir)
+        for sym in bars:
+            if cfg.scorer.type == "insider_cluster":
+                try:
+                    fl = edgar.list_filings(sym, form_type="4")
+                    insider_filings_dates[sym] = [
+                        cast(date, f["filed"])
+                        for f in fl
+                        if start_d - timedelta(days=180) <= cast(date, f["filed"]) <= end_d
+                    ]
+                except Exception as exc:  # noqa: BLE001
+                    console.print(f"[yellow]skipping Form 4 for {sym}: {exc}[/yellow]")
+            else:
+                try:
+                    fl = edgar.list_filings(sym, form_type="8-K")
+                    form_8k_filings_dates[sym] = [
+                        cast(date, f["filed"])
+                        for f in fl
+                        if start_d - timedelta(days=90) <= cast(date, f["filed"]) <= end_d
+                    ]
+                except Exception as exc:  # noqa: BLE001
+                    console.print(f"[yellow]skipping 8-K for {sym}: {exc}[/yellow]")
+
     data = BacktestData(
         symbols=list(bars.keys()),
         bars=bars,
@@ -944,6 +973,8 @@ def backtest(
         earnings_history=earnings_history,
         quarterly_financials=quarterly_financials,
         risk_factors_history=risk_factors_history,
+        insider_filings_dates=insider_filings_dates,
+        form_8k_filings_dates=form_8k_filings_dates,
     )
 
     engine = get_engine()

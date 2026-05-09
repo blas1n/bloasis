@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 # ---------------------------------------------------------------------------
 
 
-UniverseSource = Literal["sp500", "sp500_historical", "custom_csv"]
+UniverseSource = Literal["sp500", "sp500_historical", "russell2000", "custom_csv"]
 
 
 class UniverseConfig(BaseModel):
@@ -79,6 +79,8 @@ ScorerType = Literal[
     "fundamental_llm_jt_intersect",
     "edgar_textdiff",
     "edgar_textdiff_jt_intersect",
+    "insider_cluster",
+    "form_8k_event",
 ]
 RegimeName = Literal["crisis", "bear", "sideways", "recovery", "bull"]
 
@@ -158,6 +160,21 @@ class ScorerConfig(BaseModel):
 
     edgar_textdiff_top_pct: float = Field(default=0.10, gt=0.0, le=1.0)
     edgar_filing_lag_days: int = Field(default=90, ge=0)
+    # PR20 — EDGAR signal variants:
+    #   cosine: rank by 10-K Item 1A YoY TF cosine (PR18 default)
+    #   length: rank by -|length change| (small-change firms top)
+    #   blend:  cosine - length_blend_weight × |length change|
+    edgar_signal_mode: Literal["cosine", "length", "blend"] = "cosine"
+    edgar_length_blend_weight: float = Field(default=0.5, ge=0.0)
+    # PR20 — Multi-filing rolling cosine. Engine averages cosine across the
+    # last N YoY pairs before passing to the scorer. 1 = single-pair (PR18).
+    edgar_rolling_window: int = Field(default=1, ge=1)
+
+    # PR20 — SEC Form 4 / 8-K activity scorer knobs
+    insider_top_pct: float = Field(default=0.10, gt=0.0, le=1.0)
+    insider_window_days: int = Field(default=60, gt=0)
+    form_8k_top_pct: float = Field(default=0.10, gt=0.0, le=1.0)
+    form_8k_window_days: int = Field(default=30, gt=0)
 
     @model_validator(mode="after")
     def _validate_thresholds(self) -> ScorerConfig:
@@ -199,6 +216,13 @@ class SignalConfig(BaseModel):
     # Larger values reduce turnover and may dampen DD. Stop-loss / profit-tier
     # exits still evaluate every trading day regardless of this setting.
     rebalance_days: int = Field(default=1, ge=1)
+
+    # PR20 — Tolerance-band rebalancing (Chitsiripanich-Paolella 2024).
+    # On a rebalance day, if today's BUY set differs from yesterday's
+    # BUY set by < `rebalance_tolerance_pct` (Jaccard distance), skip the
+    # BUY churn entirely — SELL signals still honored to avoid cash drag.
+    # 0.0 = always rebalance (default, original behaviour). 0.2 = 20% band.
+    rebalance_tolerance_pct: float = Field(default=0.0, ge=0.0, le=1.0)
 
     @model_validator(mode="after")
     def _validate_tiers(self) -> SignalConfig:

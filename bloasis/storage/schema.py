@@ -103,6 +103,9 @@ feature_log = Table(
     Column("risk_factors_len_change", Float, nullable=True),
     # PR19 — Residual momentum (Blitz-Hanauer-Vidojevic 2020)
     Column("residual_momentum_252_21", Float, nullable=True),
+    # PR20 — SEC Form 4 / 8-K activity counts
+    Column("insider_filings_60d", Float, nullable=True),
+    Column("form_8k_filings_30d", Float, nullable=True),
     # Forward labels (filled async by labeling job)
     Column("forward_return_5d", Float, nullable=True),
     Column("forward_return_20d", Float, nullable=True),

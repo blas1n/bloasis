@@ -461,12 +461,38 @@ class EDGARTextDiffScorer:
         *,
         top_pct: float = 0.10,
         continuous_score: bool = False,
+        signal_mode: str = "cosine",
+        length_blend_weight: float = 0.5,
     ) -> None:
         if not 0.0 < top_pct <= 1.0:
             raise ValueError(f"top_pct must be in (0, 1], got {top_pct}")
+        if signal_mode not in ("cosine", "length", "blend"):
+            raise ValueError(f"signal_mode must be one of cosine|length|blend, got {signal_mode!r}")
         self._cfg = cfg
         self._top_pct = top_pct
         self._continuous = continuous_score
+        self._signal_mode = signal_mode
+        self._length_weight = length_blend_weight
+
+    def _signal(self, fv: FeatureVector) -> float:
+        cos = float(fv.risk_factors_cosine)
+        lc = float(fv.risk_factors_len_change)
+        if self._signal_mode == "cosine":
+            return cos  # may be NaN
+        if self._signal_mode == "length":
+            # Large +/- change = bad (Cohen-Malloy). Long-only inverts:
+            # -|length change| ranks small-change firms highest.
+            if math.isnan(lc):
+                return float("nan")
+            return -abs(lc)
+        # blend: cosine - λ · |length change|. Both signals long the
+        # "stable disclosure" side. Falls back to cosine alone when
+        # length data missing.
+        if math.isnan(cos):
+            return float("nan")
+        if math.isnan(lc):
+            return cos
+        return cos - self._length_weight * abs(lc)
 
     def score_cross_section(
         self, fvs: list[FeatureVector], cvs: list[CompositeVector]
@@ -475,7 +501,7 @@ class EDGARTextDiffScorer:
             return []
         eligibles: list[tuple[int, float]] = []
         for i, fv in enumerate(fvs):
-            v = float(fv.risk_factors_cosine)
+            v = self._signal(fv)
             if not math.isnan(v):
                 eligibles.append((i, v))
 
@@ -519,6 +545,136 @@ class EDGARTextDiffScorer:
                 risks=(),
             ),
         )
+
+
+class InsiderClusterScorer:
+    """PR20 — SEC Form 4 insider cluster signal (alpha-architect).
+
+    Cross-section ranks on `insider_filings_60d`. Top `top_pct` get score
+    0.99, rest 0.0. NaN excluded. Spec: 3+ unique insider Form 4 filings
+    in trailing 60 days = strong long signal (~5% 6-month alpha in
+    independent replications).
+    """
+
+    def __init__(
+        self,
+        cfg: ScorerConfig,
+        *,
+        top_pct: float = 0.10,
+        continuous_score: bool = False,
+    ) -> None:
+        if not 0.0 < top_pct <= 1.0:
+            raise ValueError(f"top_pct must be in (0, 1], got {top_pct}")
+        self._cfg = cfg
+        self._top_pct = top_pct
+        self._continuous = continuous_score
+
+    def score_cross_section(
+        self, fvs: list[FeatureVector], cvs: list[CompositeVector]
+    ) -> list[ScoredCandidate]:
+        if not fvs:
+            return []
+        eligibles: list[tuple[int, float]] = []
+        for i, fv in enumerate(fvs):
+            v = float(fv.insider_filings_60d)
+            if not math.isnan(v):
+                eligibles.append((i, v))
+        if self._continuous:
+            scores_by_idx = _percentile_scores(eligibles, len(fvs))
+        else:
+            n_select = max(1, int(len(eligibles) * self._top_pct)) if eligibles else 0
+            eligibles_sorted = sorted(eligibles, key=lambda t: t[1], reverse=True)
+            top_indices = {idx for idx, _v in eligibles_sorted[:n_select]}
+            scores_by_idx = {i: (0.99 if i in top_indices else 0.0) for i in range(len(fvs))}
+        return [
+            ScoredCandidate(
+                symbol=fv.symbol,
+                timestamp=fv.timestamp,
+                score=scores_by_idx.get(i, 0.0),
+                rationale=Rationale(
+                    contributions=(
+                        FactorContribution(
+                            name="insider_filings_60d",
+                            composite_score=float(fv.insider_filings_60d),
+                            weight=1.0,
+                            contribution=float(fv.insider_filings_60d),
+                            inputs={"insider_filings_60d": float(fv.insider_filings_60d)},
+                        ),
+                    ),
+                    triggers=(),
+                    risks=(),
+                ),
+            )
+            for i, fv in enumerate(fvs)
+        ]
+
+    def score(self, fv: FeatureVector, cv: CompositeVector) -> ScoredCandidate:
+        return self.score_cross_section([fv], [cv])[0]
+
+
+class Form8KEventScorer:
+    """PR20 — SEC 8-K event-recency signal (Cohen-Jackson-Mitts inspiration).
+
+    Cross-section ranks on `form_8k_filings_30d`. Top `top_pct` get
+    score 0.99 (recent 8-K events = active firm = post-event drift
+    candidate). Lighter than full Item-1.01/5.02 parsing — count alone
+    captures attention spike.
+    """
+
+    def __init__(
+        self,
+        cfg: ScorerConfig,
+        *,
+        top_pct: float = 0.10,
+        continuous_score: bool = False,
+    ) -> None:
+        if not 0.0 < top_pct <= 1.0:
+            raise ValueError(f"top_pct must be in (0, 1], got {top_pct}")
+        self._cfg = cfg
+        self._top_pct = top_pct
+        self._continuous = continuous_score
+
+    def score_cross_section(
+        self, fvs: list[FeatureVector], cvs: list[CompositeVector]
+    ) -> list[ScoredCandidate]:
+        if not fvs:
+            return []
+        eligibles: list[tuple[int, float]] = []
+        for i, fv in enumerate(fvs):
+            v = float(fv.form_8k_filings_30d)
+            if not math.isnan(v):
+                eligibles.append((i, v))
+        if self._continuous:
+            scores_by_idx = _percentile_scores(eligibles, len(fvs))
+        else:
+            n_select = max(1, int(len(eligibles) * self._top_pct)) if eligibles else 0
+            eligibles_sorted = sorted(eligibles, key=lambda t: t[1], reverse=True)
+            top_indices = {idx for idx, _v in eligibles_sorted[:n_select]}
+            scores_by_idx = {i: (0.99 if i in top_indices else 0.0) for i in range(len(fvs))}
+        return [
+            ScoredCandidate(
+                symbol=fv.symbol,
+                timestamp=fv.timestamp,
+                score=scores_by_idx.get(i, 0.0),
+                rationale=Rationale(
+                    contributions=(
+                        FactorContribution(
+                            name="form_8k_filings_30d",
+                            composite_score=float(fv.form_8k_filings_30d),
+                            weight=1.0,
+                            contribution=float(fv.form_8k_filings_30d),
+                            inputs={"form_8k_filings_30d": float(fv.form_8k_filings_30d)},
+                        ),
+                    ),
+                    triggers=(),
+                    risks=(),
+                ),
+            )
+            for i, fv in enumerate(fvs)
+        ]
+
+    def score(self, fv: FeatureVector, cv: CompositeVector) -> ScoredCandidate:
+        return self.score_cross_section([fv], [cv])[0]
 
 
 class FundamentalLLMScorer:

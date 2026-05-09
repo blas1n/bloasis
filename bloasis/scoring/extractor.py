@@ -86,6 +86,11 @@ class ExtractionContext:
     risk_factors_cosine: float | None = None
     risk_factors_len_change: float | None = None
 
+    # PR20 — SEC Form 4 / 8-K activity. Scalar counts pre-computed by the
+    # engine from `bloasis.data.fetchers.sec_edgar.EdgarClient.list_filings`.
+    insider_filings_60d: float | None = None
+    form_8k_filings_30d: float | None = None
+
     def __post_init__(self) -> None:
         if self.ohlcv is None or self.ohlcv.empty:
             raise ValueError(f"empty ohlcv for {self.symbol} @ {self.timestamp}")
@@ -247,6 +252,13 @@ class FeatureExtractor:
                 residual_momentum(close, ctx.spy_close_series, lookback=252, skip=21)
                 if ctx.spy_close_series is not None and not ctx.spy_close_series.empty
                 else float("nan")
+            ),
+            # PR20 — SEC Form 4 / 8-K activity counts
+            insider_filings_60d=(
+                float("nan") if ctx.insider_filings_60d is None else float(ctx.insider_filings_60d)
+            ),
+            form_8k_filings_30d=(
+                float("nan") if ctx.form_8k_filings_30d is None else float(ctx.form_8k_filings_30d)
             ),
         )
 

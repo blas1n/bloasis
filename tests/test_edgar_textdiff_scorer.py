@@ -89,3 +89,42 @@ def test_top_pct_validation() -> None:
         EDGARTextDiffScorer(cfg, top_pct=0.0)
     with pytest.raises(ValueError, match="top_pct"):
         EDGARTextDiffScorer(cfg, top_pct=1.5)
+
+
+def test_signal_mode_length_uses_neg_abs_length_change() -> None:
+    cfg = ScorerConfig()
+    scorer = EDGARTextDiffScorer(cfg, signal_mode="length")
+    fvs = [
+        _fv("STABLE", cosine=0.99, len_change=0.01),  # tiny change → top
+        _fv("BIG_UP", cosine=0.99, len_change=0.30),  # big change → bottom
+        _fv("BIG_DOWN", cosine=0.99, len_change=-0.30),
+    ]
+    cvs = [_cv(f.symbol) for f in fvs]
+    out = scorer.score_cross_section(fvs, cvs)
+    by = {sc.symbol: sc.score for sc in out}
+    assert by["STABLE"] > cfg.entry_threshold  # smallest |length_change|
+    assert by["BIG_UP"] == 0.0
+    assert by["BIG_DOWN"] == 0.0
+
+
+def test_signal_mode_blend_combines_cosine_and_length() -> None:
+    cfg = ScorerConfig()
+    scorer = EDGARTextDiffScorer(cfg, signal_mode="blend", length_blend_weight=0.5)
+    fvs = [
+        _fv("BEST", cosine=0.99, len_change=0.01),
+        _fv("LOW_COS", cosine=0.50, len_change=0.01),
+        _fv("BIG_LEN", cosine=0.99, len_change=0.50),
+    ]
+    cvs = [_cv(f.symbol) for f in fvs]
+    out = scorer.score_cross_section(fvs, cvs)
+    by = {sc.symbol: sc.score for sc in out}
+    # BEST has highest cosine - 0.5*|len| → top decile
+    assert by["BEST"] > cfg.entry_threshold
+
+
+def test_signal_mode_invalid_raises() -> None:
+    cfg = ScorerConfig()
+    import pytest as _pytest
+
+    with _pytest.raises(ValueError, match="signal_mode"):
+        EDGARTextDiffScorer(cfg, signal_mode="bogus")

@@ -116,6 +116,46 @@ class EdgarClient:
         return out
 
     # ------------------------------------------------------------------
+    # Generic form list — Form 4 (insider trades), 8-K (events)
+    # ------------------------------------------------------------------
+    def list_filings(self, ticker: str, *, form_type: str) -> list[dict[str, object]]:
+        """Return all filings of `form_type` (e.g. "4", "8-K") for ticker.
+
+        Lightweight — returns dicts with `accession`, `primary_doc`, `filed`
+        (date). The submissions API "recent" payload is shared with
+        list_10k so the cache hit is free after one fetch.
+        """
+        cik = self.cik(ticker)
+        if cik is None:
+            return []
+        cache = self._root / "filings" / f"{cik}.json"
+        if cache.exists():
+            sub = json.loads(cache.read_text())
+        else:
+            sub = json.loads(_http_get(f"https://data.sec.gov/submissions/CIK{cik}.json"))
+            cache.write_text(json.dumps(sub))
+            time.sleep(BASE_DELAY)
+        recent = sub.get("filings", {}).get("recent", {})
+        forms = recent.get("form", [])
+        out: list[dict[str, object]] = []
+        for i, form in enumerate(forms):
+            if form != form_type:
+                continue
+            try:
+                filed = date.fromisoformat(recent["filingDate"][i])
+            except (KeyError, ValueError):
+                continue
+            out.append(
+                {
+                    "accession": recent["accessionNumber"][i],
+                    "primary_doc": recent.get("primaryDocument", [""] * len(forms))[i],
+                    "filed": filed,
+                }
+            )
+        out.sort(key=lambda f: f["filed"], reverse=True)  # type: ignore[arg-type, return-value]
+        return out
+
+    # ------------------------------------------------------------------
     # Item 1A extraction
     # ------------------------------------------------------------------
     def risk_factors(self, ticker: str, filing: TenKFiling) -> str | None:

@@ -178,3 +178,52 @@ def test_risk_factors_fetches_and_caches_when_absent(tmp_path: Path) -> None:
     # Cache file written
     cache_file = edgar / "risk_factors" / "0000320193_a1.txt"
     assert cache_file.exists()
+
+
+def test_list_filings_filters_by_form_type(tmp_path: Path) -> None:
+    edgar = tmp_path / "edgar"
+    (edgar / "filings").mkdir(parents=True)
+    (edgar / "tickers.json").write_text(
+        json.dumps({"0": {"ticker": "AAPL", "cik_str": 320193, "title": "Apple Inc."}})
+    )
+    (edgar / "filings" / "0000320193.json").write_text(
+        json.dumps(
+            {
+                "filings": {
+                    "recent": {
+                        "form": ["10-K", "8-K", "4", "8-K", "10-Q"],
+                        "filingDate": [
+                            "2024-11-01",
+                            "2024-10-01",
+                            "2024-09-15",
+                            "2024-08-01",
+                            "2024-07-01",
+                        ],
+                        "reportDate": [""] * 5,
+                        "accessionNumber": ["a1", "a2", "a3", "a4", "a5"],
+                        "primaryDocument": ["d1", "d2", "d3", "d4", "d5"],
+                    }
+                }
+            }
+        )
+    )
+    client = EdgarClient(tmp_path)
+
+    eight_ks = client.list_filings("AAPL", form_type="8-K")
+    assert len(eight_ks) == 2
+    assert {f["accession"] for f in eight_ks} == {"a2", "a4"}
+
+    form_4s = client.list_filings("AAPL", form_type="4")
+    assert len(form_4s) == 1
+    assert form_4s[0]["accession"] == "a3"
+
+    none_match = client.list_filings("AAPL", form_type="ZZZ")
+    assert none_match == []
+
+
+def test_list_filings_unknown_ticker_returns_empty(tmp_path: Path) -> None:
+    edgar = tmp_path / "edgar"
+    (edgar / "filings").mkdir(parents=True)
+    (edgar / "tickers.json").write_text(json.dumps({}))
+    client = EdgarClient(tmp_path)
+    assert client.list_filings("ZZZZ", form_type="8-K") == []

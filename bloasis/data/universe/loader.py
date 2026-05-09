@@ -6,6 +6,7 @@ from datetime import date
 
 from bloasis.config import DataConfig, UniverseConfig
 from bloasis.data.universe.custom_csv import list_custom_csv
+from bloasis.data.universe.russell2000 import list_russell2000
 from bloasis.data.universe.sp500 import list_sp500
 from bloasis.data.universe.sp500_historical import list_sp500_at
 
@@ -30,6 +31,8 @@ def load_universe(
         if as_of is None:
             raise ValueError("sp500_historical requires as_of date")
         return list_sp500_at(as_of, cache_dir=data_cfg.cache_dir, refresh=refresh)
+    if source == "russell2000":
+        return list_russell2000(cache_dir=data_cfg.cache_dir, refresh=refresh)
     if source == "custom_csv":
         if universe_cfg.custom_csv_path is None:
             raise ValueError("custom_csv source requires custom_csv_path")
