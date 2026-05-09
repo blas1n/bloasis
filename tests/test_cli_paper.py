@@ -54,16 +54,27 @@ def db_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return p
 
 
-def _fake_signal(symbol: str) -> MagicMock:
-    """A BUY signal stub matching the attributes _execute_against_broker reads."""
+def _fake_signal(symbol: str, action: str = "BUY") -> MagicMock:
+    """Signal stub matching the attributes _execute_against_broker reads."""
     sig = MagicMock()
-    sig.action = "BUY"
+    sig.action = action
     sig.symbol = symbol
-    sig.entry_price = 200.0
-    sig.target_size_pct = 0.02
+    sig.entry_price = 200.0 if action == "BUY" else None
+    sig.target_size_pct = 0.02 if action == "BUY" else 0.0
     sig.timestamp = pd.Timestamp("2026-05-09", tz="UTC")
-    sig.reason = f"smoke-{symbol}"
+    sig.reason = f"smoke-{action}-{symbol}"
     return sig
+
+
+def _fake_position(symbol: str, qty: float = 5.0, price: float = 195.0) -> MagicMock:
+    """BrokerPosition stub for broker.get_positions()."""
+    pos = MagicMock()
+    pos.symbol = symbol
+    pos.quantity = qty
+    pos.avg_cost = price
+    pos.current_price = price
+    pos.market_value = qty * price
+    return pos
 
 
 def _patch_broker_and_pipeline(monkeypatch: pytest.MonkeyPatch, symbols: list[str]) -> MagicMock:
@@ -81,6 +92,8 @@ def _patch_broker_and_pipeline(monkeypatch: pytest.MonkeyPatch, symbols: list[st
     fill.filled_avg_price = 200.5
     fill.reason = None
     broker.place_market_order.return_value = fill
+    # Default: no positions held. Tests that exercise SELL set this explicitly.
+    broker.get_positions.return_value = []
 
     # Both isinstance(broker, BrokerAdapter) sites need to pass — patch
     # the base class so MagicMock instances qualify.
@@ -220,3 +233,161 @@ def test_paper_session_idempotent_across_runs(
     assert len(sessions) == 1
     assert len(orders) == 6  # 3 runs × 2 symbols
     assert len(snaps) == 3  # 3 runs × 1 snapshot each
+
+
+# ---------------------------------------------------------------------------
+# PR46 — SELL handling + held-position fetch
+# ---------------------------------------------------------------------------
+
+
+def test_paper_run_fetches_held_positions_for_signal_generator(
+    baseline_config: Path,
+    db_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Without held positions passed in, SignalGenerator can't emit SELL signals.
+
+    The runner must call broker.get_positions() and pass them through.
+    """
+    broker = _patch_broker_and_pipeline(monkeypatch, ["AAPL", "MSFT"])
+    broker.get_positions.return_value = [
+        _fake_position("GOOG", qty=3.0, price=180.0),
+        _fake_position("META", qty=4.0, price=400.0),
+    ]
+
+    res = runner.invoke(
+        app,
+        [
+            "trade",
+            "paper",
+            "-s",
+            "AAPL",
+            "-s",
+            "MSFT",
+            "-c",
+            str(baseline_config),
+            "--session",
+            "sell-test-1",
+        ],
+    )
+    assert res.exit_code == 0, res.output
+
+    # broker.get_positions must have been called (rotation needs current state)
+    assert broker.get_positions.called
+
+    # SignalGenerator.generate(candidates, held=...) — `held` must be non-empty
+    # since broker reported 2 positions. Inspect the call kwargs.
+    from bloasis import signal as signal_mod
+
+    sig_gen_cls = signal_mod.SignalGenerator  # patched MagicMock class
+    instance = sig_gen_cls.return_value
+    # Last call's `held` kwarg should contain 2 HeldPosition objects matching
+    # broker's positions (translated symbols).
+    assert instance.generate.called
+    call_kwargs = instance.generate.call_args.kwargs
+    held = list(call_kwargs.get("held", ()))
+    held_symbols = sorted(h.symbol for h in held)
+    assert held_symbols == ["GOOG", "META"]
+
+
+def test_paper_run_submits_sell_orders_and_persists_them(
+    baseline_config: Path,
+    db_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """SELL signals from SignalGenerator must be submitted as sell orders
+    and persisted to paper_orders with side='sell'."""
+    broker = _patch_broker_and_pipeline(monkeypatch, ["AAPL", "MSFT"])
+    broker.get_positions.return_value = [
+        _fake_position("GOOG", qty=3.0, price=180.0),
+    ]
+    # SignalGenerator returns: 2 BUYs (AAPL, MSFT) + 1 SELL (GOOG)
+    from bloasis import signal as signal_mod
+
+    sig_gen_cls = signal_mod.SignalGenerator
+    sig_gen_cls.return_value.generate.return_value = [
+        _fake_signal("AAPL", "BUY"),
+        _fake_signal("MSFT", "BUY"),
+        _fake_signal("GOOG", "SELL"),
+    ]
+    # SELL fill: broker returns 3 shares filled at slightly worse price
+    sell_fill = MagicMock()
+    sell_fill.status = "filled"
+    sell_fill.filled_qty = 3.0
+    sell_fill.filled_avg_price = 179.5
+    sell_fill.reason = None
+    buy_fill = MagicMock()
+    buy_fill.status = "filled"
+    buy_fill.filled_qty = 10.0
+    buy_fill.filled_avg_price = 200.5
+    buy_fill.reason = None
+
+    def route_order(order: object) -> MagicMock:
+        return sell_fill if getattr(order, "side", None) == "sell" else buy_fill
+
+    broker.place_market_order.side_effect = route_order
+
+    res = runner.invoke(
+        app,
+        [
+            "trade",
+            "paper",
+            "-s",
+            "AAPL",
+            "-s",
+            "MSFT",
+            "-c",
+            str(baseline_config),
+            "--session",
+            "sell-test-2",
+        ],
+    )
+    assert res.exit_code == 0, res.output
+
+    eng = get_engine(db_path)
+    with eng.connect() as conn:
+        orders = conn.execute(select(paper_orders)).fetchall()
+
+    # 2 BUY + 1 SELL = 3 orders persisted
+    sides = sorted(o.side for o in orders)
+    assert sides == ["buy", "buy", "sell"]
+
+    sell_row = next(o for o in orders if o.side == "sell")
+    assert sell_row.symbol == "GOOG"
+    assert sell_row.qty == pytest.approx(3.0)
+    assert sell_row.filled_qty == pytest.approx(3.0)
+    assert sell_row.filled_avg_price == pytest.approx(179.5)
+    assert sell_row.broker_status == "filled"
+
+
+def test_paper_run_no_sell_when_no_held_positions(
+    baseline_config: Path,
+    db_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """First-day run (empty broker) should still work — only BUYs."""
+    broker = _patch_broker_and_pipeline(monkeypatch, ["AAPL", "MSFT"])
+    broker.get_positions.return_value = []  # explicit clarity
+
+    res = runner.invoke(
+        app,
+        [
+            "trade",
+            "paper",
+            "-s",
+            "AAPL",
+            "-s",
+            "MSFT",
+            "-c",
+            str(baseline_config),
+            "--session",
+            "first-day",
+        ],
+    )
+    assert res.exit_code == 0, res.output
+
+    eng = get_engine(db_path)
+    with eng.connect() as conn:
+        orders = conn.execute(select(paper_orders)).fetchall()
+    assert all(o.side == "buy" for o in orders)
+    assert len(orders) == 2

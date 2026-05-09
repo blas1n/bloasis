@@ -36,7 +36,7 @@ import sys
 from datetime import UTC, date, datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import typer
 from rich.console import Console
@@ -1381,13 +1381,28 @@ def _execute_against_broker(
     """
     from bloasis.allocation.composer import StrategyComposer
     from bloasis.broker import BrokerAdapter, BrokerOrder
-    from bloasis.signal import SignalGenerator
+    from bloasis.signal import HeldPosition, SignalGenerator
     from bloasis.storage import writers
 
     assert isinstance(broker, BrokerAdapter), "broker must implement BrokerAdapter"
 
+    # Fetch what we currently hold so SignalGenerator can emit SELL signals
+    # for positions whose score has dropped below exit_threshold (or are no
+    # longer in the candidate universe entirely). Without this the strategy
+    # can never rotate — first day's BUYs sit forever.
+    broker_positions = broker.get_positions()
+    held = [
+        HeldPosition(
+            symbol=bp.symbol,
+            quantity=bp.quantity,
+            avg_cost=bp.avg_cost,
+        )
+        for bp in broker_positions
+    ]
+    held_qty_by_symbol: dict[str, float] = {bp.symbol: bp.quantity for bp in broker_positions}
+
     sig_gen = SignalGenerator(cfg.scorer, cfg.signal)
-    signals = sig_gen.generate(candidates, held=())
+    signals = sig_gen.generate(candidates, held=held)
 
     account = broker.get_account()
     composer = StrategyComposer(cfg.allocation)
@@ -1409,35 +1424,49 @@ def _execute_against_broker(
     n_orders = 0
 
     for sig in signals:
-        if sig.action != "BUY":
+        side: Literal["buy", "sell"]
+        if sig.action == "BUY":
+            if sig.entry_price is None or sig.entry_price <= 0:
+                continue
+            target_capital = capital_for_strategy * sig.target_size_pct
+            qty = target_capital / float(sig.entry_price)
+            entry_hint: float | None = float(sig.entry_price)
+            side = "buy"
+        elif sig.action == "SELL":
+            qty = held_qty_by_symbol.get(sig.symbol, 0.0)
+            target_capital = 0.0
+            entry_hint = None
+            side = "sell"
+        else:
             continue
-        if sig.entry_price is None or sig.entry_price <= 0:
-            continue
-        target = capital_for_strategy * sig.target_size_pct
-        qty = target / float(sig.entry_price)
         if qty <= 0:
             continue
+
         order = BrokerOrder(
             symbol=sig.symbol,
-            side="buy",
+            side=side,
             qty=qty,
-            client_order_id=f"bloasis-{label}-{sig.symbol}-{int(sig.timestamp.timestamp())}",
+            client_order_id=f"bloasis-{label}-{side}-{sig.symbol}-{int(sig.timestamp.timestamp())}",
         )
         result = broker.place_market_order(order)
         n_orders += 1
         if session_id is not None and engine is not None:
-            entry_hint = float(sig.entry_price) if sig.entry_price else None
             slip = None
-            if result.filled_avg_price > 0 and entry_hint is not None and entry_hint > 0:
+            if (
+                side == "buy"
+                and result.filled_avg_price > 0
+                and entry_hint is not None
+                and entry_hint > 0
+            ):
                 slip = ((result.filled_avg_price - entry_hint) / entry_hint) * 10_000.0
             writers.write_paper_order(
                 engine,
                 session_id=session_id,
                 ts=submitted_at,
                 symbol=sig.symbol,
-                side="buy",
+                side=side,
                 qty=qty,
-                target_capital=target,
+                target_capital=target_capital,
                 entry_price_hint=entry_hint,
                 filled_qty=result.filled_qty,
                 filled_avg_price=result.filled_avg_price,
@@ -1449,7 +1478,7 @@ def _execute_against_broker(
             )
         table.add_row(
             sig.symbol,
-            "buy",
+            side,
             f"{qty:.4f}",
             result.status,
             f"{result.filled_avg_price * result.filled_qty:.2f}",
