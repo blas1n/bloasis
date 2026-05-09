@@ -1,0 +1,30 @@
+# PR23-C — position_size_max_pct sweep on EDGAR baseline.
+#
+# Hypothesis: PR20 winner (pos=0.02 = 50 stocks equal-weight) is concentration-
+# bounded. Smaller position size = wider universe = better diversification,
+# possibly better DD. Larger = tighter focus on top decile signal.
+#
+# Sweep:
+#   - signal.position_size_max_pct: 0.005 / 0.01 / 0.02 / 0.03 / 0.05
+#
+# At pos=0.005 with top decile of 50 stocks, capital is split into 200
+# equal-weight slots → effectively the entire top decile gets in. At
+# pos=0.05 only 20 stocks fit → tighter focus.
+#
+# 5 combos. Cheap. ~12 min wall-clock with warm cache.
+
+name: pr23-position-size
+base: configs/edgar-rolling2.yaml
+
+walk_forward:
+  start: 2022-01-01
+  end: 2024-10-17
+  train_days: 180
+  test_days: 120
+  step_days: 120
+
+universe: sp500_at:2024-12-31
+
+axes:
+  - path: signal.position_size_max_pct
+    values: [0.005, 0.01, 0.02, 0.03, 0.05]

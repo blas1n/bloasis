@@ -1,0 +1,37 @@
+# PR23-B — regime_overlay sigma_target sweep on EDGAR baseline.
+#
+# Hypothesis: PR22's intersect approach destroys alpha by narrowing the
+# universe. Vol-targeting (Barroso-Santa-Clara constant-vol) closes DD
+# without touching universe — scales every position by sigma_target /
+# realized_vol_126d. PR19 already showed JT residual responds well to
+# vol-control; test if adding it on top of EDGAR helps DD without hurting
+# alpha.
+#
+# Sweep:
+#   - regime_overlay.enabled: false (baseline) / true
+#   - regime_overlay.sigma_target: 0.10 / 0.12 / 0.15
+#
+# 1 + 3 = 4 effective combos (overlay-disabled cell is one regardless of
+# sigma_target). Grid produces 6 rows (2 enabled-bool × 3 sigma) but the
+# 3 disabled-bool rows are duplicates — accept the redundancy for
+# combinatorial completeness.
+#
+# Cheap. ~15 min wall-clock with warm cache.
+
+name: pr23-regime-overlay
+base: configs/edgar-rolling2.yaml
+
+walk_forward:
+  start: 2022-01-01
+  end: 2024-10-17
+  train_days: 180
+  test_days: 120
+  step_days: 120
+
+universe: sp500_at:2024-12-31
+
+axes:
+  - path: regime_overlay.enabled
+    values: [false, true]
+  - path: regime_overlay.sigma_target
+    values: [0.10, 0.12, 0.15]
