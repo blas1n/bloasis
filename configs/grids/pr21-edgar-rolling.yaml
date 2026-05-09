@@ -13,10 +13,15 @@
 name: pr21-edgar-rolling
 base: configs/edgar-rolling2.yaml
 
+# Walk-forward: 2022-01-01..2024-10-17, train=180/test=120/step=120 → 7 folds.
+# This is the exact protocol PR20 measured against (~/Docs/bloasis/PR20_Grid_Measurement_2026-05-09.md).
+# Train=180 (6 months) vs train=365 changes results materially because EDGAR's
+# annual filing cycle wants the rolling cosine signal active early; longer train
+# delays first fold's first signal.
 walk_forward:
-  start: 2022-07-01
+  start: 2022-01-01
   end: 2024-10-17
-  train_days: 365
+  train_days: 180
   test_days: 120
   step_days: 120
 
