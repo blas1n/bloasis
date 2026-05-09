@@ -69,6 +69,10 @@ grid_app = typer.Typer(
     name="grid",
     help="Combinatorial backtest grid runner (PR21). See docs/e2e/grid-runner-checklist.md.",
 )
+paper_app = typer.Typer(
+    name="paper",
+    help="Inspect paper-trading sessions (PR47): list, show details, friction, close.",
+)
 app.add_typer(config_app, name="config")
 app.add_typer(universe_app, name="universe")
 app.add_typer(fetch_app, name="fetch")
@@ -76,6 +80,7 @@ app.add_typer(runs_app, name="runs")
 app.add_typer(trade_app, name="trade")
 app.add_typer(ml_app, name="ml")
 app.add_typer(grid_app, name="grid")
+app.add_typer(paper_app, name="paper")
 
 console = Console()
 
@@ -1746,6 +1751,206 @@ def grid_show(
             gate,
         )
     console.print(table)
+
+
+# ---------------------------------------------------------------------------
+# Paper trading inspection (PR47)
+# ---------------------------------------------------------------------------
+
+
+def _format_pct(x: float) -> str:
+    return f"{x * 100:+.2f}%"
+
+
+@paper_app.command("sessions")
+def paper_sessions_list() -> None:
+    """List every paper session with order/snapshot counts and equity range."""
+    from sqlalchemy import func, select
+
+    from bloasis.storage import paper_equity_snapshots as eq_table
+    from bloasis.storage import paper_orders as ord_table
+    from bloasis.storage import paper_sessions as sess_table
+
+    engine = get_engine()
+    with engine.connect() as conn:
+        sessions = conn.execute(
+            select(sess_table).order_by(sess_table.c.started_at.desc())
+        ).fetchall()
+
+        if not sessions:
+            console.print("[yellow]no paper sessions found[/yellow]")
+            return
+
+        order_counts: dict[int, int] = {
+            int(r[0]): int(r[1])
+            for r in conn.execute(
+                select(ord_table.c.session_id, func.count()).group_by(ord_table.c.session_id)
+            ).fetchall()
+        }
+        snap_min: dict[int, float] = {
+            int(r[0]): float(r[1])
+            for r in conn.execute(
+                select(eq_table.c.session_id, func.min(eq_table.c.equity)).group_by(
+                    eq_table.c.session_id
+                )
+            ).fetchall()
+        }
+        snap_max: dict[int, float] = {
+            int(r[0]): float(r[1])
+            for r in conn.execute(
+                select(eq_table.c.session_id, func.max(eq_table.c.equity)).group_by(
+                    eq_table.c.session_id
+                )
+            ).fetchall()
+        }
+
+    table = RichTable(title=f"paper sessions — {len(sessions)} total")
+    table.add_column("id", justify="right")
+    table.add_column("name", style="cyan")
+    table.add_column("status")
+    table.add_column("orders", justify="right")
+    table.add_column("equity range", justify="right")
+    table.add_column("started")
+
+    for s in sessions:
+        sid = s.session_id
+        emin = snap_min.get(sid)
+        emax = snap_max.get(sid)
+        eq_str = f"${emin:,.0f} → ${emax:,.0f}" if emin is not None and emax is not None else "—"
+        table.add_row(
+            str(sid),
+            s.name,
+            s.status,
+            str(order_counts.get(sid, 0)),
+            eq_str,
+            s.started_at.strftime("%Y-%m-%d") if s.started_at else "—",
+        )
+    console.print(table)
+
+
+def _resolve_session_id(name: str) -> int:
+    """Look up a session by name; raise typer.Exit on miss."""
+    from sqlalchemy import select
+
+    from bloasis.storage import paper_sessions as sess_table
+
+    engine = get_engine()
+    with engine.connect() as conn:
+        row = conn.execute(
+            select(sess_table.c.session_id).where(sess_table.c.name == name)
+        ).fetchone()
+    if row is None:
+        console.print(f"[red]session '{name}' not found[/red]")
+        raise typer.Exit(code=1)
+    return int(row.session_id)
+
+
+@paper_app.command("show")
+def paper_show(
+    session_name: str = typer.Argument(...),  # noqa: B008
+) -> None:
+    """Render session detail: equity curve summary, order count, total return."""
+    from sqlalchemy import func, select
+
+    from bloasis.storage import paper_equity_snapshots as eq_table
+    from bloasis.storage import paper_orders as ord_table
+
+    sid = _resolve_session_id(session_name)
+    engine = get_engine()
+    with engine.connect() as conn:
+        snaps = conn.execute(
+            select(eq_table.c.ts, eq_table.c.equity)
+            .where(eq_table.c.session_id == sid)
+            .order_by(eq_table.c.ts)
+        ).fetchall()
+        n_orders = conn.execute(
+            select(func.count()).where(ord_table.c.session_id == sid)
+        ).scalar_one()
+
+    table = RichTable(title=f"paper session — {session_name}")
+    table.add_column("metric", style="cyan")
+    table.add_column("value", justify="right")
+
+    if snaps:
+        first = snaps[0].equity
+        last = snaps[-1].equity
+        ret = (last - first) / first if first > 0 else 0.0
+        max_eq = max(s.equity for s in snaps)
+        running_max = first
+        max_dd = 0.0
+        for s in snaps:
+            running_max = max(running_max, s.equity)
+            dd = (s.equity - running_max) / running_max if running_max > 0 else 0.0
+            max_dd = min(max_dd, dd)
+        table.add_row("snapshots", str(len(snaps)))
+        table.add_row("equity start", f"${first:,.2f}")
+        table.add_row("equity end", f"${last:,.2f}")
+        table.add_row("equity peak", f"${max_eq:,.2f}")
+        table.add_row("total return", _format_pct(ret))
+        table.add_row("max drawdown", _format_pct(max_dd))
+    else:
+        table.add_row("snapshots", "0")
+
+    table.add_row("orders submitted", str(n_orders))
+    console.print(table)
+
+
+@paper_app.command("friction")
+def paper_friction(
+    session_name: str = typer.Argument(...),  # noqa: B008
+) -> None:
+    """Median/p25/p75 slippage in bps for filled BUY orders in this session."""
+    import statistics
+
+    from sqlalchemy import select
+
+    from bloasis.storage import paper_orders as ord_table
+
+    sid = _resolve_session_id(session_name)
+    engine = get_engine()
+    with engine.connect() as conn:
+        rows = conn.execute(
+            select(ord_table.c.slippage_bps, ord_table.c.symbol).where(
+                ord_table.c.session_id == sid,
+                ord_table.c.broker_status == "filled",
+                ord_table.c.slippage_bps.is_not(None),
+            )
+        ).fetchall()
+
+    table = RichTable(title=f"paper friction — {session_name}")
+    table.add_column("metric", style="cyan")
+    table.add_column("value", justify="right")
+
+    if not rows:
+        console.print(f"[yellow]no filled orders with slippage data in '{session_name}'[/yellow]")
+        return
+
+    bps_values = [float(r.slippage_bps) for r in rows]
+    bps_sorted = sorted(bps_values)
+    n = len(bps_sorted)
+    median = statistics.median(bps_sorted)
+    p25 = bps_sorted[max(0, n // 4)] if n > 1 else bps_sorted[0]
+    p75 = bps_sorted[min(n - 1, (3 * n) // 4)] if n > 1 else bps_sorted[0]
+
+    table.add_row("filled orders", str(n))
+    table.add_row("median slippage", f"{median:.1f} bps")
+    table.add_row("p25 slippage", f"{p25:.1f} bps")
+    table.add_row("p75 slippage", f"{p75:.1f} bps")
+    table.add_row("max slippage", f"{max(bps_values):.1f} bps")
+    console.print(table)
+
+
+@paper_app.command("close")
+def paper_close(
+    session_name: str = typer.Argument(...),  # noqa: B008
+) -> None:
+    """Mark a paper session as closed (idempotent — safe to re-run)."""
+    from bloasis.storage import writers
+
+    sid = _resolve_session_id(session_name)
+    engine = get_engine()
+    writers.close_paper_session(engine, session_id=sid)
+    console.print(f"[green]✓[/green] session '{session_name}' (id={sid}) closed")
 
 
 if __name__ == "__main__":
