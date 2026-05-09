@@ -1,0 +1,29 @@
+# PR21 starter grid — re-run the PR20 EDGAR axis sweep with `bloasis grid`.
+#
+# Uses edgar-rolling2 (the PR20 winner) as the base. Sweeps two axes that
+# were the top movers: rolling_window (the PR20 win driver) and
+# rebalance_days (the PR19 win driver). 4 × 4 = 16 combinations.
+#
+# Estimated runtime: ~30 min wall-clock with warm yfinance + EDGAR cache.
+#
+# Usage:
+#   uv run bloasis grid run configs/grids/pr21-edgar-rolling.yaml
+#   uv run bloasis grid show pr21-edgar-rolling
+
+name: pr21-edgar-rolling
+base: configs/edgar-rolling2.yaml
+
+walk_forward:
+  start: 2022-07-01
+  end: 2024-10-17
+  train_days: 365
+  test_days: 120
+  step_days: 120
+
+universe: sp500_at:2024-12-31
+
+axes:
+  - path: scorer.edgar_rolling_window
+    values: [1, 2, 3, 5]
+  - path: signal.rebalance_days
+    values: [1, 5, 21, 42]
