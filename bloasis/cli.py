@@ -36,7 +36,7 @@ import sys
 from datetime import UTC, date, datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 import typer
 from rich.console import Console
@@ -1363,12 +1363,13 @@ def _execute_against_broker(
     CLI handler resolves the session via `writers.create_paper_session`
     before calling this helper.
     """
-    from bloasis.allocation.composer import StrategyComposer
-    from bloasis.broker import BrokerAdapter, BrokerOrder
-    from bloasis.signal import HeldPosition, SignalGenerator
+    from bloasis.broker.protocols import BrokerAdapter as _BrokerAdapterAlias
+    from bloasis.risk import MarketState, PortfolioState
+    from bloasis.signal import HeldPosition
     from bloasis.storage import writers
+    from bloasis.strategy.runner import execute_strategy_step
 
-    assert isinstance(broker, BrokerAdapter), "broker must implement BrokerAdapter"
+    assert isinstance(broker, _BrokerAdapterAlias), "broker must implement BrokerAdapter"
 
     # Fetch what we currently hold so SignalGenerator can emit SELL signals
     # for positions whose score has dropped below exit_threshold (or are no
@@ -1383,14 +1384,6 @@ def _execute_against_broker(
         )
         for bp in broker_positions
     ]
-    held_qty_by_symbol: dict[str, float] = {bp.symbol: bp.quantity for bp in broker_positions}
-
-    sig_gen = SignalGenerator(cfg.scorer, cfg.signal)
-    signals = sig_gen.generate(candidates, held=held)
-
-    account = broker.get_account()
-    composer = StrategyComposer(cfg.allocation)
-    plan = composer.plan(total_capital=account.cash, spy_price=None)
 
     table = RichTable(title=f"trade {label}")
     table.add_column("symbol", style="cyan")
@@ -1400,44 +1393,47 @@ def _execute_against_broker(
     table.add_column("filled $", justify="right")
     table.add_column("reason")
 
-    # Use plan.strategy_capital (slice for this strategy) to size orders.
-    capital_for_strategy = plan.strategy_capital if plan.strategy_capital > 0 else account.cash
-
     engine = get_engine() if session_id is not None else None
     submitted_at = datetime.now(tz=UTC)
-    n_orders = 0
 
-    for sig in signals:
-        side: Literal["buy", "sell"]
-        if sig.action == "BUY":
-            if sig.entry_price is None or sig.entry_price <= 0:
-                continue
-            target_capital = capital_for_strategy * sig.target_size_pct
-            qty = target_capital / float(sig.entry_price)
-            entry_hint: float | None = float(sig.entry_price)
-            side = "buy"
-        elif sig.action == "SELL":
-            qty = held_qty_by_symbol.get(sig.symbol, 0.0)
-            target_capital = 0.0
-            entry_hint = None
-            side = "sell"
-        else:
-            continue
-        if qty <= 0:
-            continue
+    # Build market / portfolio state for the runner. Live has no precomputed
+    # VIX series — pass 0.0; risk_evaluator's VIX gate only fires on backtest
+    # bars exceeding cfg.risk.max_vix anyway. SPY returns also empty for the
+    # live one-shot call → regime overlay defaults to scale=1.0 (no shrink).
+    import pandas as pd_mod
 
-        order = BrokerOrder(
-            symbol=sig.symbol,
-            side=side,
-            qty=qty,
-            client_order_id=f"bloasis-{label}-{side}-{sig.symbol}-{int(sig.timestamp.timestamp())}",
-        )
-        result = broker.place_market_order(order)
-        n_orders += 1
+    market_state = MarketState(timestamp=submitted_at, vix=0.0)
+    portfolio_state = PortfolioState(
+        total_value=broker.get_account().equity,
+        sector_concentrations={},  # broker doesn't report sector mix
+    )
+    spy_returns_to_date = pd_mod.Series([], dtype=float)
+
+    step = execute_strategy_step(
+        cfg=cfg,
+        candidates=candidates,
+        held_positions=held,
+        market_state=market_state,
+        spy_returns_to_date=spy_returns_to_date,
+        portfolio_state=portfolio_state,
+        signal_date=submitted_at,
+        executor=broker,
+        prev_buy_set=None,
+        label=label,
+    )
+
+    for order, result, sig in step.submitted:
+        target_capital = 0.0
+        entry_hint: float | None = None
+        if order.side == "buy" and sig.entry_price is not None:
+            entry_hint = float(sig.entry_price)
+            # Re-derive target_capital so the persisted row mirrors what the
+            # runner sized to; runner uses equity * (size_pct * regime_scale).
+            target_capital = order.qty * entry_hint
         if session_id is not None and engine is not None:
             slip = None
             if (
-                side == "buy"
+                order.side == "buy"
                 and result.filled_avg_price > 0
                 and entry_hint is not None
                 and entry_hint > 0
@@ -1447,9 +1443,9 @@ def _execute_against_broker(
                 engine,
                 session_id=session_id,
                 ts=submitted_at,
-                symbol=sig.symbol,
-                side=side,
-                qty=qty,
+                symbol=order.symbol,
+                side=order.side,
+                qty=order.qty,
                 target_capital=target_capital,
                 entry_price_hint=entry_hint,
                 filled_qty=result.filled_qty,
@@ -1461,24 +1457,24 @@ def _execute_against_broker(
                 rationale_json=json.dumps({"reason": sig.reason or ""}),
             )
         table.add_row(
-            sig.symbol,
-            side,
-            f"{qty:.4f}",
+            order.symbol,
+            order.side,
+            f"{order.qty:.4f}",
             result.status,
             f"{result.filled_avg_price * result.filled_qty:.2f}",
             result.reason or sig.reason,
         )
 
     console.print(table)
+    account_after = broker.get_account()
     console.print(
-        f"[dim]broker={broker.mode} | strategy_capital=${capital_for_strategy:,.2f} | "
-        f"spy_qty={plan.spy_share_qty}[/dim]"
+        f"[dim]broker={broker.mode} | equity=${account_after.equity:,.2f} | "
+        f"cash=${account_after.cash:,.2f}[/dim]"
     )
 
     if session_id is not None and engine is not None:
-        # End-of-run mark-to-market: re-fetch the account so cash/equity
-        # reflect the orders we just placed.
-        account_after = broker.get_account()
+        # End-of-run mark-to-market: account state already reflects the
+        # orders we just placed (broker / sim mutated it inline).
         positions_value = max(0.0, account_after.equity - account_after.cash)
         writers.snapshot_paper_equity(
             engine,
@@ -1487,7 +1483,7 @@ def _execute_against_broker(
             cash=account_after.cash,
             positions_value=positions_value,
             equity=account_after.equity,
-            n_positions=n_orders,
+            n_positions=len(step.submitted),
         )
 
 
