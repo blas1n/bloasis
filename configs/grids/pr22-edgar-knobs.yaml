@@ -1,0 +1,31 @@
+# PR22 Grid A — continuous_score × top_pct sweep on EDGAR winner.
+#
+# Stays on the rolling=2/rebal=21 baseline (PR20 winner) and sweeps two
+# untested axes:
+#   - scorer.continuous_score: percentile rank vs binary 0.99/0.0 (PR20
+#     observed cont=true hurt EDGAR DD 0.80 → 0.97 — but only on a wider
+#     EDGAR window. Re-test with monthly rebalance.)
+#   - scorer.edgar_textdiff_top_pct: 0.05–0.20 (currently 0.10 default,
+#     untested whether wider/tighter top decile helps).
+#
+# 4 × 2 = 8 combos. ~20 min wall-clock with warm cache.
+#
+# Walk-forward exactly matches PR20 protocol (7 folds).
+
+name: pr22-edgar-knobs
+base: configs/edgar-rolling2.yaml
+
+walk_forward:
+  start: 2022-01-01
+  end: 2024-10-17
+  train_days: 180
+  test_days: 120
+  step_days: 120
+
+universe: sp500_at:2024-12-31
+
+axes:
+  - path: scorer.edgar_textdiff_top_pct
+    values: [0.05, 0.10, 0.15, 0.20]
+  - path: scorer.continuous_score
+    values: [false, true]

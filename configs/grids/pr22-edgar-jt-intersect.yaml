@@ -1,0 +1,36 @@
+# PR22 Grid B — EDGAR ∩ JT(residual) ensemble.
+#
+# Uses scorer.type=edgar_textdiff_jt_intersect — picks symbols that pass
+# BOTH EDGAR top decile AND JT momentum top decile. Sweeps:
+#   - scorer.jt_residual: false (vanilla JT) vs true (Blitz-Hanauer-Vidojevic
+#     residual momentum, vol-halved, DD-improved per PR19)
+#   - scorer.jt_top_pct: 0.10 vs 0.20 (intersect width)
+#
+# Hypothesis: residual JT alpha (vol-controlled) + EDGAR DD discipline
+# (concentration capped via intersect filter) closes the DD gap that pure
+# JT residual+monthly couldn't (PR19: α +8.99% / DD 1.20 fail).
+#
+# Keeps PR20 EDGAR rolling=2 + monthly rebalance baseline; only the
+# intersect filter and JT mode change.
+#
+# 2 × 2 = 4 combos. ~12 min wall-clock with warm cache.
+
+name: pr22-edgar-jt-intersect
+base: configs/edgar-rolling2.yaml
+
+walk_forward:
+  start: 2022-01-01
+  end: 2024-10-17
+  train_days: 180
+  test_days: 120
+  step_days: 120
+
+universe: sp500_at:2024-12-31
+
+axes:
+  - path: scorer.type
+    values: ["edgar_textdiff_jt_intersect"]
+  - path: scorer.jt_residual
+    values: [false, true]
+  - path: scorer.jt_top_pct
+    values: [0.10, 0.20]
