@@ -1,0 +1,33 @@
+# PR23-D — fundamental_llm Ollama first measurement.
+#
+# LLM-based fundamental analysis scorer. Each (symbol, quarter_end) calls
+# Ollama (llama3.2:3b default) to score balance-sheet / cash-flow health.
+# Disk-cached per (sym, qe) so first combo is expensive, subsequent fast.
+#
+# COST WARNING: cold cache for SP500 ~ 490 stocks × ~12 quarters = 5,880
+# LLM calls. At ~1-2 sec each on llama3.2:3b ≈ 1.6-3.3 hours wall-clock
+# for the FIRST combo. Second combo only re-runs the scoring loop with
+# a different top_pct — same cached LLM responses → ~10 min.
+#
+# Sweep:
+#   - scorer.fundamental_llm_top_pct: 0.10 / 0.20
+#
+# 2 combos. Total wall-clock ~2-4 hours (mostly first combo).
+
+name: pr23-fundamental-llm
+base: configs/edgar-rolling2.yaml
+
+walk_forward:
+  start: 2022-01-01
+  end: 2024-10-17
+  train_days: 180
+  test_days: 120
+  step_days: 120
+
+universe: sp500_at:2024-12-31
+
+axes:
+  - path: scorer.type
+    values: ["fundamental_llm"]
+  - path: scorer.fundamental_llm_top_pct
+    values: [0.10, 0.20]

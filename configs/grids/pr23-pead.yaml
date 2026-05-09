@@ -1,0 +1,34 @@
+# PR23 — PEAD scorer first measurement at PR20 protocol.
+#
+# Bernard-Thomas PEAD (Post-Earnings Announcement Drift) — rank stocks by
+# their most recent earnings surprise and their proximity to the announcement.
+# Untested at the 7-fold protocol.
+#
+# Sweeps:
+#   - scorer.pead_top_pct: 0.10 / 0.20 (universe width)
+#   - scorer.pead_drift_days: 30 / 60 / 120 (post-announcement drift window)
+#
+# 2 × 3 = 6 combos. Cheap (no LLM, no EDGAR text fetch). ~15 min wall-clock
+# with warm yfinance cache + earnings prefetch.
+#
+# Comparison: edgar-rolling2 baseline = α +4.1% / sharpe vs SPY 1.33.
+
+name: pr23-pead
+base: configs/edgar-rolling2.yaml
+
+walk_forward:
+  start: 2022-01-01
+  end: 2024-10-17
+  train_days: 180
+  test_days: 120
+  step_days: 120
+
+universe: sp500_at:2024-12-31
+
+axes:
+  - path: scorer.type
+    values: ["pead"]
+  - path: scorer.pead_top_pct
+    values: [0.10, 0.20]
+  - path: scorer.pead_drift_days
+    values: [30, 60, 120]
