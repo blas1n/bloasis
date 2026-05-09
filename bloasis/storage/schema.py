@@ -325,3 +325,94 @@ Index(
     unique=True,
     sqlite_where=equity_curve.c.run_id.is_(None),
 )
+
+
+# ---------------------------------------------------------------------------
+# paper_sessions / paper_orders / paper_equity_snapshots — paper trading (PR45)
+# ---------------------------------------------------------------------------
+# Paper trading sits between backtest (replay) and live (real money). The
+# data we need to measure friction, OOS alpha, and rotation is identical to
+# backtest at the row level (orders + equity curve), but the run lifecycle
+# is fundamentally different — paper sessions are continuous and re-enter
+# daily, where backtest_runs are one-shot. We persist that difference as a
+# distinct paper_sessions table rather than overloading backtest_runs.
+
+paper_sessions = Table(
+    "paper_sessions",
+    metadata,
+    Column("session_id", Integer, primary_key=True, autoincrement=True),
+    Column("user_id", Integer, nullable=False, server_default="0"),
+    Column("name", String(128), nullable=False),
+    Column("config_hash", String(16), nullable=False),
+    Column("config_json", Text, nullable=False),
+    Column("started_at", DateTime(timezone=True), nullable=False),
+    Column("ended_at", DateTime(timezone=True), nullable=True),
+    Column("status", String(16), nullable=False, server_default="running"),
+    CheckConstraint(
+        "status IN ('running', 'closed', 'failed')",
+        name="ck_paper_sessions_status",
+    ),
+)
+
+# `name` is the natural key used for idempotent CLI re-entry: re-running
+# `bloasis trade paper --session edgar-rolling2-paper` should resume an
+# existing session, not spawn a duplicate.
+Index(
+    "uq_paper_sessions_user_name",
+    paper_sessions.c.user_id,
+    paper_sessions.c.name,
+    unique=True,
+)
+
+
+paper_orders = Table(
+    "paper_orders",
+    metadata,
+    Column("order_id", Integer, primary_key=True, autoincrement=True),
+    Column(
+        "session_id",
+        Integer,
+        ForeignKey("paper_sessions.session_id"),
+        nullable=False,
+    ),
+    Column("ts", DateTime(timezone=True), nullable=False),
+    Column("symbol", String(16), nullable=False),
+    Column("side", String(4), nullable=False),
+    # Intent — what the strategy asked for
+    Column("qty", Float, nullable=False),
+    Column("target_capital", Float, nullable=False),
+    Column("entry_price_hint", Float, nullable=True),
+    # Fill — what the broker delivered
+    Column("filled_qty", Float, nullable=False, server_default="0"),
+    Column("filled_avg_price", Float, nullable=False, server_default="0"),
+    Column("broker_status", String(16), nullable=False),
+    Column("broker_order_id", String(64), nullable=True),
+    # Friction
+    Column("slippage_bps", Float, nullable=True),
+    Column("fees", Float, nullable=False, server_default="0"),
+    # Provenance — score / scorer / feature timestamp at signal time
+    Column("rationale_json", Text, nullable=True),
+    CheckConstraint("side IN ('buy', 'sell')", name="ck_paper_orders_side"),
+    CheckConstraint("qty > 0", name="ck_paper_orders_qty"),
+)
+
+Index("idx_paper_orders_session_ts", paper_orders.c.session_id, paper_orders.c.ts)
+Index("idx_paper_orders_symbol", paper_orders.c.symbol)
+
+
+paper_equity_snapshots = Table(
+    "paper_equity_snapshots",
+    metadata,
+    Column(
+        "session_id",
+        Integer,
+        ForeignKey("paper_sessions.session_id"),
+        nullable=False,
+    ),
+    Column("ts", DateTime(timezone=True), nullable=False),
+    Column("cash", Float, nullable=False),
+    Column("positions_value", Float, nullable=False),
+    Column("equity", Float, nullable=False),
+    Column("n_positions", Integer, nullable=False),
+    PrimaryKeyConstraint("session_id", "ts", name="pk_paper_equity_snapshots"),
+)

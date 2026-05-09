@@ -13,14 +13,14 @@ from dataclasses import asdict
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import insert, update
+from sqlalchemy import insert, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from bloasis.backtest.portfolio import Fill
 from bloasis.backtest.result import BacktestResult
 from bloasis.scoring.features import FeatureVector
 from bloasis.scoring.rationale import Rationale
-from bloasis.storage import backtest_runs, equity_curve, feature_log, trades
+from bloasis.storage.schema import backtest_runs, equity_curve, feature_log, trades
 
 if TYPE_CHECKING:
     from sqlalchemy import Engine
@@ -250,3 +250,139 @@ def _avg_max_dd(result: BacktestResult) -> float:
     if not result.fold_results:
         return 0.0
     return sum(f.max_drawdown for f in result.fold_results) / len(result.fold_results)
+
+
+# ---------------------------------------------------------------------------
+# Paper trading writers (PR45)
+# ---------------------------------------------------------------------------
+
+
+def create_paper_session(
+    engine: Engine,
+    *,
+    name: str,
+    config_hash: str,
+    config_json: str,
+    user_id: int = 0,
+) -> int:
+    """Resolve `name` to a session_id, creating the row if it doesn't exist.
+
+    Idempotent: re-running `bloasis trade paper --session X` resumes the
+    existing session rather than spawning a duplicate. The (user_id, name)
+    pair has a unique index — same name across users is allowed in case
+    the schema later supports multi-user.
+    """
+    from bloasis.storage.schema import paper_sessions
+
+    now = datetime.now(tz=UTC)
+    with engine.begin() as conn:
+        existing = conn.execute(
+            select(paper_sessions.c.session_id).where(
+                paper_sessions.c.user_id == user_id,
+                paper_sessions.c.name == name,
+            )
+        ).fetchone()
+        if existing is not None:
+            return int(existing.session_id)
+
+        result = conn.execute(
+            insert(paper_sessions)
+            .values(
+                user_id=user_id,
+                name=name,
+                config_hash=config_hash,
+                config_json=config_json,
+                started_at=now,
+                status="running",
+            )
+            .returning(paper_sessions.c.session_id)
+        )
+        row = result.fetchone()
+        assert row is not None
+        return int(row.session_id)
+
+
+def close_paper_session(engine: Engine, *, session_id: int) -> None:
+    """Mark the session as `closed` with `ended_at = now()`."""
+    from bloasis.storage.schema import paper_sessions
+
+    now = datetime.now(tz=UTC)
+    with engine.begin() as conn:
+        conn.execute(
+            update(paper_sessions)
+            .where(paper_sessions.c.session_id == session_id)
+            .values(status="closed", ended_at=now)
+        )
+
+
+def write_paper_order(
+    engine: Engine,
+    *,
+    session_id: int,
+    ts: datetime,
+    symbol: str,
+    side: str,
+    qty: float,
+    target_capital: float,
+    entry_price_hint: float | None,
+    filled_qty: float,
+    filled_avg_price: float,
+    broker_status: str,
+    broker_order_id: str | None,
+    slippage_bps: float | None,
+    fees: float,
+    rationale_json: str | None,
+) -> int:
+    """Persist a submitted order with its broker response (filled or rejected)."""
+    from bloasis.storage.schema import paper_orders
+
+    with engine.begin() as conn:
+        result = conn.execute(
+            insert(paper_orders)
+            .values(
+                session_id=session_id,
+                ts=ts,
+                symbol=symbol,
+                side=side,
+                qty=qty,
+                target_capital=target_capital,
+                entry_price_hint=entry_price_hint,
+                filled_qty=filled_qty,
+                filled_avg_price=filled_avg_price,
+                broker_status=broker_status,
+                broker_order_id=broker_order_id,
+                slippage_bps=slippage_bps,
+                fees=fees,
+                rationale_json=rationale_json,
+            )
+            .returning(paper_orders.c.order_id)
+        )
+        row = result.fetchone()
+        assert row is not None
+        return int(row.order_id)
+
+
+def snapshot_paper_equity(
+    engine: Engine,
+    *,
+    session_id: int,
+    ts: datetime,
+    cash: float,
+    positions_value: float,
+    equity: float,
+    n_positions: int,
+) -> None:
+    """Append a daily mark-to-market snapshot from broker.get_account()."""
+    from bloasis.storage.schema import paper_equity_snapshots
+
+    with engine.begin() as conn:
+        conn.execute(
+            insert(paper_equity_snapshots).values(
+                session_id=session_id,
+                ts=ts,
+                cash=cash,
+                positions_value=positions_value,
+                equity=equity,
+                n_positions=n_positions,
+            )
+        )

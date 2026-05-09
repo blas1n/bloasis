@@ -1169,9 +1169,22 @@ def trade_paper(
         None, "--config", "-c", help="Strategy YAML (uses defaults if omitted)."
     ),
     days: int = typer.Option(365, "--days", min=60),  # noqa: B008
+    session: str = typer.Option(  # noqa: B008
+        None,
+        "--session",
+        help="Persist orders + equity snapshots under this session name. "
+        "Idempotent — re-running with the same name resumes the session.",
+    ),
 ) -> None:
-    """Submit BUY/SELL signals to Alpaca paper account."""
+    """Submit BUY/SELL signals to Alpaca paper account.
+
+    When `--session NAME` is provided, every order is persisted to
+    `paper_orders` and an end-of-run mark-to-market snapshot is appended
+    to `paper_equity_snapshots`. Without `--session`, the run is
+    fire-and-forget (legacy behavior).
+    """
     from bloasis.broker import AlpacaBrokerAdapter
+    from bloasis.storage import create_all, writers
 
     if not symbols or len(symbols) < 2:
         raise typer.BadParameter("at least 2 --symbol/-s entries required")
@@ -1182,8 +1195,20 @@ def trade_paper(
         console.print("[yellow]no candidates produced[/yellow]")
         raise typer.Exit(code=1)
 
+    session_id: int | None = None
+    if session is not None:
+        engine = get_engine()
+        create_all(engine)
+        session_id = writers.create_paper_session(
+            engine,
+            name=session,
+            config_hash=config_hash(cfg),
+            config_json=cfg.model_dump_json(),
+        )
+        console.print(f"[dim]paper session: {session} (id={session_id})[/dim]")
+
     broker = AlpacaBrokerAdapter(mode="paper")
-    _execute_against_broker(cfg, candidates, broker, label="paper")
+    _execute_against_broker(cfg, candidates, broker, label="paper", session_id=session_id)
 
 
 @trade_app.command("live")
@@ -1344,11 +1369,20 @@ def _execute_against_broker(
     broker: BrokerAdapter,
     *,
     label: str,
+    session_id: int | None = None,
 ) -> None:
-    """Translate signals into broker orders and print the result table."""
+    """Translate signals into broker orders and print the result table.
+
+    When `session_id` is set (paper trading), every submitted order is
+    persisted to `paper_orders` with its broker fill response, and a
+    daily equity snapshot is appended to `paper_equity_snapshots`. The
+    CLI handler resolves the session via `writers.create_paper_session`
+    before calling this helper.
+    """
     from bloasis.allocation.composer import StrategyComposer
     from bloasis.broker import BrokerAdapter, BrokerOrder
     from bloasis.signal import SignalGenerator
+    from bloasis.storage import writers
 
     assert isinstance(broker, BrokerAdapter), "broker must implement BrokerAdapter"
 
@@ -1370,6 +1404,10 @@ def _execute_against_broker(
     # Use plan.strategy_capital (slice for this strategy) to size orders.
     capital_for_strategy = plan.strategy_capital if plan.strategy_capital > 0 else account.cash
 
+    engine = get_engine() if session_id is not None else None
+    submitted_at = datetime.now(tz=UTC)
+    n_orders = 0
+
     for sig in signals:
         if sig.action != "BUY":
             continue
@@ -1386,6 +1424,29 @@ def _execute_against_broker(
             client_order_id=f"bloasis-{label}-{sig.symbol}-{int(sig.timestamp.timestamp())}",
         )
         result = broker.place_market_order(order)
+        n_orders += 1
+        if session_id is not None and engine is not None:
+            entry_hint = float(sig.entry_price) if sig.entry_price else None
+            slip = None
+            if result.filled_avg_price > 0 and entry_hint is not None and entry_hint > 0:
+                slip = ((result.filled_avg_price - entry_hint) / entry_hint) * 10_000.0
+            writers.write_paper_order(
+                engine,
+                session_id=session_id,
+                ts=submitted_at,
+                symbol=sig.symbol,
+                side="buy",
+                qty=qty,
+                target_capital=target,
+                entry_price_hint=entry_hint,
+                filled_qty=result.filled_qty,
+                filled_avg_price=result.filled_avg_price,
+                broker_status=result.status,
+                broker_order_id=order.client_order_id,
+                slippage_bps=slip,
+                fees=0.0,
+                rationale_json=json.dumps({"reason": sig.reason or ""}),
+            )
         table.add_row(
             sig.symbol,
             "buy",
@@ -1400,6 +1461,21 @@ def _execute_against_broker(
         f"[dim]broker={broker.mode} | strategy_capital=${capital_for_strategy:,.2f} | "
         f"spy_qty={plan.spy_share_qty}[/dim]"
     )
+
+    if session_id is not None and engine is not None:
+        # End-of-run mark-to-market: re-fetch the account so cash/equity
+        # reflect the orders we just placed.
+        account_after = broker.get_account()
+        positions_value = max(0.0, account_after.equity - account_after.cash)
+        writers.snapshot_paper_equity(
+            engine,
+            session_id=session_id,
+            ts=submitted_at,
+            cash=account_after.cash,
+            positions_value=positions_value,
+            equity=account_after.equity,
+            n_positions=n_orders,
+        )
 
 
 # ---------------------------------------------------------------------------
