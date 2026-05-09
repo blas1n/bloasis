@@ -34,7 +34,7 @@ import json
 import os
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 import typer
 from rich.console import Console
@@ -63,12 +63,17 @@ fetch_app = typer.Typer(name="fetch", help="Fetch and cache market data.")
 runs_app = typer.Typer(name="runs", help="Inspect past backtest runs.")
 trade_app = typer.Typer(name="trade", help="Execute strategy signals against a broker.")
 ml_app = typer.Typer(name="ml", help="Phase 2 ML pipeline (training, prediction).")
+grid_app = typer.Typer(
+    name="grid",
+    help="Combinatorial backtest grid runner (PR21). See docs/e2e/grid-runner-checklist.md.",
+)
 app.add_typer(config_app, name="config")
 app.add_typer(universe_app, name="universe")
 app.add_typer(fetch_app, name="fetch")
 app.add_typer(runs_app, name="runs")
 app.add_typer(trade_app, name="trade")
 app.add_typer(ml_app, name="ml")
+app.add_typer(grid_app, name="grid")
 
 console = Console()
 
@@ -830,13 +835,9 @@ def backtest(
     step_days: int = typer.Option(180, "--step-days", min=1),  # noqa: B008
 ) -> None:
     """Run a walk-forward backtest, persist the run, and print metrics."""
-    import pandas as pd
-
-    from bloasis.backtest import BacktestData, Backtester
+    from bloasis.backtest import Backtester
+    from bloasis.backtest.prefetch import prefetch_backtest_data
     from bloasis.config import config_hash as compute_config_hash
-    from bloasis.data.cache import ParquetCache
-    from bloasis.data.fetchers.yfinance_market import YfMarketContextFetcher
-    from bloasis.data.fetchers.yfinance_ohlcv import YfOhlcvFetcher
     from bloasis.scoring.extractor import FeatureExtractor
     from bloasis.storage import writers
 
@@ -849,133 +850,10 @@ def backtest(
     if start_d is None or end_d is None:
         raise typer.BadParameter("--start and --end are required (YYYY-MM-DD)")
 
-    # Pre-fetch OHLCV with warmup. The backtester slices per-day internally.
-    cache = ParquetCache(cfg.data.cache_dir, namespace="ohlcv")
-    ohlcv = YfOhlcvFetcher(cache=cache, max_age_hours=cfg.data.ohlcv_cache_max_age_hours)
-    market = YfMarketContextFetcher(ohlcv=ohlcv)
-
-    warmup = timedelta(days=300)
-    fetch_start = start_d - warmup
-    bars: dict[str, pd.DataFrame] = {}
-    skipped: list[tuple[str, str]] = []
-    for sym in symbols:
-        upper = sym.upper()
-        try:
-            bars[upper] = ohlcv.fetch(upper, fetch_start, end_d)
-        except Exception as exc:  # noqa: BLE001 — yfinance/network errors vary
-            skipped.append((upper, str(exc)))
-            console.print(f"[yellow]skipping {upper}: {exc}[/yellow]")
-    if skipped:
-        console.print(
-            f"[yellow]skipped {len(skipped)}/{len(symbols)} symbols "
-            "(delisted, renamed, or unavailable in yfinance)[/yellow]"
-        )
-    if not bars:
-        raise typer.BadParameter(
-            "every symbol failed to fetch — check connectivity / ticker validity"
-        )
-    market_ctx = market.fetch(fetch_start, end_d)
-
-    # Phase 3 PEAD: only fetch earnings if the scorer requires them.
-    earnings_history: dict[str, pd.DataFrame] = {}
-    if cfg.scorer.type in ("pead", "pead_jt_intersect"):
-        from bloasis.data.fetchers.yfinance_earnings import YfEarningsFetcher
-
-        earnings_cache = ParquetCache(cfg.data.cache_dir, namespace="earnings")
-        earnings_fetcher = YfEarningsFetcher(
-            cache=earnings_cache,
-            max_age_hours=cfg.data.fundamentals_cache_max_age_hours,
-        )
-        for sym in bars:
-            try:
-                earnings_history[sym] = earnings_fetcher.fetch(sym)
-            except Exception as exc:  # noqa: BLE001
-                console.print(f"[yellow]skipping earnings for {sym}: {exc}[/yellow]")
-
-    # Phase 3 LLM fundamental: fetch quarterly statements per symbol.
-    quarterly_financials: dict[str, pd.DataFrame] = {}
-    if cfg.scorer.type in ("fundamental_llm", "fundamental_llm_jt_intersect"):
-        from bloasis.data.fetchers.yfinance_financials import YfFinancialsFetcher
-
-        fin_cache = ParquetCache(cfg.data.cache_dir, namespace="financials")
-        fin_fetcher = YfFinancialsFetcher(
-            cache=fin_cache,
-            max_age_hours=cfg.data.fundamentals_cache_max_age_hours,
-        )
-        for sym in bars:
-            try:
-                quarterly_financials[sym] = fin_fetcher.fetch(sym)
-            except Exception as exc:  # noqa: BLE001
-                console.print(f"[yellow]skipping financials for {sym}: {exc}[/yellow]")
-
-    # Phase 3D — 10-K Risk Factors text per (symbol, filed_date).
-    risk_factors_history: dict[str, list[tuple[date, date, str]]] = {}
-    if cfg.scorer.type in ("edgar_textdiff", "edgar_textdiff_jt_intersect"):
-        from bloasis.data.fetchers.sec_edgar import EdgarClient
-
-        edgar = EdgarClient(cache_dir=cfg.data.cache_dir)
-        for sym in bars:
-            try:
-                filings = edgar.list_10k(sym)
-            except Exception as exc:  # noqa: BLE001
-                console.print(f"[yellow]skipping EDGAR list for {sym}: {exc}[/yellow]")
-                continue
-            history: list[tuple[date, date, str]] = []
-            # Filter filings to those usable for the backtest window:
-            #  - filed within (start_d - 5y, end_d) so we have ≥2 priors
-            #    available even at the earliest test date.
-            #  - keep at most 12 filings per stock (~12 fiscal years)
-            window_start = start_d - timedelta(days=5 * 365)
-            relevant = [f for f in filings if window_start <= f["filed"] <= end_d]
-            for f in relevant[:12]:
-                txt = edgar.risk_factors(sym, f)
-                if txt is None:
-                    continue
-                history.append((f["filed"], f["period"], txt))
-            history.sort(key=lambda t: t[0])  # ascending by filed_date
-            if history:
-                risk_factors_history[sym] = history
-
-    # PR20 — SEC Form 4 / 8-K filing dates (count-based scorers).
-    insider_filings_dates: dict[str, list[date]] = {}
-    form_8k_filings_dates: dict[str, list[date]] = {}
-    if cfg.scorer.type in ("insider_cluster", "form_8k_event"):
-        from bloasis.data.fetchers.sec_edgar import EdgarClient
-
-        edgar = EdgarClient(cache_dir=cfg.data.cache_dir)
-        for sym in bars:
-            if cfg.scorer.type == "insider_cluster":
-                try:
-                    fl = edgar.list_filings(sym, form_type="4")
-                    insider_filings_dates[sym] = [
-                        cast(date, f["filed"])
-                        for f in fl
-                        if start_d - timedelta(days=180) <= cast(date, f["filed"]) <= end_d
-                    ]
-                except Exception as exc:  # noqa: BLE001
-                    console.print(f"[yellow]skipping Form 4 for {sym}: {exc}[/yellow]")
-            else:
-                try:
-                    fl = edgar.list_filings(sym, form_type="8-K")
-                    form_8k_filings_dates[sym] = [
-                        cast(date, f["filed"])
-                        for f in fl
-                        if start_d - timedelta(days=90) <= cast(date, f["filed"]) <= end_d
-                    ]
-                except Exception as exc:  # noqa: BLE001
-                    console.print(f"[yellow]skipping 8-K for {sym}: {exc}[/yellow]")
-
-    data = BacktestData(
-        symbols=list(bars.keys()),
-        bars=bars,
-        vix_series=market_ctx.vix,
-        spy_close_series=market_ctx.spy_close,
-        earnings_history=earnings_history,
-        quarterly_financials=quarterly_financials,
-        risk_factors_history=risk_factors_history,
-        insider_filings_dates=insider_filings_dates,
-        form_8k_filings_dates=form_8k_filings_dates,
-    )
+    try:
+        data = prefetch_backtest_data(cfg, symbols, start_d, end_d, console=console)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
 
     engine = get_engine()
     create_all(engine)
@@ -1520,6 +1398,217 @@ def _execute_against_broker(
         f"[dim]broker={broker.mode} | strategy_capital=${capital_for_strategy:,.2f} | "
         f"spy_qty={plan.spy_share_qty}[/dim]"
     )
+
+
+# ---------------------------------------------------------------------------
+# Grid runner (PR21) — combinatorial backtest matrix sharing prefetch cost
+# ---------------------------------------------------------------------------
+
+
+def _resolve_universe_symbols(
+    universe: str | None, symbols: list[str] | None, cache_dir: Path
+) -> list[str]:
+    """Resolve a grid spec's universe / symbols into a concrete ticker list."""
+    if symbols:
+        return [s.upper() for s in symbols]
+    if not universe:
+        raise typer.BadParameter("grid spec must provide 'universe' or 'symbols'")
+    if universe == "sp500":
+        from bloasis.data.universe.sp500 import list_sp500
+
+        return list_sp500(cache_dir=cache_dir)
+    if universe.startswith("sp500_at:"):
+        from bloasis.data.universe.sp500_historical import list_sp500_at
+
+        as_of = date.fromisoformat(universe.split(":", 1)[1])
+        return list_sp500_at(as_of, cache_dir=cache_dir)
+    if universe == "russell2000":
+        from bloasis.data.universe.russell2000 import list_russell2000
+
+        return list_russell2000(cache_dir=cache_dir)
+    raise typer.BadParameter(
+        f"unknown universe '{universe}'. Use sp500, sp500_at:YYYY-MM-DD, russell2000, "
+        "or pass explicit 'symbols' in the spec."
+    )
+
+
+@grid_app.command("run")
+def grid_run(
+    spec_path: Path = typer.Argument(  # noqa: B008
+        ..., exists=False, help="Path to grid axes YAML."
+    ),
+) -> None:
+    """Execute every combination in `spec_path`, sharing one prefetch."""
+    from bloasis.backtest.grid import (
+        expand_combinations,
+        load_grid_spec,
+        run_grid,
+    )
+    from bloasis.backtest.prefetch import prefetch_backtest_data
+    from bloasis.config import config_hash as compute_config_hash
+    from bloasis.scoring.extractor import FeatureExtractor
+    from bloasis.storage import writers
+
+    spec = load_grid_spec(spec_path)
+    base_cfg = load_config(spec.base_config_path)
+
+    start_d = (
+        spec.walk_forward["start"]
+        if isinstance(spec.walk_forward["start"], date)
+        else date.fromisoformat(str(spec.walk_forward["start"]))
+    )
+    end_d = (
+        spec.walk_forward["end"]
+        if isinstance(spec.walk_forward["end"], date)
+        else date.fromisoformat(str(spec.walk_forward["end"]))
+    )
+
+    symbols = _resolve_universe_symbols(spec.universe, spec.symbols, base_cfg.data.cache_dir)
+
+    # Union of scorer types across every combination — so prefetch fans out
+    # exactly the data sources any combo will consume.
+    from bloasis.backtest.grid import apply_overrides as _apply
+
+    combos = expand_combinations(spec)
+    scorer_types = {_apply(base_cfg, c).scorer.type for c in combos}
+
+    console.print(
+        f"[cyan]grid {spec.name}: {len(combos)} combinations across "
+        f"{len(symbols)} symbols, scorers {sorted(scorer_types)}[/cyan]"
+    )
+
+    try:
+        data = prefetch_backtest_data(
+            base_cfg,
+            symbols,
+            start_d,
+            end_d,
+            scorer_types=scorer_types,
+            console=console,
+        )
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+    engine = get_engine()
+    create_all(engine)
+
+    def _persist(gr: object) -> None:
+        # late import to avoid circular ref via bloasis.backtest.grid
+        from bloasis.backtest.grid import GridRunResult
+
+        assert isinstance(gr, GridRunResult)
+        cfg_hash = compute_config_hash(gr.config)
+        run_id = writers.create_backtest_run(
+            engine,
+            name=gr.run_name,
+            config_hash=cfg_hash,
+            config_json=gr.config.model_dump_json(),
+            scorer_type=gr.config.scorer.type,
+            feature_version=FeatureExtractor.VERSION,
+            start_date=datetime(start_d.year, start_d.month, start_d.day, tzinfo=UTC),
+            end_date=datetime(end_d.year, end_d.month, end_d.day, tzinfo=UTC),
+            initial_capital=gr.config.execution.initial_capital,
+        )
+        gr.run_id = run_id
+        if gr.error is not None:
+            writers.fail_backtest_run(engine, run_id, gr.error.splitlines()[0])
+        elif gr.result is not None:
+            from dataclasses import replace
+
+            finalized = replace(gr.result, config_hash=cfg_hash, run_id=run_id)
+            writers.finalize_backtest_run(engine, run_id, finalized)
+            gr.result = finalized
+
+    def _progress(idx: int, total: int, gr: object) -> None:
+        from bloasis.backtest.grid import GridRunResult
+
+        assert isinstance(gr, GridRunResult)
+        if gr.error:
+            console.print(f"[red]  [{idx}/{total}] {gr.run_name} — FAILED[/red]")
+        else:
+            r = gr.result
+            sharpe = f"{r.median_sharpe_vs_spy:.2f}" if r else "—"
+            alpha = f"{r.median_alpha_annualized:+.3f}" if r else "—"
+            gate = "PASS" if r and r.passed_acceptance else "fail"
+            console.print(f"  [{idx}/{total}] {gr.run_name} — sharpe {sharpe}, α {alpha} ({gate})")
+
+    results = run_grid(
+        spec,
+        base_cfg,
+        data,
+        persist=_persist,
+        on_progress=_progress,
+    )
+
+    n_ok = sum(1 for r in results if r.error is None and r.result is not None)
+    n_pass = sum(1 for r in results if r.result is not None and r.result.passed_acceptance)
+    console.print(
+        f"[green]grid {spec.name}: {n_ok}/{len(results)} completed, "
+        f"{n_pass} passed acceptance[/green]"
+    )
+
+
+@grid_app.command("show")
+def grid_show(
+    grid_name: str = typer.Argument(...),  # noqa: B008
+    limit: int = typer.Option(50, "--limit", min=1, max=500),  # noqa: B008
+) -> None:
+    """Render a leaderboard of all runs whose name starts with `<grid_name>#`."""
+    from sqlalchemy import select
+
+    from bloasis.storage import backtest_runs as br_table
+
+    engine = get_engine()
+    with engine.connect() as conn:
+        rows = conn.execute(
+            select(
+                br_table.c.run_id,
+                br_table.c.name,
+                br_table.c.alpha_vs_spy,
+                br_table.c.sharpe,
+                br_table.c.max_drawdown,
+                br_table.c.passed_acceptance,
+                br_table.c.status,
+                br_table.c.n_trades,
+            )
+            .where(br_table.c.name.like(f"{grid_name}#%"))
+            .order_by(br_table.c.sharpe.desc().nullslast())
+            .limit(limit)
+        ).fetchall()
+
+    if not rows:
+        console.print(f"[red]no runs found for grid '{grid_name}'[/red]")
+        raise typer.Exit(code=1)
+
+    table = RichTable(title=f"grid {grid_name} — top {len(rows)} by sharpe")
+    table.add_column("run_id", justify="right")
+    table.add_column("combo")
+    table.add_column("sharpe", justify="right")
+    table.add_column("alpha", justify="right")
+    table.add_column("max_dd", justify="right")
+    table.add_column("trades", justify="right")
+    table.add_column("gate")
+
+    best_idx: int | None = None
+    for i, r in enumerate(rows):
+        if r.passed_acceptance and r.sharpe is not None:
+            best_idx = i
+            break
+
+    for i, r in enumerate(rows):
+        combo = r.name.split("#", 1)[1] if "#" in (r.name or "") else (r.name or "")
+        gate = "PASS" if r.passed_acceptance else (r.status or "fail")
+        marker = "★ " if i == best_idx else ""
+        table.add_row(
+            str(r.run_id),
+            f"{marker}{combo}",
+            f"{r.sharpe:.3f}" if r.sharpe is not None else "—",
+            f"{r.alpha_vs_spy:+.3f}" if r.alpha_vs_spy is not None else "—",
+            f"{r.max_drawdown:.3f}" if r.max_drawdown is not None else "—",
+            str(r.n_trades) if r.n_trades is not None else "—",
+            gate,
+        )
+    console.print(table)
 
 
 if __name__ == "__main__":
