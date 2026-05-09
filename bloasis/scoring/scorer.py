@@ -461,12 +461,38 @@ class EDGARTextDiffScorer:
         *,
         top_pct: float = 0.10,
         continuous_score: bool = False,
+        signal_mode: str = "cosine",
+        length_blend_weight: float = 0.5,
     ) -> None:
         if not 0.0 < top_pct <= 1.0:
             raise ValueError(f"top_pct must be in (0, 1], got {top_pct}")
+        if signal_mode not in ("cosine", "length", "blend"):
+            raise ValueError(f"signal_mode must be one of cosine|length|blend, got {signal_mode!r}")
         self._cfg = cfg
         self._top_pct = top_pct
         self._continuous = continuous_score
+        self._signal_mode = signal_mode
+        self._length_weight = length_blend_weight
+
+    def _signal(self, fv: FeatureVector) -> float:
+        cos = float(fv.risk_factors_cosine)
+        lc = float(fv.risk_factors_len_change)
+        if self._signal_mode == "cosine":
+            return cos  # may be NaN
+        if self._signal_mode == "length":
+            # Large +/- change = bad (Cohen-Malloy). Long-only inverts:
+            # -|length change| ranks small-change firms highest.
+            if math.isnan(lc):
+                return float("nan")
+            return -abs(lc)
+        # blend: cosine - λ · |length change|. Both signals long the
+        # "stable disclosure" side. Falls back to cosine alone when
+        # length data missing.
+        if math.isnan(cos):
+            return float("nan")
+        if math.isnan(lc):
+            return cos
+        return cos - self._length_weight * abs(lc)
 
     def score_cross_section(
         self, fvs: list[FeatureVector], cvs: list[CompositeVector]
@@ -475,7 +501,7 @@ class EDGARTextDiffScorer:
             return []
         eligibles: list[tuple[int, float]] = []
         for i, fv in enumerate(fvs):
-            v = float(fv.risk_factors_cosine)
+            v = self._signal(fv)
             if not math.isnan(v):
                 eligibles.append((i, v))
 

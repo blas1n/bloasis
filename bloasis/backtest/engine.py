@@ -236,6 +236,8 @@ class Backtester:
         delisted_seen: set[str] = set()
 
         rebalance_days = max(1, self._cfg.signal.rebalance_days)
+        rebalance_tolerance = self._cfg.signal.rebalance_tolerance_pct
+        prev_buy_set: set[str] | None = None
         for i, d in enumerate(trading_days):
             # Rebalance only every N trading days (default 1 = daily). On
             # non-rebalance days, skip candidate build + signal gen, keep
@@ -258,6 +260,20 @@ class Backtester:
                     for p in portfolio.positions.values()
                 ]
                 signals = self._signal_gen.generate(candidates, held=held)
+
+                # PR20 — Tolerance-band rebalancing (Chitsiripanich-Paolella
+                # 2024). Skip rebalance entirely if today's BUY set differs
+                # from yesterday's by less than `rebalance_tolerance_pct` of
+                # current size — small drift = no churn. SELL signals (held
+                # but no longer eligible) always honored to avoid cash drag.
+                if rebalance_tolerance > 0 and prev_buy_set is not None:
+                    today_buy_set = {s.symbol for s in signals if s.action == "BUY"}
+                    union = prev_buy_set | today_buy_set
+                    if union:
+                        diff_frac = len(today_buy_set ^ prev_buy_set) / len(union)
+                        if diff_frac < rebalance_tolerance:
+                            signals = [s for s in signals if s.action == "SELL"]
+                prev_buy_set = {s.symbol for s in signals if s.action == "BUY"}
             else:
                 signals = []
 
@@ -439,11 +455,25 @@ class Backtester:
                     if pd.Timestamp(filed) <= pit_cutoff
                 ]
                 if len(eligible) >= 2:
-                    cur_filed, _cur_period, cur_text = eligible[-1]
-                    _prr_filed, _prr_period, prr_text = eligible[-2]
-                    cos = cosine_similarity(cur_text, prr_text)
-                    lc = length_change_pct(cur_text, prr_text)
-                    rf_cosine = cos if cos == cos else None
+                    # PR20 — rolling-window cosine: average the last N YoY
+                    # pairs available in `eligible`. window=1 is the PR18
+                    # default (single most-recent pair).
+                    window = max(1, self._cfg.scorer.edgar_rolling_window)
+                    pairs_available = len(eligible) - 1
+                    n_pairs = min(window, pairs_available)
+                    cosines: list[float] = []
+                    for k in range(n_pairs):
+                        cur_text = eligible[-(k + 1)][2]
+                        prr_text = eligible[-(k + 2)][2]
+                        c = cosine_similarity(cur_text, prr_text)
+                        if c == c:
+                            cosines.append(c)
+                    rf_cosine = sum(cosines) / len(cosines) if cosines else None
+                    # Length change still measured on the most-recent pair only
+                    # (rolling len-change averaging would mask the latest signal).
+                    cur_text_latest = eligible[-1][2]
+                    prr_text_latest = eligible[-2][2]
+                    lc = length_change_pct(cur_text_latest, prr_text_latest)
                     rf_len_change = lc if lc == lc else None
             try:
                 ctx = ExtractionContext(
@@ -701,6 +731,8 @@ class Backtester:
                 self._cfg.scorer,
                 top_pct=self._cfg.scorer.edgar_textdiff_top_pct,
                 continuous_score=self._cfg.scorer.continuous_score,
+                signal_mode=self._cfg.scorer.edgar_signal_mode,
+                length_blend_weight=self._cfg.scorer.edgar_length_blend_weight,
             )
         if self._cfg.scorer.type == "edgar_textdiff_jt_intersect":
             from bloasis.scoring.scorer import (
@@ -723,6 +755,8 @@ class Backtester:
                         self._cfg.scorer,
                         top_pct=self._cfg.scorer.edgar_textdiff_top_pct,
                         continuous_score=self._cfg.scorer.continuous_score,
+                        signal_mode=self._cfg.scorer.edgar_signal_mode,
+                        length_blend_weight=self._cfg.scorer.edgar_length_blend_weight,
                     ),
                 ],
             )
