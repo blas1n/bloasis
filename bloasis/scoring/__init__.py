@@ -17,7 +17,9 @@ from bloasis.scoring.rationale import FactorContribution, Rationale, ScoredCandi
 from bloasis.scoring.regime import classify_regime
 from bloasis.scoring.scorer import (
     EDGARTextDiffScorer,
+    Form8KEventScorer,
     FundamentalLLMScorer,
+    InsiderClusterScorer,
     IntersectScorer,
     JTMomentumScorer,
     LightGBMScorer,
@@ -35,7 +37,9 @@ __all__ = [
     "FactorContribution",
     "FeatureExtractor",
     "FeatureVector",
+    "Form8KEventScorer",
     "FundamentalLLMScorer",
+    "InsiderClusterScorer",
     "IntersectScorer",
     "JTMomentumScorer",
     "LightGBMScorer",

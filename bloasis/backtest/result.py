@@ -48,6 +48,10 @@ class BacktestData:
     # Outer dict: symbol → list of (filed_date, period_end, text), sorted
     # ascending by filed_date.
     risk_factors_history: dict[str, list[tuple[date, date, str]]] = field(default_factory=dict)
+    # PR20 — SEC Form 4 / 8-K filing dates per symbol. Engine counts
+    # the filings within configured windows when building ctx.
+    insider_filings_dates: dict[str, list[date]] = field(default_factory=dict)
+    form_8k_filings_dates: dict[str, list[date]] = field(default_factory=dict)
 
     def universe_at(self, d: date) -> list[str]:
         """Return symbols tradable on `d`. Falls back to `self.symbols` if no

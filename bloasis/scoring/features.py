@@ -70,6 +70,11 @@ FEATURE_COLUMNS: tuple[str, ...] = (
     # market-beta residual returns. Lower vol than raw momentum, no return
     # drop. Drop-in replacement for `momentum_252_21` to fix DD failures.
     "residual_momentum_252_21",
+    # PR20 — SEC Form 4 insider cluster + 8-K event recency. Form 4 count
+    # over 60d (alpha-architect insider-cluster), 8-K count over 30d
+    # (Cohen-Jackson-Mitts 8-K trading gap).
+    "insider_filings_60d",
+    "form_8k_filings_30d",
 )
 
 
@@ -139,6 +144,10 @@ class FeatureVector:
 
     # PR19 — Residual / idiosyncratic momentum
     residual_momentum_252_21: float = field(default_factory=_nan)
+
+    # PR20 — SEC Form 4 / 8-K activity windows
+    insider_filings_60d: float = field(default_factory=_nan)
+    form_8k_filings_30d: float = field(default_factory=_nan)
 
     FEATURE_COLUMNS: ClassVar[tuple[str, ...]] = FEATURE_COLUMNS
 

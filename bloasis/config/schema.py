@@ -79,6 +79,8 @@ ScorerType = Literal[
     "fundamental_llm_jt_intersect",
     "edgar_textdiff",
     "edgar_textdiff_jt_intersect",
+    "insider_cluster",
+    "form_8k_event",
 ]
 RegimeName = Literal["crisis", "bear", "sideways", "recovery", "bull"]
 
@@ -167,6 +169,12 @@ class ScorerConfig(BaseModel):
     # PR20 — Multi-filing rolling cosine. Engine averages cosine across the
     # last N YoY pairs before passing to the scorer. 1 = single-pair (PR18).
     edgar_rolling_window: int = Field(default=1, ge=1)
+
+    # PR20 — SEC Form 4 / 8-K activity scorer knobs
+    insider_top_pct: float = Field(default=0.10, gt=0.0, le=1.0)
+    insider_window_days: int = Field(default=60, gt=0)
+    form_8k_top_pct: float = Field(default=0.10, gt=0.0, le=1.0)
+    form_8k_window_days: int = Field(default=30, gt=0)
 
     @model_validator(mode="after")
     def _validate_thresholds(self) -> ScorerConfig:
