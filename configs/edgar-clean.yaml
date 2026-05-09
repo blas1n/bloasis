@@ -1,0 +1,109 @@
+# BLOASIS Production: EDGAR cosine clean (Phase 3D paper-gate first pass).
+#
+# Cohen-Malloy "Lazy Prices" 2020 — 10-K Risk Factors disclosure-change
+# signal. Top decile by year-over-year cosine similarity (HIGH cos =
+# stable disclosure = positive long-only candidate).
+#
+# Config rationale (see ~/Docs/bloasis/Phase3D_Final_Measurement_2026-05-09.md):
+# - signal.atr_stop_multiplier 100 / atr_tp_multiplier 100 / profit_tiers []:
+#   EDGAR is annual-filing-driven (low-turnover); friction settings have
+#   no measured effect on alpha or sharpe. Effectively disabled.
+# - signal.position_size_max_pct 0.02: 1/50 equal-weight across the top
+#   decile ≈ 50 stocks. Concentration grid showed pos 0.02 is the only
+#   variant that passes the DD gate.
+# - execution.market_slippage_bps 0 / fees_bps 0: also no measured
+#   effect on EDGAR signal — annual rebalance keeps trade count low.
+#
+# Measurement (SP500, 2022-2024, 7 walk-forward folds):
+#   median_alpha_annualized:    +0.0149 ✅ (paper-gate ≥ -0.005)
+#   median_sharpe_vs_spy:       0.997   ✅ (paper-gate ≥ 0.7; live-gate 1.0 by 0.003)
+#   median_max_dd_ratio_to_spy: 0.802   ✅ (paper-gate ≤ 0.85)
+#   passed_acceptance: YES — first bloasis config to clear all 4 gates.
+#
+# Multi-window robustness (sharpe / DD):
+#   2014-2019: 0.985 / 0.207
+#   2019-2022: 1.258 / 0.71
+#   2022-2024: 0.997 / 0.802
+#   alpha is era-dependent (positive only in 2022-2024); sharpe + DD robust.
+
+universe:
+  source: sp500
+  custom_csv_path: null
+
+pre_filter:
+  min_market_cap: 1_000_000_000
+  max_pe_ratio: 10000
+  min_dollar_volume: 5_000_000
+  exclude_sectors: []
+
+scorer:
+  type: edgar_textdiff
+  ml_model_path: null
+  edgar_textdiff_top_pct: 0.10
+  edgar_filing_lag_days: 90
+
+  weights:
+    value: 0.0
+    quality: 1.0
+    momentum: 0.0
+    technical: 0.0
+    volatility: 0.0
+    liquidity: 0.0
+    sentiment: 0.0
+  regime_multipliers: {}
+  thresholds:
+    rsi_oversold: 30.0
+    rsi_overbought: 70.0
+    strong_momentum_20d: 0.10
+    high_volatility_ann: 0.40
+    elevated_vix: 25.0
+    high_leverage_de: 2.0
+    strong_trend_adx: 25.0
+  entry_threshold: 0.65
+  exit_threshold: 0.40
+
+regime_overlay:
+  enabled: false
+  sigma_target: 0.12
+  vol_lookback_days: 126
+  bear_lookback_days: 504
+  bear_scale: 0.5
+  scale_clip: [0.0, 1.5]
+
+signal:
+  atr_stop_multiplier: 100.0
+  atr_tp_multiplier: 100.0
+  position_size_max_pct: 0.02
+  profit_tiers: []
+
+risk:
+  vix_extreme: 40.0
+  vix_high: 30.0
+  max_single_order_pct: 0.02
+  max_sector_concentration: 1.0
+
+execution:
+  fill_mode: limit_with_fallback
+  market_slippage_bps: 0
+  limit_offset_bps: 0
+  limit_timeout_bars: 1
+  fees_bps: 0
+  initial_capital: 10000.0
+
+data:
+  cache_dir: ~/.cache/bloasis
+  ohlcv_cache_max_age_hours: 24
+  fundamentals_cache_max_age_hours: 24
+  sentiment_cache_max_age_hours: 6
+  finnhub_rate_per_minute: 60
+  sentiment_lookback_days: 7
+
+allocation:
+  strategies:
+    - {name: bloasis_smart_beta, type: strategy, weight: 1.00}
+
+acceptance_criteria:
+  walk_forward_min_folds: 5
+  median_alpha_annualized: -0.005
+  median_sharpe_vs_spy: 0.7
+  median_max_dd_ratio_to_spy: 0.85
