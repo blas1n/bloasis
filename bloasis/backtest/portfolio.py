@@ -7,19 +7,58 @@ SL/TP enforcement happens here too: `check_stops()` returns implicit SELL
 fills when a held bar's high/low touches the stored stop or take-profit
 levels. This mirrors what a broker would do for resting OCO orders.
 
+PR49 — implements the `BrokerAdapter` protocol so the same per-step
+runner code drives backtest (executor=SimulatedPortfolio) and live
+(executor=AlpacaBrokerAdapter). When `data_panel` + `execution_cfg`
+are provided, `place_market_order` simulates fills against next-day
+bars internally; when omitted (legacy callers), `apply` is still the
+direct entry point.
+
 All state is in-memory; the engine persists to `equity_curve` and `trades`
 tables via `bloasis/storage/writers.py`.
 """
 
 from __future__ import annotations
 
+import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, date, datetime
 from typing import TYPE_CHECKING, Literal
 
+import pandas as pd
+
 if TYPE_CHECKING:
-    pass
+    from bloasis.broker.protocols import (
+        AccountInfo,
+        BrokerOrder,
+        BrokerPosition,
+        OrderResult,
+    )
+    from bloasis.config.schema import ExecutionConfig
+
+
+def _to_dt_from_ts(value: object) -> datetime:
+    """Convert a pandas Timestamp / numpy datetime to a tz-aware datetime."""
+    ts = pd.Timestamp(value)  # type: ignore[arg-type]
+    if ts.tzinfo is None:
+        ts = ts.tz_localize("UTC")
+    return ts.to_pydatetime()
+
+
+def _signal_ts_for_panel(signal_date: date, bars: pd.DataFrame | None) -> pd.Timestamp:
+    """Build a Timestamp for `signal_date` matching the panel's tz convention.
+
+    The engine strips tz from all data indices (`_normalize_tz`) for naive
+    comparison, but tests / live caches may keep UTC-aware indices. Detect
+    and match so `bars.index <= signal_ts` works in both cases.
+    """
+    naive = pd.Timestamp(signal_date.year, signal_date.month, signal_date.day)
+    if bars is None or bars.empty or not isinstance(bars.index, pd.DatetimeIndex):
+        return naive
+    if bars.index.tz is None:
+        return naive
+    return naive.tz_localize(bars.index.tz)
 
 
 @dataclass(slots=True)
@@ -52,19 +91,232 @@ class Fill:
 
 @dataclass(slots=True)
 class SimulatedPortfolio:
-    """Long-only simulated portfolio."""
+    """Long-only simulated portfolio.
+
+    PR49 — also implements the `BrokerAdapter` protocol so the strategy
+    runner can drive both backtest and live with the same code. The
+    `data_panel` / `execution_cfg` / `sectors` kwargs are optional for
+    backwards-compatibility with callers that only use `apply()` /
+    `mark()` / `check_stops()` directly.
+    """
 
     initial_capital: float
+    data_panel: dict[str, pd.DataFrame] | None = None
+    execution_cfg: ExecutionConfig | None = None
+    sectors: dict[str, str | None] | None = None
     cash: float = field(init=False)
     positions: dict[str, Position] = field(init=False)
     trade_count: int = field(init=False, default=0)
     realized_pnl_total: float = field(init=False, default=0.0)
     win_count: int = field(init=False, default=0)
     loss_count: int = field(init=False, default=0)
+    _current_date: date | None = field(init=False, default=None)
 
     def __post_init__(self) -> None:
         self.cash = float(self.initial_capital)
         self.positions = {}
+
+    # ------------------------------------------------------------------
+    # BrokerAdapter protocol (PR49)
+    # ------------------------------------------------------------------
+
+    @property
+    def mode(self) -> Literal["paper", "live", "offline"]:
+        return "offline"
+
+    def advance_clock(self, signal_date: date) -> None:
+        """Set the date stamp used by `place_market_order` to look up
+        next-day bars for fill simulation. Called once per strategy step
+        by the runner.
+        """
+        self._current_date = signal_date
+
+    def get_account(self) -> AccountInfo:
+        from bloasis.broker.protocols import AccountInfo
+
+        equity = self.total_equity()
+        return AccountInfo(cash=self.cash, equity=equity, buying_power=self.cash)
+
+    def get_positions(self) -> list[BrokerPosition]:
+        from bloasis.broker.protocols import BrokerPosition
+
+        return [
+            BrokerPosition(
+                symbol=p.symbol,
+                quantity=p.quantity,
+                avg_cost=p.avg_cost,
+                current_price=p.last_price,
+                market_value=p.quantity * p.last_price,
+            )
+            for p in self.positions.values()
+        ]
+
+    def cancel_order(self, order_id: str) -> bool:
+        """SimulatedPortfolio fills synchronously — there's nothing to cancel."""
+        return False
+
+    def place_market_order(self, order: BrokerOrder) -> OrderResult:
+        """Simulate a market order against the next-day bar from `data_panel`.
+
+        Requires both `data_panel` and `execution_cfg` to be set on the
+        portfolio. The runner ensures this; legacy direct callers still
+        use `apply()` instead.
+        """
+        from bloasis.broker.protocols import OrderResult
+
+        if self.data_panel is None or self.execution_cfg is None:
+            raise RuntimeError(
+                "SimulatedPortfolio.place_market_order requires data_panel "
+                "and execution_cfg at construction time"
+            )
+        if self._current_date is None:
+            raise RuntimeError("SimulatedPortfolio.place_market_order called before advance_clock")
+
+        bars = self.data_panel.get(order.symbol)
+        sector = self.sectors.get(order.symbol) if self.sectors else None
+        signal_ts = _signal_ts_for_panel(self._current_date, bars)
+        submitted_at = datetime.now(tz=UTC)
+        order_id = f"sim-{uuid.uuid4().hex[:12]}"
+
+        if bars is None or bars.empty:
+            return OrderResult(
+                order_id=order_id,
+                client_order_id=order.client_order_id,
+                status="rejected",
+                filled_qty=0.0,
+                filled_avg_price=0.0,
+                submitted_at=submitted_at,
+                reason="no bars available",
+            )
+
+        if order.side == "buy":
+            fill = self._simulate_buy_fill(order, bars, signal_ts, sector)
+        else:
+            fill = self._simulate_sell_fill(order, bars, signal_ts, sector)
+
+        if fill is None:
+            return OrderResult(
+                order_id=order_id,
+                client_order_id=order.client_order_id,
+                status="rejected",
+                filled_qty=0.0,
+                filled_avg_price=0.0,
+                submitted_at=submitted_at,
+                reason="no fill bar available",
+            )
+
+        applied = self.apply(fill)
+        return OrderResult(
+            order_id=order_id,
+            client_order_id=order.client_order_id,
+            status="filled",
+            filled_qty=applied.quantity,
+            filled_avg_price=applied.price,
+            submitted_at=submitted_at,
+        )
+
+    def _simulate_buy_fill(
+        self,
+        order: BrokerOrder,
+        bars: pd.DataFrame,
+        signal_ts: pd.Timestamp,
+        sector: str | None,
+    ) -> Fill | None:
+        """Replicate FillSimulator.simulate_buy logic for use inside the
+        portfolio. signal_close comes from the bar at signal_date, fill
+        executes on the next bar's open price (with execution_cfg slippage).
+        """
+        assert self.execution_cfg is not None
+        cfg = self.execution_cfg
+        signal_idx = bars.index[bars.index <= signal_ts]
+        if len(signal_idx) == 0:
+            return None
+        signal_close = float(bars.loc[signal_idx[-1], "close"])
+        forward = bars.loc[bars.index > signal_idx[-1]]
+        if forward.empty:
+            return None
+
+        if cfg.fill_mode == "market":
+            next_bar = forward.iloc[0]
+            open_price = float(next_bar["open"])
+            slippage = open_price * cfg.market_slippage_bps / 10_000
+            executed = open_price + slippage
+            return Fill(
+                timestamp=_to_dt_from_ts(next_bar.name),
+                symbol=order.symbol,
+                side="buy",
+                quantity=order.qty,
+                price=executed,
+                fees=order.qty * executed * cfg.fees_bps / 10_000,
+                slippage_bps=cfg.market_slippage_bps,
+                sector=sector,
+            )
+
+        # limit_with_fallback
+        limit_price = signal_close * (1 - cfg.limit_offset_bps / 10_000)
+        timeout = max(1, cfg.limit_timeout_bars)
+        candidate_bars = forward.iloc[:timeout]
+        for ts, bar in candidate_bars.iterrows():
+            low = float(bar["low"])
+            if low <= limit_price:
+                return Fill(
+                    timestamp=_to_dt_from_ts(ts),
+                    symbol=order.symbol,
+                    side="buy",
+                    quantity=order.qty,
+                    price=limit_price,
+                    fees=order.qty * limit_price * cfg.fees_bps / 10_000,
+                    slippage_bps=0.0,
+                    sector=sector,
+                )
+
+        # Fallback: market fill on bar after limit window expired.
+        fallback_bars = forward.iloc[timeout : timeout + 1]
+        if fallback_bars.empty:
+            return None
+        next_bar = fallback_bars.iloc[0]
+        open_price = float(next_bar["open"])
+        slippage = open_price * cfg.market_slippage_bps / 10_000
+        executed = open_price + slippage
+        return Fill(
+            timestamp=_to_dt_from_ts(next_bar.name),
+            symbol=order.symbol,
+            side="buy",
+            quantity=order.qty,
+            price=executed,
+            fees=order.qty * executed * cfg.fees_bps / 10_000,
+            slippage_bps=cfg.market_slippage_bps,
+            sector=sector,
+        )
+
+    def _simulate_sell_fill(
+        self,
+        order: BrokerOrder,
+        bars: pd.DataFrame,
+        signal_ts: pd.Timestamp,
+        sector: str | None,
+    ) -> Fill | None:
+        """Mirror Backtester._execute_sell — sell at next-day open with
+        market slippage."""
+        assert self.execution_cfg is not None
+        cfg = self.execution_cfg
+        forward = bars.loc[bars.index > signal_ts]
+        if forward.empty:
+            return None
+        next_bar = forward.iloc[0]
+        open_price = float(next_bar["open"])
+        slippage = open_price * cfg.market_slippage_bps / 10_000
+        executed = open_price - slippage
+        return Fill(
+            timestamp=_to_dt_from_ts(next_bar.name),
+            symbol=order.symbol,
+            side="sell",
+            quantity=order.qty,
+            price=executed,
+            fees=order.qty * executed * cfg.fees_bps / 10_000,
+            slippage_bps=cfg.market_slippage_bps,
+            sector=sector,
+        )
 
     # ------------------------------------------------------------------
     # state queries

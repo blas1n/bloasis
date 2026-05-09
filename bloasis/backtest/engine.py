@@ -57,10 +57,10 @@ from bloasis.scoring.extractor import ExtractionContext, FeatureExtractor
 from bloasis.scoring.features import FeatureVector
 from bloasis.scoring.regime_overlay import (
     RegimeOverlayParams,
-    compute_regime_scale,
 )
 from bloasis.scoring.scorer import RuleBasedScorer, Scorer
-from bloasis.signal import CandidateData, HeldPosition, SignalGenerator, TradingSignal
+from bloasis.signal import CandidateData, HeldPosition, SignalGenerator
+from bloasis.strategy.runner import execute_strategy_step
 
 if TYPE_CHECKING:
     from sqlalchemy import Engine
@@ -213,7 +213,18 @@ class Backtester:
         run_id: int,
     ) -> tuple[FoldResult, int, int]:
         capital = self._cfg.execution.initial_capital
-        portfolio = SimulatedPortfolio(initial_capital=capital)
+        # PR49 — SimulatedPortfolio implements BrokerAdapter and is wired
+        # with the data panel + execution config so the strategy runner
+        # (shared with live) can call place_market_order on it for fill
+        # simulation. Stop-loss / mark-to-market still happen here at the
+        # fold loop level since they're backtest-specific (live delegates
+        # SL/TP to broker bracket orders, future PR).
+        portfolio = SimulatedPortfolio(
+            initial_capital=capital,
+            data_panel=self._data.bars,
+            execution_cfg=self._cfg.execution,
+            sectors=self._data.sectors,
+        )
 
         # Trading days in test window (intersect with SPY index for safety).
         trading_days = self._trading_days(window.test_start, window.test_end)
@@ -236,19 +247,28 @@ class Backtester:
         delisted_seen: set[str] = set()
 
         rebalance_days = max(1, self._cfg.signal.rebalance_days)
-        rebalance_tolerance = self._cfg.signal.rebalance_tolerance_pct
         prev_buy_set: set[str] | None = None
         for i, d in enumerate(trading_days):
+            today_dt = _to_dt(d)
+            portfolio.advance_clock(d)
+
             # Rebalance only every N trading days (default 1 = daily). On
             # non-rebalance days, skip candidate build + signal gen, keep
             # only stop-loss / profit-tier evaluation + mark-to-market.
             is_rebalance_day = (i % rebalance_days) == 0
             if is_rebalance_day:
-                # 1. Build candidates for today.
                 candidates, day_features = self._build_candidates(d, scorer)
                 fold_feature_vectors.extend(day_features)
 
-                # 2. Generate signals.
+                vix_today = float(
+                    self._data.vix_series.loc[: cast(pd.Timestamp, today_dt)].iloc[-1]
+                )
+                market_state = MarketState(timestamp=today_dt, vix=vix_today)
+                portfolio_state = PortfolioState(
+                    total_value=portfolio.total_equity(),
+                    sector_concentrations=portfolio.sector_concentrations(),
+                )
+                spy_returns_to_date = self._spy_daily_returns.loc[: cast(pd.Timestamp, today_dt)]
                 held = [
                     HeldPosition(
                         symbol=p.symbol,
@@ -259,68 +279,48 @@ class Backtester:
                     )
                     for p in portfolio.positions.values()
                 ]
-                signals = self._signal_gen.generate(candidates, held=held)
-
-                # PR20 — Tolerance-band rebalancing (Chitsiripanich-Paolella
-                # 2024). Skip rebalance entirely if today's BUY set differs
-                # from yesterday's by less than `rebalance_tolerance_pct` of
-                # current size — small drift = no churn. SELL signals (held
-                # but no longer eligible) always honored to avoid cash drag.
-                if rebalance_tolerance > 0 and prev_buy_set is not None:
-                    today_buy_set = {s.symbol for s in signals if s.action == "BUY"}
-                    union = prev_buy_set | today_buy_set
-                    if union:
-                        diff_frac = len(today_buy_set ^ prev_buy_set) / len(union)
-                        if diff_frac < rebalance_tolerance:
-                            signals = [s for s in signals if s.action == "SELL"]
-                prev_buy_set = {s.symbol for s in signals if s.action == "BUY"}
-            else:
-                signals = []
-
-            # 3. Risk evaluation + fills.
-            today_dt = _to_dt(d)
-            vix_today = float(self._data.vix_series.loc[: cast(pd.Timestamp, today_dt)].iloc[-1])
-            market_state = MarketState(timestamp=today_dt, vix=vix_today)
-            equity_for_sizing = portfolio.total_equity()
-
-            # PR12: regime overlay scales BUY size_pct (BSC constant-vol +
-            # DM bear gate). Computed once per timestep using SPY returns
-            # up to today (no look-ahead — pct_change already excludes today
-            # if today's bar isn't yet in the series; we slice <= today_dt).
-            spy_returns_to_date = self._spy_daily_returns.loc[: cast(pd.Timestamp, today_dt)]
-            regime_scale = compute_regime_scale(spy_returns_to_date, params=self._overlay_params)
-
-            for sig in signals:
-                portfolio_state = PortfolioState(
-                    total_value=equity_for_sizing,
-                    sector_concentrations=portfolio.sector_concentrations(),
+                step = execute_strategy_step(
+                    cfg=self._cfg,
+                    candidates=candidates,
+                    held_positions=held,
+                    market_state=market_state,
+                    spy_returns_to_date=spy_returns_to_date,
+                    portfolio_state=portfolio_state,
+                    signal_date=today_dt,
+                    executor=portfolio,
+                    prev_buy_set=prev_buy_set,
+                    label="bt",
                 )
-                decision = self._risk.evaluate(sig, portfolio_state, market_state)
-                if decision.action == "REJECT":
-                    continue
-                size_pct = (
-                    decision.adjusted_size_pct
-                    if decision.adjusted_size_pct is not None
-                    else sig.target_size_pct
-                )
-
-                if sig.action == "BUY":
-                    # Regime overlay applies only to entries; SELLs always
-                    # exit fully (no size adjustment).
-                    sized = size_pct * regime_scale
-                    fill = self._execute_buy(
-                        sig=sig,
-                        size_pct=sized,
-                        equity=equity_for_sizing,
-                        portfolio=portfolio,
-                        signal_date=today_dt,
+                prev_buy_set = step.new_buy_set
+                # The runner already mutated portfolio state via place_market_order.
+                # Map each submitted order back to a Fill + rationale so we can
+                # persist later. portfolio.apply (called inside place_market_order)
+                # has already updated cash + positions, so we re-derive a Fill
+                # representation from the OrderResult for downstream persistence.
+                for order, order_result, sig in step.submitted:
+                    if order_result.status != "filled":
+                        continue
+                    # Attach SL/TP for BUYs so portfolio.check_stops can
+                    # fire on subsequent bars (live delegates to broker
+                    # bracket orders — backtest still does this in-portfolio).
+                    if order.side == "buy":
+                        portfolio.attach_levels(
+                            order.symbol,
+                            stop_loss=sig.stop_loss,
+                            take_profit=sig.take_profit,
+                        )
+                    fill = Fill(
+                        timestamp=order_result.submitted_at,
+                        symbol=order.symbol,
+                        side=order.side,
+                        quantity=order_result.filled_qty,
+                        price=order_result.filled_avg_price,
+                        fees=0.0,
+                        slippage_bps=self._cfg.execution.market_slippage_bps,
+                        sector=self._data.sectors.get(order.symbol),
+                        reason=sig.reason,
                     )
-                    if fill is not None:
-                        fold_fills.append((fill, sig.score_breakdown))
-                elif sig.action == "SELL":
-                    fill = self._execute_sell(sig, today_dt, portfolio)
-                    if fill is not None:
-                        fold_fills.append((fill, sig.score_breakdown))
+                    fold_fills.append((fill, sig.score_breakdown))
 
             # 4. SL/TP enforcement on today's bar (after fills above).
             bars_today = self._bars_today(portfolio.held_symbols(), d)
@@ -551,81 +551,9 @@ class Backtester:
     # order execution helpers
     # ------------------------------------------------------------------
 
-    def _execute_buy(
-        self,
-        *,
-        sig: TradingSignal,
-        size_pct: float,
-        equity: float,
-        portfolio: SimulatedPortfolio,
-        signal_date: datetime,
-    ) -> Fill | None:
-        """Returns the applied Fill (for DB write) or None if no order placed."""
-        target_dollars = equity * size_pct
-        if target_dollars <= 0 or sig.entry_price is None:
-            return None
-        quantity = target_dollars / float(sig.entry_price)
-        if quantity <= 0:
-            return None
-        bars = self._data.bars.get(sig.symbol)
-        if bars is None or bars.empty:
-            return None
-        fill = self._fills.simulate_buy(
-            symbol=sig.symbol,
-            quantity=quantity,
-            signal_date=signal_date,
-            signal_close=float(sig.entry_price),
-            bars=bars,
-            sector=sig.sector,
-            reason=sig.reason,
-        )
-        if fill is None:
-            return None
-        # Refuse if the fill would overdraw cash (slack from risk-eval rounding).
-        cost = fill.quantity * fill.price + fill.fees
-        if cost > portfolio.cash + 1e-6:
-            return None
-        applied = portfolio.apply(fill)
-        portfolio.attach_levels(
-            sig.symbol,
-            stop_loss=sig.stop_loss,
-            take_profit=sig.take_profit,
-        )
-        return applied
-
-    def _execute_sell(
-        self,
-        sig: TradingSignal,
-        timestamp: datetime,
-        portfolio: SimulatedPortfolio,
-    ) -> Fill | None:
-        """Returns the applied SELL Fill or None if nothing to sell."""
-        pos = portfolio.positions.get(sig.symbol)
-        if pos is None:
-            return None
-        # SELL the entire position at next-day open + slippage.
-        bars = self._data.bars.get(sig.symbol)
-        if bars is None:
-            return None
-        forward = bars.loc[bars.index > timestamp]
-        if forward.empty:
-            return None
-        next_bar = forward.iloc[0]
-        open_price = float(next_bar["open"])
-        slippage = open_price * self._cfg.execution.market_slippage_bps / 10_000
-        executed = open_price - slippage
-        fill = Fill(
-            timestamp=_to_dt_from_ts(next_bar.name),
-            symbol=sig.symbol,
-            side="sell",
-            quantity=pos.quantity,
-            price=executed,
-            fees=pos.quantity * executed * self._cfg.execution.fees_bps / 10_000,
-            slippage_bps=self._cfg.execution.market_slippage_bps,
-            sector=pos.sector,
-            reason=sig.reason,
-        )
-        return portfolio.apply(fill)
+    # PR49 — _execute_buy / _execute_sell were removed; the strategy
+    # runner now drives both via SimulatedPortfolio.place_market_order
+    # (which uses FillSimulator-equivalent logic internally).
 
     # ------------------------------------------------------------------
     # data-access helpers
