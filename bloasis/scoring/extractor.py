@@ -20,6 +20,7 @@ from bloasis.scoring.derived import (
     kbar_kmid2,
     kbar_ksft2,
     momentum,
+    residual_momentum,
     vix_zscore_60d,
     volatility_annualized,
     volume_ratio,
@@ -239,6 +240,13 @@ class FeatureExtractor:
                 float("nan")
                 if ctx.risk_factors_len_change is None
                 else float(ctx.risk_factors_len_change)
+            ),
+            # PR19 — Residual momentum (Blitz-Hanauer-Vidojevic 2020). NaN
+            # if SPY series unavailable (live path may pass None).
+            residual_momentum_252_21=(
+                residual_momentum(close, ctx.spy_close_series, lookback=252, skip=21)
+                if ctx.spy_close_series is not None and not ctx.spy_close_series.empty
+                else float("nan")
             ),
         )
 

@@ -101,6 +101,8 @@ feature_log = Table(
     # Phase 3D — 10-K text-diff signals
     Column("risk_factors_cosine", Float, nullable=True),
     Column("risk_factors_len_change", Float, nullable=True),
+    # PR19 — Residual momentum (Blitz-Hanauer-Vidojevic 2020)
+    Column("residual_momentum_252_21", Float, nullable=True),
     # Forward labels (filled async by labeling job)
     Column("forward_return_5d", Float, nullable=True),
     Column("forward_return_20d", Float, nullable=True),
