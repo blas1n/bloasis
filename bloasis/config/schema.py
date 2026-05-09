@@ -142,6 +142,13 @@ class ScorerConfig(BaseModel):
     # drawdown failure — same return, half the vol.
     jt_residual: bool = False
 
+    # PR19 — Continuous score mode (vs binary 0.99/0.0). When true, scorer
+    # emits percentile-rank scores in [0, 1] so the entry/exit threshold
+    # gap (0.65 / 0.40 default) creates hysteresis: middle-ranked stocks
+    # stay held rather than churning. Applies to JTMomentumScorer +
+    # EDGARTextDiffScorer.
+    continuous_score: bool = False
+
     pead_top_pct: float = Field(default=0.10, gt=0.0, le=1.0)
     pead_drift_days: int = Field(default=60, gt=0)
 

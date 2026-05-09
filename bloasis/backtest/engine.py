@@ -678,6 +678,7 @@ class Backtester:
                         top_pct=self._cfg.scorer.jt_top_pct,
                         vol_scale=self._cfg.scorer.jt_vol_scale,
                         residual=self._cfg.scorer.jt_residual,
+                        continuous_score=self._cfg.scorer.continuous_score,
                     ),
                     PEADScorer(
                         self._cfg.scorer,
@@ -699,6 +700,7 @@ class Backtester:
             return EDGARTextDiffScorer(
                 self._cfg.scorer,
                 top_pct=self._cfg.scorer.edgar_textdiff_top_pct,
+                continuous_score=self._cfg.scorer.continuous_score,
             )
         if self._cfg.scorer.type == "edgar_textdiff_jt_intersect":
             from bloasis.scoring.scorer import (
@@ -715,10 +717,12 @@ class Backtester:
                         top_pct=self._cfg.scorer.jt_top_pct,
                         vol_scale=self._cfg.scorer.jt_vol_scale,
                         residual=self._cfg.scorer.jt_residual,
+                        continuous_score=self._cfg.scorer.continuous_score,
                     ),
                     EDGARTextDiffScorer(
                         self._cfg.scorer,
                         top_pct=self._cfg.scorer.edgar_textdiff_top_pct,
+                        continuous_score=self._cfg.scorer.continuous_score,
                     ),
                 ],
             )
@@ -737,6 +741,7 @@ class Backtester:
                         top_pct=self._cfg.scorer.jt_top_pct,
                         vol_scale=self._cfg.scorer.jt_vol_scale,
                         residual=self._cfg.scorer.jt_residual,
+                        continuous_score=self._cfg.scorer.continuous_score,
                     ),
                     FundamentalLLMScorer(
                         self._cfg.scorer,

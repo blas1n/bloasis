@@ -340,6 +340,7 @@ class JTMomentumScorer:
         top_pct: float = 0.10,
         vol_scale: bool = False,
         residual: bool = False,
+        continuous_score: bool = False,
     ) -> None:
         if not 0.0 < top_pct <= 1.0:
             raise ValueError(f"top_pct must be in (0, 1], got {top_pct}")
@@ -347,6 +348,7 @@ class JTMomentumScorer:
         self._top_pct = top_pct
         self._vol_scale = vol_scale
         self._residual = residual
+        self._continuous = continuous_score
 
     def _signal(self, fv: FeatureVector) -> float:
         # Residual momentum (Blitz-Hanauer-Vidojevic 2020) is the academic
@@ -375,15 +377,20 @@ class JTMomentumScorer:
             if not math.isnan(sig):
                 valid_indices.append((i, sig))
 
-        # Top-decile cutoff. Always at least 1 if any are valid.
-        n_select = max(1, int(len(valid_indices) * self._top_pct)) if valid_indices else 0
-        valid_sorted = sorted(valid_indices, key=lambda t: t[1], reverse=True)
-        top_indices = {idx for idx, _mom in valid_sorted[:n_select]}
+        if self._continuous:
+            # Percentile-rank continuous score in [0, 1]. Lets entry/exit
+            # threshold gap (hysteresis) keep middle-ranked stocks held
+            # rather than cycling. NaN signal → score 0.0.
+            scores_by_idx = _percentile_scores(valid_indices, len(fvs))
+        else:
+            n_select = max(1, int(len(valid_indices) * self._top_pct)) if valid_indices else 0
+            valid_sorted = sorted(valid_indices, key=lambda t: t[1], reverse=True)
+            top_indices = {idx for idx, _mom in valid_sorted[:n_select]}
+            scores_by_idx = {i: (0.99 if i in top_indices else 0.0) for i in range(len(fvs))}
 
         out: list[ScoredCandidate] = []
         for i, fv in enumerate(fvs):
-            sig = self._signal(fv)
-            score = 0.0 if math.isnan(sig) else (0.99 if i in top_indices else 0.0)
+            score = scores_by_idx.get(i, 0.0)
             out.append(self._build_scored(fv, score=score, momentum=float(fv.momentum_252_21)))
         return out
 
@@ -413,6 +420,25 @@ class JTMomentumScorer:
         )
 
 
+def _percentile_scores(valid_indices: list[tuple[int, float]], n_total: int) -> dict[int, float]:
+    """Map (index, signal) pairs to [0, 1] percentile-rank scores.
+
+    Higher signal → higher score. Indexes not in `valid_indices` get 0.0.
+    Single-valid degenerate case returns 0.5.
+    """
+    out: dict[int, float] = dict.fromkeys(range(n_total), 0.0)
+    if not valid_indices:
+        return out
+    sorted_by_signal = sorted(valid_indices, key=lambda t: t[1])  # ascending
+    n = len(sorted_by_signal)
+    if n == 1:
+        out[sorted_by_signal[0][0]] = 0.5
+        return out
+    for rank, (idx, _sig) in enumerate(sorted_by_signal):
+        out[idx] = rank / (n - 1)
+    return out
+
+
 class EDGARTextDiffScorer:
     """Phase 3 Candidate D-textdiff — Cohen-Malloy "Lazy Prices" 2020 inverted.
 
@@ -429,11 +455,18 @@ class EDGARTextDiffScorer:
     `bloasis.scoring.edgar_textdiff`).
     """
 
-    def __init__(self, cfg: ScorerConfig, *, top_pct: float = 0.10) -> None:
+    def __init__(
+        self,
+        cfg: ScorerConfig,
+        *,
+        top_pct: float = 0.10,
+        continuous_score: bool = False,
+    ) -> None:
         if not 0.0 < top_pct <= 1.0:
             raise ValueError(f"top_pct must be in (0, 1], got {top_pct}")
         self._cfg = cfg
         self._top_pct = top_pct
+        self._continuous = continuous_score
 
     def score_cross_section(
         self, fvs: list[FeatureVector], cvs: list[CompositeVector]
@@ -445,13 +478,18 @@ class EDGARTextDiffScorer:
             v = float(fv.risk_factors_cosine)
             if not math.isnan(v):
                 eligibles.append((i, v))
-        n_select = max(1, int(len(eligibles) * self._top_pct)) if eligibles else 0
-        eligibles_sorted = sorted(eligibles, key=lambda t: t[1], reverse=True)
-        top_indices = {idx for idx, _v in eligibles_sorted[:n_select]}
+
+        if self._continuous:
+            scores_by_idx = _percentile_scores(eligibles, len(fvs))
+        else:
+            n_select = max(1, int(len(eligibles) * self._top_pct)) if eligibles else 0
+            eligibles_sorted = sorted(eligibles, key=lambda t: t[1], reverse=True)
+            top_indices = {idx for idx, _v in eligibles_sorted[:n_select]}
+            scores_by_idx = {i: (0.99 if i in top_indices else 0.0) for i in range(len(fvs))}
+
         out: list[ScoredCandidate] = []
         for i, fv in enumerate(fvs):
-            score = 0.99 if i in top_indices else 0.0
-            out.append(self._build_scored(fv, score=score))
+            out.append(self._build_scored(fv, score=scores_by_idx.get(i, 0.0)))
         return out
 
     def score(self, fv: FeatureVector, cv: CompositeVector) -> ScoredCandidate:
