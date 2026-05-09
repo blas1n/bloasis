@@ -1,0 +1,119 @@
+# BLOASIS baseline strategy config — PR18 v3 (Phase 0 redesign).
+#
+# Pure rank-based Jegadeesh-Titman 12-1 momentum. Single signal:
+# top-decile of momentum_252_21 → buy candidate, others rejected.
+#
+# Why: PR12-17 measurement (~/Docs/bloasis/Phase2_Postmortem_2026-05-07.md)
+# showed bloasis's 7-composite blend + cross-section threshold framework
+# structurally fails to clear acceptance on long-only S&P 500. The post-
+# mortem identified the JT 12-1 standalone pilot (sharpe 1.21, alpha
+# +7.6%) as the only ship-ready signal in the codebase.
+#
+# Phase 0 mandate: ship JT alone. No composites, no overlay, no thresholds.
+# Score is rank-based — top top_pct passes entry threshold (0.99), all
+# others fail (0.0). Sole tunable: top_pct (default 10%).
+#
+# Acceptance gate set to paper-trading thresholds (mission.md §Paper-trading
+# gate, M2 entry). Live-money still gated separately.
+#
+# See ~/Docs/bloasis/Redesign_Brief_2026-05-07.md §Path E.
+
+universe:
+  source: sp500
+  custom_csv_path: null
+
+pre_filter:
+  min_market_cap: 1_000_000_000
+  max_pe_ratio: 25
+  min_dollar_volume: 5_000_000
+  exclude_sectors: []
+
+scorer:
+  type: jt_momentum
+  ml_model_path: null
+  jt_top_pct: 0.10           # top 10% by momentum_252_21 → entry candidate
+
+  # Composite weights are unused by JTMomentumScorer but schema requires
+  # them. Set to neutral; do not interpret.
+  weights:
+    value: 0.0
+    quality: 0.0
+    momentum: 1.0
+    technical: 0.0
+    volatility: 0.0
+    liquidity: 0.0
+    sentiment: 0.0
+
+  regime_multipliers: {}
+
+  thresholds:
+    rsi_oversold: 30.0
+    rsi_overbought: 70.0
+    strong_momentum_20d: 0.10
+    high_volatility_ann: 0.40
+    elevated_vix: 25.0
+    high_leverage_de: 2.0
+    strong_trend_adx: 25.0
+
+  # JT scorer emits 0.99 for top decile, 0.0 otherwise. Defaults work but
+  # we keep entry/exit explicit for clarity in `bloasis runs show`.
+  entry_threshold: 0.65
+  exit_threshold: 0.40
+
+# No regime overlay — Phase 0 is pure JT to isolate signal quality from
+# overlay effects. Re-add as Phase 1 if Phase 0 clears acceptance.
+regime_overlay:
+  enabled: false
+  sigma_target: 0.12
+  vol_lookback_days: 126
+  bear_lookback_days: 504
+  bear_scale: 0.5
+  scale_clip: [0.0, 1.5]
+
+signal:
+  atr_stop_multiplier: 2.0
+  atr_tp_multiplier: 3.0
+  position_size_max_pct: 0.10
+  profit_tiers:
+    - {fraction: 0.33, type: target,   atr_mult: 1.5}
+    - {fraction: 0.33, type: target,   atr_mult: 3.0}
+    - {fraction: 0.34, type: trailing, atr_mult: 2.0}
+
+risk:
+  vix_extreme: 40.0
+  vix_high: 30.0
+  max_single_order_pct: 0.10
+  max_sector_concentration: 0.30
+
+execution:
+  fill_mode: limit_with_fallback
+  market_slippage_bps: 5
+  limit_offset_bps: 10
+  limit_timeout_bars: 1
+  fees_bps: 0
+  initial_capital: 10000.0
+
+data:
+  cache_dir: ~/.cache/bloasis
+  ohlcv_cache_max_age_hours: 24
+  fundamentals_cache_max_age_hours: 24
+  sentiment_cache_max_age_hours: 6
+  finnhub_rate_per_minute: 60
+  sentiment_lookback_days: 7
+
+allocation:
+  strategies:
+    - name: core_spy
+      type: spy_passive
+      weight: 0.70
+    - name: bloasis_smart_beta
+      type: strategy
+      weight: 0.30
+
+# Paper-trading gate (mission.md §Paper-trading gate). Live-money still
+# requires sharpe >= 1.0 + 6-month paper track record.
+acceptance_criteria:
+  walk_forward_min_folds: 5
+  median_alpha_annualized: -0.005
+  median_sharpe_vs_spy: 0.7
+  median_max_dd_ratio_to_spy: 0.85

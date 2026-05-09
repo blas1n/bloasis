@@ -118,6 +118,19 @@ class Backtester:
             bear_scale=cfg.regime_overlay.bear_scale,
             scale_clip=cfg.regime_overlay.scale_clip,
         )
+        # Phase 3 LLM fundamental scorer (lazy: only constructed when needed).
+        self._llm_fundamental_scorer = None
+        if cfg.scorer.type in ("fundamental_llm", "fundamental_llm_jt_intersect"):
+            from bloasis.scoring.llm_fundamental import LLMConfig, LLMFundamentalScorer
+
+            cache_dir = (cfg.data.cache_dir / "fundamental_llm").expanduser()
+            self._llm_fundamental_scorer = LLMFundamentalScorer(
+                cache_dir=cache_dir,
+                llm=LLMConfig(
+                    model=cfg.scorer.fundamental_llm_model,
+                    api_base=cfg.scorer.fundamental_llm_api_base,
+                ),
+            )
 
     # ------------------------------------------------------------------
     # public entry point
@@ -372,6 +385,58 @@ class Backtester:
             sliced = bars.loc[:ts_pd]
             if len(sliced) < MIN_BARS_FOR_FEATURES:
                 continue
+            earnings_slice: pd.DataFrame | None = None
+            full_earnings = self._data.earnings_history.get(sym)
+            if full_earnings is not None and not full_earnings.empty:
+                earnings_slice = full_earnings.loc[full_earnings.index < ts_pd]
+
+            # Phase 3 LLM fundamental: pull last annual statement before
+            # timestamp (with 90-day filing lag for PIT correctness — 10-K
+            # is typically released 60-90 days after fiscal year-end), score
+            # via LLM (cached).
+            llm_score: float | None = None
+            if self._llm_fundamental_scorer is not None:
+                fin = self._data.quarterly_financials.get(sym)
+                if fin is not None and not fin.empty:
+                    pit_cutoff = ts_pd - pd.Timedelta(days=90)
+                    past = fin.loc[fin.index <= pit_cutoff]
+                    if not past.empty:
+                        last_row = past.iloc[-1]
+                        last_qe = past.index[-1].to_pydatetime()
+                        # Preserve all canonical fields incl. NaN — scorer
+                        # short-circuits on NaN inputs, prompt expects every
+                        # field present.
+                        s = self._llm_fundamental_scorer.score(
+                            sym, last_qe, {str(k): float(v) for k, v in last_row.items()}
+                        )
+                        llm_score = s if s == s else None  # NaN → None
+
+            # Phase 3D — 10-K text-diff (cosine + length change) at most
+            # recent filing ≤ ts_pd - filing_lag (PIT correctness).
+            rf_cosine: float | None = None
+            rf_len_change: float | None = None
+            rf_history = self._data.risk_factors_history.get(sym)
+            if rf_history and len(rf_history) >= 2:
+                from bloasis.scoring.edgar_textdiff import (
+                    cosine_similarity,
+                    length_change_pct,
+                )
+
+                lag = pd.Timedelta(days=self._cfg.scorer.edgar_filing_lag_days)
+                pit_cutoff = ts_pd - lag
+                # Find the most recent filing ≤ pit_cutoff and its prior.
+                eligible = [
+                    (filed, period, text)
+                    for filed, period, text in rf_history
+                    if pd.Timestamp(filed) <= pit_cutoff
+                ]
+                if len(eligible) >= 2:
+                    cur_filed, _cur_period, cur_text = eligible[-1]
+                    _prr_filed, _prr_period, prr_text = eligible[-2]
+                    cos = cosine_similarity(cur_text, prr_text)
+                    lc = length_change_pct(cur_text, prr_text)
+                    rf_cosine = cos if cos == cos else None
+                    rf_len_change = lc if lc == lc else None
             try:
                 ctx = ExtractionContext(
                     timestamp=ts,
@@ -382,6 +447,10 @@ class Backtester:
                     fundamentals={},
                     vix_series=self._data.vix_series.loc[:ts_pd],
                     spy_close_series=self._data.spy_close_series.loc[:ts_pd],
+                    earnings_history=earnings_slice,
+                    fundamental_llm_score=llm_score,
+                    risk_factors_cosine=rf_cosine,
+                    risk_factors_len_change=rf_len_change,
                 )
             except ValueError:
                 # Skip symbols that fail look-ahead assertions (data weirdness).
@@ -569,6 +638,100 @@ class Backtester:
             from bloasis.scoring.scorer import LightGBMScorer
 
             return LightGBMScorer(cfg=self._cfg.scorer)
+        if self._cfg.scorer.type == "jt_momentum":
+            from bloasis.scoring.scorer import JTMomentumScorer
+
+            return JTMomentumScorer(
+                self._cfg.scorer,
+                top_pct=self._cfg.scorer.jt_top_pct,
+                vol_scale=self._cfg.scorer.jt_vol_scale,
+            )
+        if self._cfg.scorer.type == "pead":
+            from bloasis.scoring.scorer import PEADScorer
+
+            return PEADScorer(
+                self._cfg.scorer,
+                top_pct=self._cfg.scorer.pead_top_pct,
+                drift_days=self._cfg.scorer.pead_drift_days,
+            )
+        if self._cfg.scorer.type == "pead_jt_intersect":
+            from bloasis.scoring.scorer import (
+                IntersectScorer,
+                JTMomentumScorer,
+                PEADScorer,
+            )
+
+            return IntersectScorer(
+                self._cfg.scorer,
+                sub_scorers=[
+                    JTMomentumScorer(
+                        self._cfg.scorer,
+                        top_pct=self._cfg.scorer.jt_top_pct,
+                        vol_scale=self._cfg.scorer.jt_vol_scale,
+                    ),
+                    PEADScorer(
+                        self._cfg.scorer,
+                        top_pct=self._cfg.scorer.pead_top_pct,
+                        drift_days=self._cfg.scorer.pead_drift_days,
+                    ),
+                ],
+            )
+        if self._cfg.scorer.type == "fundamental_llm":
+            from bloasis.scoring.scorer import FundamentalLLMScorer
+
+            return FundamentalLLMScorer(
+                self._cfg.scorer,
+                top_pct=self._cfg.scorer.fundamental_llm_top_pct,
+            )
+        if self._cfg.scorer.type == "edgar_textdiff":
+            from bloasis.scoring.scorer import EDGARTextDiffScorer
+
+            return EDGARTextDiffScorer(
+                self._cfg.scorer,
+                top_pct=self._cfg.scorer.edgar_textdiff_top_pct,
+            )
+        if self._cfg.scorer.type == "edgar_textdiff_jt_intersect":
+            from bloasis.scoring.scorer import (
+                EDGARTextDiffScorer,
+                IntersectScorer,
+                JTMomentumScorer,
+            )
+
+            return IntersectScorer(
+                self._cfg.scorer,
+                sub_scorers=[
+                    JTMomentumScorer(
+                        self._cfg.scorer,
+                        top_pct=self._cfg.scorer.jt_top_pct,
+                        vol_scale=self._cfg.scorer.jt_vol_scale,
+                    ),
+                    EDGARTextDiffScorer(
+                        self._cfg.scorer,
+                        top_pct=self._cfg.scorer.edgar_textdiff_top_pct,
+                    ),
+                ],
+            )
+        if self._cfg.scorer.type == "fundamental_llm_jt_intersect":
+            from bloasis.scoring.scorer import (
+                FundamentalLLMScorer,
+                IntersectScorer,
+                JTMomentumScorer,
+            )
+
+            return IntersectScorer(
+                self._cfg.scorer,
+                sub_scorers=[
+                    JTMomentumScorer(
+                        self._cfg.scorer,
+                        top_pct=self._cfg.scorer.jt_top_pct,
+                        vol_scale=self._cfg.scorer.jt_vol_scale,
+                    ),
+                    FundamentalLLMScorer(
+                        self._cfg.scorer,
+                        top_pct=self._cfg.scorer.fundamental_llm_top_pct,
+                    ),
+                ],
+            )
         return RuleBasedScorer(self._cfg.scorer)
 
     def _fold_result(

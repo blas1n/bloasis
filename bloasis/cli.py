@@ -876,11 +876,74 @@ def backtest(
         )
     market_ctx = market.fetch(fetch_start, end_d)
 
+    # Phase 3 PEAD: only fetch earnings if the scorer requires them.
+    earnings_history: dict[str, pd.DataFrame] = {}
+    if cfg.scorer.type in ("pead", "pead_jt_intersect"):
+        from bloasis.data.fetchers.yfinance_earnings import YfEarningsFetcher
+
+        earnings_cache = ParquetCache(cfg.data.cache_dir, namespace="earnings")
+        earnings_fetcher = YfEarningsFetcher(
+            cache=earnings_cache,
+            max_age_hours=cfg.data.fundamentals_cache_max_age_hours,
+        )
+        for sym in bars:
+            try:
+                earnings_history[sym] = earnings_fetcher.fetch(sym)
+            except Exception as exc:  # noqa: BLE001
+                console.print(f"[yellow]skipping earnings for {sym}: {exc}[/yellow]")
+
+    # Phase 3 LLM fundamental: fetch quarterly statements per symbol.
+    quarterly_financials: dict[str, pd.DataFrame] = {}
+    if cfg.scorer.type in ("fundamental_llm", "fundamental_llm_jt_intersect"):
+        from bloasis.data.fetchers.yfinance_financials import YfFinancialsFetcher
+
+        fin_cache = ParquetCache(cfg.data.cache_dir, namespace="financials")
+        fin_fetcher = YfFinancialsFetcher(
+            cache=fin_cache,
+            max_age_hours=cfg.data.fundamentals_cache_max_age_hours,
+        )
+        for sym in bars:
+            try:
+                quarterly_financials[sym] = fin_fetcher.fetch(sym)
+            except Exception as exc:  # noqa: BLE001
+                console.print(f"[yellow]skipping financials for {sym}: {exc}[/yellow]")
+
+    # Phase 3D — 10-K Risk Factors text per (symbol, filed_date).
+    risk_factors_history: dict[str, list[tuple[date, date, str]]] = {}
+    if cfg.scorer.type in ("edgar_textdiff", "edgar_textdiff_jt_intersect"):
+        from bloasis.data.fetchers.sec_edgar import EdgarClient
+
+        edgar = EdgarClient(cache_dir=cfg.data.cache_dir)
+        for sym in bars:
+            try:
+                filings = edgar.list_10k(sym)
+            except Exception as exc:  # noqa: BLE001
+                console.print(f"[yellow]skipping EDGAR list for {sym}: {exc}[/yellow]")
+                continue
+            history: list[tuple[date, date, str]] = []
+            # Filter filings to those usable for the backtest window:
+            #  - filed within (start_d - 5y, end_d) so we have ≥2 priors
+            #    available even at the earliest test date.
+            #  - keep at most 12 filings per stock (~12 fiscal years)
+            window_start = start_d - timedelta(days=5 * 365)
+            relevant = [f for f in filings if window_start <= f["filed"] <= end_d]
+            for f in relevant[:12]:
+                txt = edgar.risk_factors(sym, f)
+                if txt is None:
+                    continue
+                history.append((f["filed"], f["period"], txt))
+            history.sort(key=lambda t: t[0])  # ascending by filed_date
+            if history:
+                risk_factors_history[sym] = history
+
     data = BacktestData(
         symbols=list(bars.keys()),
         bars=bars,
         vix_series=market_ctx.vix,
         spy_close_series=market_ctx.spy_close,
+        earnings_history=earnings_history,
+        quarterly_financials=quarterly_financials,
+        risk_factors_history=risk_factors_history,
     )
 
     engine = get_engine()

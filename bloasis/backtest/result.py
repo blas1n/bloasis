@@ -36,6 +36,18 @@ class BacktestData:
     spy_close_series: pd.Series
     sectors: dict[str, str | None] = field(default_factory=dict)
     universe_by_date: dict[date, list[str]] | None = None
+    # Phase 3 PEAD: optional earnings history per symbol. Empty dict =
+    # unavailable (PEAD features stay NaN). DataFrame indexed by date.
+    earnings_history: dict[str, pd.DataFrame] = field(default_factory=dict)
+    # Phase 3 LLM fundamental: optional quarterly statements per symbol.
+    # DataFrame indexed by quarter-end date with CANONICAL_FIELDS columns.
+    quarterly_financials: dict[str, pd.DataFrame] = field(default_factory=dict)
+    # Phase 3D — 10-K Risk Factors text per (symbol, filed_date). Engine
+    # picks the most recent filing < (timestamp - filing_lag_days) and the
+    # immediately prior filing, computes cosine + length change.
+    # Outer dict: symbol → list of (filed_date, period_end, text), sorted
+    # ascending by filed_date.
+    risk_factors_history: dict[str, list[tuple[date, date, str]]] = field(default_factory=dict)
 
     def universe_at(self, d: date) -> list[str]:
         """Return symbols tradable on `d`. Falls back to `self.symbols` if no

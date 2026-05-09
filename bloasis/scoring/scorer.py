@@ -311,6 +311,395 @@ class LightGBMScorer:
         )
 
 
+class JTMomentumScorer:
+    """Phase 0 redesign — pure rank-based Jegadeesh-Titman 12-1 momentum.
+
+    Top `top_pct` (default 10%) of symbols by `momentum_252_21` get a unit
+    score of 0.99 (above the default `entry_threshold=0.65` so they pass);
+    everyone else gets 0.0 (below `exit_threshold=0.40`). NaN momentum →
+    excluded from ranking, scored as 0.0.
+
+    Why this exists:
+    PR12-17 measurement showed bloasis's 7-composite blend + cross-section
+    threshold dilutes the long-term momentum signal. The same JT 12-1
+    momentum that scores sharpe 1.21 standalone (Quant_Robustness 2026-05-07)
+    drops to sharpe 0.30-0.50 once routed through the composite system.
+
+    Phase 0 ships JT 12-1 *raw* — no compositing, no z-score → CDF, just
+    rank-based top-decile selection — to recover the standalone alpha.
+
+    Single-row `score()` is degenerate (no cross-section to rank against);
+    returns 0.5. Production path is `score_cross_section()` (engine calls
+    this per timestep).
+    """
+
+    def __init__(
+        self,
+        cfg: ScorerConfig,
+        *,
+        top_pct: float = 0.10,
+        vol_scale: bool = False,
+    ) -> None:
+        if not 0.0 < top_pct <= 1.0:
+            raise ValueError(f"top_pct must be in (0, 1], got {top_pct}")
+        self._cfg = cfg
+        self._top_pct = top_pct
+        self._vol_scale = vol_scale
+
+    def _signal(self, fv: FeatureVector) -> float:
+        mom = float(fv.momentum_252_21)
+        if math.isnan(mom):
+            return float("nan")
+        if not self._vol_scale:
+            return mom
+        vol = float(fv.volatility_20d)
+        if math.isnan(vol) or vol <= 0:
+            return float("nan")
+        return mom / vol
+
+    def score_cross_section(
+        self, fvs: list[FeatureVector], cvs: list[CompositeVector]
+    ) -> list[ScoredCandidate]:
+        if not fvs:
+            return []
+        # Identify rankable (non-NaN) symbols by their position in the
+        # input list (so we can re-emit a ScoredCandidate per input).
+        valid_indices: list[tuple[int, float]] = []
+        for i, fv in enumerate(fvs):
+            sig = self._signal(fv)
+            if not math.isnan(sig):
+                valid_indices.append((i, sig))
+
+        # Top-decile cutoff. Always at least 1 if any are valid.
+        n_select = max(1, int(len(valid_indices) * self._top_pct)) if valid_indices else 0
+        valid_sorted = sorted(valid_indices, key=lambda t: t[1], reverse=True)
+        top_indices = {idx for idx, _mom in valid_sorted[:n_select]}
+
+        out: list[ScoredCandidate] = []
+        for i, fv in enumerate(fvs):
+            sig = self._signal(fv)
+            score = 0.0 if math.isnan(sig) else (0.99 if i in top_indices else 0.0)
+            out.append(self._build_scored(fv, score=score, momentum=float(fv.momentum_252_21)))
+        return out
+
+    def score(self, fv: FeatureVector, cv: CompositeVector) -> ScoredCandidate:
+        # Without a cross-section we can't rank — return neutral.
+        return self._build_scored(fv, score=0.5, momentum=float(fv.momentum_252_21))
+
+    @staticmethod
+    def _build_scored(fv: FeatureVector, *, score: float, momentum: float) -> ScoredCandidate:
+        return ScoredCandidate(
+            symbol=fv.symbol,
+            timestamp=fv.timestamp,
+            score=score,
+            rationale=Rationale(
+                contributions=(
+                    FactorContribution(
+                        name="momentum_252_21",
+                        composite_score=momentum,
+                        weight=1.0,
+                        contribution=momentum,
+                        inputs={"momentum_252_21": momentum},
+                    ),
+                ),
+                triggers=(),
+                risks=(),
+            ),
+        )
+
+
+class EDGARTextDiffScorer:
+    """Phase 3 Candidate D-textdiff — Cohen-Malloy "Lazy Prices" 2020 inverted.
+
+    Academic finding: large 10-K disclosure changes (low cosine similarity,
+    big length changes) predict NEGATIVE future returns. We're long-only
+    so we invert: HIGH cosine similarity = stable disclosure = our long
+    candidate.
+
+    Top `top_pct` by `risk_factors_cosine` get score 0.99. NaN cosine
+    excluded. Score is pure cross-section rank, no compute beyond.
+
+    LLM-free — `risk_factors_cosine` is a TF cosine on tokenized Item 1A,
+    populated upstream by the engine prefetch (see
+    `bloasis.scoring.edgar_textdiff`).
+    """
+
+    def __init__(self, cfg: ScorerConfig, *, top_pct: float = 0.10) -> None:
+        if not 0.0 < top_pct <= 1.0:
+            raise ValueError(f"top_pct must be in (0, 1], got {top_pct}")
+        self._cfg = cfg
+        self._top_pct = top_pct
+
+    def score_cross_section(
+        self, fvs: list[FeatureVector], cvs: list[CompositeVector]
+    ) -> list[ScoredCandidate]:
+        if not fvs:
+            return []
+        eligibles: list[tuple[int, float]] = []
+        for i, fv in enumerate(fvs):
+            v = float(fv.risk_factors_cosine)
+            if not math.isnan(v):
+                eligibles.append((i, v))
+        n_select = max(1, int(len(eligibles) * self._top_pct)) if eligibles else 0
+        eligibles_sorted = sorted(eligibles, key=lambda t: t[1], reverse=True)
+        top_indices = {idx for idx, _v in eligibles_sorted[:n_select]}
+        out: list[ScoredCandidate] = []
+        for i, fv in enumerate(fvs):
+            score = 0.99 if i in top_indices else 0.0
+            out.append(self._build_scored(fv, score=score))
+        return out
+
+    def score(self, fv: FeatureVector, cv: CompositeVector) -> ScoredCandidate:
+        return self._build_scored(fv, score=0.5)
+
+    @staticmethod
+    def _build_scored(fv: FeatureVector, *, score: float) -> ScoredCandidate:
+        cos = float(fv.risk_factors_cosine)
+        return ScoredCandidate(
+            symbol=fv.symbol,
+            timestamp=fv.timestamp,
+            score=score,
+            rationale=Rationale(
+                contributions=(
+                    FactorContribution(
+                        name="risk_factors_cosine",
+                        composite_score=cos,
+                        weight=1.0,
+                        contribution=cos,
+                        inputs={
+                            "risk_factors_cosine": cos,
+                            "risk_factors_len_change": float(fv.risk_factors_len_change),
+                        },
+                    ),
+                ),
+                triggers=(),
+                risks=(),
+            ),
+        )
+
+
+class FundamentalLLMScorer:
+    """Phase 3 Candidate B-modern — LLM-rated fundamental health.
+
+    Cross-section ranking on `fundamental_llm_score` (already populated
+    in FeatureVector by upstream LLM pass). Top `top_pct` get score 0.99,
+    rest 0.0. NaN scores excluded.
+
+    The LLM call itself happens before `score_cross_section` — this scorer
+    is pure compute (matches bloasis architectural rule §2). The pipeline:
+    `bloasis.scoring.llm_fundamental.LLMFundamentalScorer` populates
+    `ExtractionContext.fundamental_llm_score`, extractor copies it into
+    FeatureVector, this scorer reads it.
+    """
+
+    def __init__(self, cfg: ScorerConfig, *, top_pct: float = 0.10) -> None:
+        if not 0.0 < top_pct <= 1.0:
+            raise ValueError(f"top_pct must be in (0, 1], got {top_pct}")
+        self._cfg = cfg
+        self._top_pct = top_pct
+
+    def score_cross_section(
+        self, fvs: list[FeatureVector], cvs: list[CompositeVector]
+    ) -> list[ScoredCandidate]:
+        if not fvs:
+            return []
+        eligibles: list[tuple[int, float]] = []
+        for i, fv in enumerate(fvs):
+            v = float(fv.fundamental_llm_score)
+            if not math.isnan(v):
+                eligibles.append((i, v))
+        n_select = max(1, int(len(eligibles) * self._top_pct)) if eligibles else 0
+        eligibles_sorted = sorted(eligibles, key=lambda t: t[1], reverse=True)
+        top_indices = {idx for idx, _v in eligibles_sorted[:n_select]}
+
+        out: list[ScoredCandidate] = []
+        for i, fv in enumerate(fvs):
+            score = 0.99 if i in top_indices else 0.0
+            out.append(self._build_scored(fv, score=score))
+        return out
+
+    def score(self, fv: FeatureVector, cv: CompositeVector) -> ScoredCandidate:
+        return self._build_scored(fv, score=0.5)
+
+    @staticmethod
+    def _build_scored(fv: FeatureVector, *, score: float) -> ScoredCandidate:
+        v = float(fv.fundamental_llm_score)
+        return ScoredCandidate(
+            symbol=fv.symbol,
+            timestamp=fv.timestamp,
+            score=score,
+            rationale=Rationale(
+                contributions=(
+                    FactorContribution(
+                        name="fundamental_llm_score",
+                        composite_score=v,
+                        weight=1.0,
+                        contribution=v,
+                        inputs={"fundamental_llm_score": v},
+                    ),
+                ),
+                triggers=(),
+                risks=(),
+            ),
+        )
+
+
+class IntersectScorer:
+    """Phase 3 Candidate A4 — combine N orthogonal alpha signals via AND.
+
+    A symbol gets score 0.99 only when EVERY sub-scorer scores it above
+    `entry_threshold`. Otherwise 0.0. Designed to capture the case where
+    e.g. high momentum AND a positive earnings surprise both confirm a
+    buy candidate (academic intuition: orthogonal signals reinforce).
+
+    Sub-scorers must implement `score_cross_section(fvs, cvs)`.
+    """
+
+    def __init__(self, cfg: ScorerConfig, *, sub_scorers: list) -> None:  # type: ignore[type-arg]
+        if len(sub_scorers) < 2:
+            raise ValueError(
+                f"IntersectScorer needs at least 2 sub-scorers, got {len(sub_scorers)}"
+            )
+        self._cfg = cfg
+        self._subs = sub_scorers
+
+    def score_cross_section(
+        self, fvs: list[FeatureVector], cvs: list[CompositeVector]
+    ) -> list[ScoredCandidate]:
+        if not fvs:
+            return []
+        threshold = self._cfg.entry_threshold
+        # Run each sub-scorer; track per-symbol pass count.
+        pass_counts: dict[str, int] = dict.fromkeys((fv.symbol for fv in fvs), 0)
+        for sub in self._subs:
+            sub_out = sub.score_cross_section(fvs, cvs)
+            for sc in sub_out:
+                if sc.score > threshold:
+                    pass_counts[sc.symbol] = pass_counts.get(sc.symbol, 0) + 1
+        n_required = len(self._subs)
+        out: list[ScoredCandidate] = []
+        for fv in fvs:
+            score = 0.99 if pass_counts.get(fv.symbol, 0) >= n_required else 0.0
+            out.append(self._build_scored(fv, score=score))
+        return out
+
+    def score(self, fv: FeatureVector, cv: CompositeVector) -> ScoredCandidate:
+        return self._build_scored(fv, score=0.5)
+
+    @staticmethod
+    def _build_scored(fv: FeatureVector, *, score: float) -> ScoredCandidate:
+        return ScoredCandidate(
+            symbol=fv.symbol,
+            timestamp=fv.timestamp,
+            score=score,
+            rationale=Rationale(
+                contributions=(
+                    FactorContribution(
+                        name="intersect",
+                        composite_score=score,
+                        weight=1.0,
+                        contribution=score,
+                        inputs={},
+                    ),
+                ),
+                triggers=(),
+                risks=(),
+            ),
+        )
+
+
+class PEADScorer:
+    """Phase 3 Candidate A — Post-Earnings Announcement Drift.
+
+    Stocks with a recent positive earnings surprise drift upward for the
+    next ~60 days (Bernard-Thomas 1989, Sloan 1996). Eligible stocks are
+    those with `last_eps_surprise_pct > 0` AND
+    `0 <= days_since_earnings <= drift_days`. Among eligibles, the top
+    `top_pct` by `last_eps_surprise_pct` get score 0.99 (passes
+    `entry_threshold=0.65`); rest 0.0.
+
+    Spec: ~/Docs/bloasis/Phase3_Modern_Candidates_2026-05-08.md §A
+    """
+
+    def __init__(
+        self,
+        cfg: ScorerConfig,
+        *,
+        top_pct: float = 0.10,
+        drift_days: int = 60,
+    ) -> None:
+        if not 0.0 < top_pct <= 1.0:
+            raise ValueError(f"top_pct must be in (0, 1], got {top_pct}")
+        if drift_days <= 0:
+            raise ValueError(f"drift_days must be > 0, got {drift_days}")
+        self._cfg = cfg
+        self._top_pct = top_pct
+        self._drift_days = drift_days
+
+    def _eligible(self, fv: FeatureVector) -> float | None:
+        """Return surprise% if eligible (positive beat, within drift), else None."""
+        surprise = float(fv.last_eps_surprise_pct)
+        days = float(fv.days_since_earnings)
+        if math.isnan(surprise) or math.isnan(days):
+            return None
+        if surprise <= 0.0:
+            return None
+        if days < 0.0 or days > self._drift_days:
+            return None
+        return surprise
+
+    def score_cross_section(
+        self, fvs: list[FeatureVector], cvs: list[CompositeVector]
+    ) -> list[ScoredCandidate]:
+        if not fvs:
+            return []
+        eligibles: list[tuple[int, float]] = []
+        for i, fv in enumerate(fvs):
+            sig = self._eligible(fv)
+            if sig is not None:
+                eligibles.append((i, sig))
+
+        n_select = max(1, int(len(eligibles) * self._top_pct)) if eligibles else 0
+        eligibles_sorted = sorted(eligibles, key=lambda t: t[1], reverse=True)
+        top_indices = {idx for idx, _sig in eligibles_sorted[:n_select]}
+
+        out: list[ScoredCandidate] = []
+        for i, fv in enumerate(fvs):
+            score = 0.99 if i in top_indices else 0.0
+            out.append(self._build_scored(fv, score=score))
+        return out
+
+    def score(self, fv: FeatureVector, cv: CompositeVector) -> ScoredCandidate:
+        # Without a cross-section we can't rank — return neutral.
+        return self._build_scored(fv, score=0.5)
+
+    @staticmethod
+    def _build_scored(fv: FeatureVector, *, score: float) -> ScoredCandidate:
+        surprise = float(fv.last_eps_surprise_pct)
+        days = float(fv.days_since_earnings)
+        return ScoredCandidate(
+            symbol=fv.symbol,
+            timestamp=fv.timestamp,
+            score=score,
+            rationale=Rationale(
+                contributions=(
+                    FactorContribution(
+                        name="last_eps_surprise_pct",
+                        composite_score=surprise,
+                        weight=1.0,
+                        contribution=surprise,
+                        inputs={
+                            "last_eps_surprise_pct": surprise,
+                            "days_since_earnings": days,
+                        },
+                    ),
+                ),
+                triggers=(),
+                risks=(),
+            ),
+        )
+
+
 # ---------------------------------------------------------------------------
 # helpers
 # ---------------------------------------------------------------------------

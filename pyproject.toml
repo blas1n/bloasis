@@ -8,13 +8,12 @@ dependencies = [
     # CLI
     "typer>=0.12.0",
     "rich>=13.7.0",
-
     # Config / Validation
     "pydantic>=2.6.0",
     "pyyaml>=6.0.1",
-
     # Database
     "sqlalchemy>=2.0.25",
+    "lxml>=6.1.0",
 ]
 
 # Heavier dependencies are split into extras so the base package installs
