@@ -235,23 +235,31 @@ class Backtester:
 
         delisted_seen: set[str] = set()
 
-        for d in trading_days:
-            # 1. Build candidates for today.
-            candidates, day_features = self._build_candidates(d, scorer)
-            fold_feature_vectors.extend(day_features)
+        rebalance_days = max(1, self._cfg.signal.rebalance_days)
+        for i, d in enumerate(trading_days):
+            # Rebalance only every N trading days (default 1 = daily). On
+            # non-rebalance days, skip candidate build + signal gen, keep
+            # only stop-loss / profit-tier evaluation + mark-to-market.
+            is_rebalance_day = (i % rebalance_days) == 0
+            if is_rebalance_day:
+                # 1. Build candidates for today.
+                candidates, day_features = self._build_candidates(d, scorer)
+                fold_feature_vectors.extend(day_features)
 
-            # 2. Generate signals.
-            held = [
-                HeldPosition(
-                    symbol=p.symbol,
-                    sector=p.sector,
-                    quantity=p.quantity,
-                    avg_cost=p.avg_cost,
-                    last_close=p.last_price,
-                )
-                for p in portfolio.positions.values()
-            ]
-            signals = self._signal_gen.generate(candidates, held=held)
+                # 2. Generate signals.
+                held = [
+                    HeldPosition(
+                        symbol=p.symbol,
+                        sector=p.sector,
+                        quantity=p.quantity,
+                        avg_cost=p.avg_cost,
+                        last_close=p.last_price,
+                    )
+                    for p in portfolio.positions.values()
+                ]
+                signals = self._signal_gen.generate(candidates, held=held)
+            else:
+                signals = []
 
             # 3. Risk evaluation + fills.
             today_dt = _to_dt(d)
@@ -645,6 +653,7 @@ class Backtester:
                 self._cfg.scorer,
                 top_pct=self._cfg.scorer.jt_top_pct,
                 vol_scale=self._cfg.scorer.jt_vol_scale,
+                residual=self._cfg.scorer.jt_residual,
             )
         if self._cfg.scorer.type == "pead":
             from bloasis.scoring.scorer import PEADScorer
@@ -668,6 +677,7 @@ class Backtester:
                         self._cfg.scorer,
                         top_pct=self._cfg.scorer.jt_top_pct,
                         vol_scale=self._cfg.scorer.jt_vol_scale,
+                        residual=self._cfg.scorer.jt_residual,
                     ),
                     PEADScorer(
                         self._cfg.scorer,
@@ -704,6 +714,7 @@ class Backtester:
                         self._cfg.scorer,
                         top_pct=self._cfg.scorer.jt_top_pct,
                         vol_scale=self._cfg.scorer.jt_vol_scale,
+                        residual=self._cfg.scorer.jt_residual,
                     ),
                     EDGARTextDiffScorer(
                         self._cfg.scorer,
@@ -725,6 +736,7 @@ class Backtester:
                         self._cfg.scorer,
                         top_pct=self._cfg.scorer.jt_top_pct,
                         vol_scale=self._cfg.scorer.jt_vol_scale,
+                        residual=self._cfg.scorer.jt_residual,
                     ),
                     FundamentalLLMScorer(
                         self._cfg.scorer,

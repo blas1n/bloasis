@@ -12,6 +12,7 @@ from bloasis.scoring.derived import (
     kbar_kmid2,
     kbar_ksft2,
     momentum,
+    residual_momentum,
     vix_zscore_60d,
     volatility_annualized,
     volume_ratio,
@@ -292,3 +293,73 @@ def test_corr_pv_zero_volume_safe() -> None:
     v = corr_price_volume(close, volume, window=20)
     # Either finite (handled internally) or NaN (acceptable). Just must not raise.
     assert math.isfinite(v) or math.isnan(v)
+
+
+# ---------------------------------------------------------------------------
+# residual_momentum (Blitz-Hanauer-Vidojevic 2020)
+# ---------------------------------------------------------------------------
+
+
+def _noisy_drift(
+    start: float, daily_drift: float, daily_noise_std: float, n: int, seed: int
+) -> pd.Series:
+    """Drift + Gaussian-noise price series so regression has non-zero variance."""
+    import numpy as np
+
+    rng = np.random.default_rng(seed)
+    noise = rng.standard_normal(n) * daily_noise_std
+    rets = noise + daily_drift
+    prices = start * np.cumprod(1.0 + rets)
+    return _series(list(prices))
+
+
+def test_residual_momentum_returns_nan_on_short_history() -> None:
+    short = _series([100.0] * 50)
+    market = _series([200.0] * 50)
+    assert math.isnan(residual_momentum(short, market, lookback=252, skip=21))
+
+
+def test_residual_momentum_extracts_alpha_above_market() -> None:
+    """Stock with same beta-ish noise but higher drift → residual momentum > 0."""
+    n = 280
+    market = _noisy_drift(200.0, 0.0005, 0.01, n, seed=1)
+    stock = _noisy_drift(100.0, 0.0015, 0.01, n, seed=2)  # higher drift
+    rm = residual_momentum(stock, market, lookback=252, skip=21)
+    assert math.isfinite(rm)
+    assert rm > 0  # consistent outperformer → positive residual
+
+
+def test_residual_momentum_below_market_negative() -> None:
+    """Stock with strongly negative own-drift → residual < 0."""
+    n = 280
+    market = _noisy_drift(200.0, 0.0015, 0.01, n, seed=3)
+    stock = _noisy_drift(100.0, -0.0020, 0.01, n, seed=4)  # absolute drift -50%/yr
+    rm = residual_momentum(stock, market, lookback=252, skip=21)
+    assert math.isfinite(rm)
+    assert rm < 0
+
+
+def test_residual_momentum_handles_aligned_index() -> None:
+    """Stock and market series with overlapping but not identical date ranges."""
+    import numpy as np
+
+    rng = np.random.default_rng(5)
+    n = 300
+    full = pd.date_range("2024-01-01", periods=n, freq="D")
+    m_rets = rng.standard_normal(n) * 0.01 + 0.0005
+    market = pd.Series(200.0 * np.cumprod(1.0 + m_rets), index=full, dtype=float)
+    s_rets = rng.standard_normal(n - 15) * 0.01 + 0.0010
+    stock = pd.Series(
+        100.0 * np.cumprod(1.0 + s_rets),
+        index=full[10:-5],
+        dtype=float,
+    )
+    rm = residual_momentum(stock, market, lookback=252, skip=21)
+    assert math.isfinite(rm)
+
+
+def test_residual_momentum_zero_market_variance_returns_nan() -> None:
+    n = 280
+    flat_market = _series([200.0] * n)
+    stock = _noisy_drift(100.0, 0.0010, 0.01, n, seed=6)
+    assert math.isnan(residual_momentum(stock, flat_market, lookback=252, skip=21))

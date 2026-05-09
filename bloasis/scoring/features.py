@@ -66,6 +66,10 @@ FEATURE_COLUMNS: tuple[str, ...] = (
     # Phase 3D — Cohen-Malloy 10-K disclosure-change signals
     "risk_factors_cosine",
     "risk_factors_len_change",
+    # PR19 — Residual momentum (Blitz-Hanauer-Vidojevic 2020) — JT 12-1 with
+    # market-beta residual returns. Lower vol than raw momentum, no return
+    # drop. Drop-in replacement for `momentum_252_21` to fix DD failures.
+    "residual_momentum_252_21",
 )
 
 
@@ -132,6 +136,9 @@ class FeatureVector:
     # Phase 3D — 10-K Risk Factors text-diff signals
     risk_factors_cosine: float = field(default_factory=_nan)
     risk_factors_len_change: float = field(default_factory=_nan)
+
+    # PR19 — Residual / idiosyncratic momentum
+    residual_momentum_252_21: float = field(default_factory=_nan)
 
     FEATURE_COLUMNS: ClassVar[tuple[str, ...]] = FEATURE_COLUMNS
 

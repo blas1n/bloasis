@@ -136,6 +136,11 @@ class ScorerConfig(BaseModel):
 
     jt_top_pct: float = Field(default=0.10, gt=0.0, le=1.0)
     jt_vol_scale: bool = False
+    # PR19 — Residual / idiosyncratic momentum (Blitz-Hanauer-Vidojevic 2020).
+    # When true, scorer ranks by `residual_momentum_252_21` (market-beta-
+    # residualized) instead of raw `momentum_252_21`. Drop-in fix for JT's
+    # drawdown failure — same return, half the vol.
+    jt_residual: bool = False
 
     pead_top_pct: float = Field(default=0.10, gt=0.0, le=1.0)
     pead_drift_days: int = Field(default=60, gt=0)
@@ -182,6 +187,11 @@ class SignalConfig(BaseModel):
     atr_tp_multiplier: float = Field(default=3.0, gt=0.0)
     position_size_max_pct: float = Field(default=0.10, gt=0.0, le=1.0)
     profit_tiers: list[ProfitTier] = Field(default_factory=list)
+
+    # Rebalance every N trading days (default 1 = daily, original behaviour).
+    # Larger values reduce turnover and may dampen DD. Stop-loss / profit-tier
+    # exits still evaluate every trading day regardless of this setting.
+    rebalance_days: int = Field(default=1, ge=1)
 
     @model_validator(mode="after")
     def _validate_tiers(self) -> SignalConfig:

@@ -339,15 +339,20 @@ class JTMomentumScorer:
         *,
         top_pct: float = 0.10,
         vol_scale: bool = False,
+        residual: bool = False,
     ) -> None:
         if not 0.0 < top_pct <= 1.0:
             raise ValueError(f"top_pct must be in (0, 1], got {top_pct}")
         self._cfg = cfg
         self._top_pct = top_pct
         self._vol_scale = vol_scale
+        self._residual = residual
 
     def _signal(self, fv: FeatureVector) -> float:
-        mom = float(fv.momentum_252_21)
+        # Residual momentum (Blitz-Hanauer-Vidojevic 2020) is the academic
+        # drop-in fix for vanilla JT's drawdown failure. Same window, but
+        # market-beta-residualized returns — half the vol, no return drop.
+        mom = float(fv.residual_momentum_252_21) if self._residual else float(fv.momentum_252_21)
         if math.isnan(mom):
             return float("nan")
         if not self._vol_scale:
