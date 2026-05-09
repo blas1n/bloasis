@@ -32,7 +32,9 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from datetime import UTC, date, datetime, timedelta
+from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -1525,6 +1527,10 @@ def grid_run(
         assert isinstance(gr, GridRunResult)
         if gr.error:
             console.print(f"[red]  [{idx}/{total}] {gr.run_name} — FAILED[/red]")
+            # Surface the traceback to stderr so users see *why* a combo
+            # failed instead of having to dig through DB or guess.
+            sys.stderr.write(f"\n--- traceback for {gr.run_name} ---\n{gr.error}\n")
+            sys.stderr.flush()
         else:
             r = gr.result
             sharpe = f"{r.median_sharpe_vs_spy:.2f}" if r else "—"
@@ -1540,23 +1546,49 @@ def grid_run(
         on_progress=_progress,
     )
 
+    # n_ok: backtest produced a result AND persistence didn't error after.
+    # n_pass: result passed acceptance AND no error path was hit (so we don't
+    # double-count a combo that succeeded the backtest but failed persistence).
     n_ok = sum(1 for r in results if r.error is None and r.result is not None)
-    n_pass = sum(1 for r in results if r.result is not None and r.result.passed_acceptance)
+    n_pass = sum(
+        1
+        for r in results
+        if r.error is None and r.result is not None and r.result.passed_acceptance
+    )
     console.print(
         f"[green]grid {spec.name}: {n_ok}/{len(results)} completed, "
         f"{n_pass} passed acceptance[/green]"
     )
 
 
+class _GridSortKey(StrEnum):
+    """Allowed sort keys for `bloasis grid show --sort`.
+
+    `sharpe` is `backtest_runs.sharpe` (avg fold sharpe, raw — not vs SPY).
+    `alpha` is `alpha_vs_spy` (median alpha annualized).
+    """
+
+    sharpe = "sharpe"
+    alpha = "alpha"
+
+
 @grid_app.command("show")
 def grid_show(
     grid_name: str = typer.Argument(...),  # noqa: B008
     limit: int = typer.Option(50, "--limit", min=1, max=500),  # noqa: B008
+    sort: _GridSortKey = typer.Option(  # noqa: B008
+        _GridSortKey.sharpe,
+        "--sort",
+        case_sensitive=False,
+        help="Sort key: sharpe (default) or alpha.",
+    ),
 ) -> None:
     """Render a leaderboard of all runs whose name starts with `<grid_name>#`."""
     from sqlalchemy import select
 
     from bloasis.storage import backtest_runs as br_table
+
+    sort_col = br_table.c.alpha_vs_spy if sort is _GridSortKey.alpha else br_table.c.sharpe
 
     engine = get_engine()
     with engine.connect() as conn:
@@ -1572,7 +1604,7 @@ def grid_show(
                 br_table.c.n_trades,
             )
             .where(br_table.c.name.like(f"{grid_name}#%"))
-            .order_by(br_table.c.sharpe.desc().nullslast())
+            .order_by(sort_col.desc().nullslast())
             .limit(limit)
         ).fetchall()
 
@@ -1580,7 +1612,7 @@ def grid_show(
         console.print(f"[red]no runs found for grid '{grid_name}'[/red]")
         raise typer.Exit(code=1)
 
-    table = RichTable(title=f"grid {grid_name} — top {len(rows)} by sharpe")
+    table = RichTable(title=f"grid {grid_name} — top {len(rows)} by {sort.value}")
     table.add_column("run_id", justify="right")
     table.add_column("combo")
     table.add_column("sharpe", justify="right")
