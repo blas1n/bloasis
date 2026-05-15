@@ -386,3 +386,37 @@ def snapshot_paper_equity(
                 n_positions=n_positions,
             )
         )
+
+
+def update_paper_order_fill(
+    engine: Engine,
+    *,
+    client_order_id: str,
+    broker_status: str,
+    filled_qty: float,
+    filled_avg_price: float,
+    slippage_bps: float | None,
+) -> None:
+    """Backfill a paper_orders row with the realised fill data.
+
+    The submit-time write captures `broker_status='accepted'` and zero
+    filled quantities because the cron fires before US market open. The
+    reconcile step queries Alpaca by `client_order_id` hours later and
+    updates the row with the actual fill outcome — required for friction
+    analysis and per-order PnL.
+
+    No-op when `client_order_id` doesn't match any DB row.
+    """
+    from bloasis.storage.schema import paper_orders
+
+    with engine.begin() as conn:
+        conn.execute(
+            update(paper_orders)
+            .where(paper_orders.c.broker_order_id == client_order_id)
+            .values(
+                broker_status=broker_status,
+                filled_qty=filled_qty,
+                filled_avg_price=filled_avg_price,
+                slippage_bps=slippage_bps,
+            )
+        )
