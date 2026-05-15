@@ -49,6 +49,8 @@ from bloasis.scoring.features import FeatureVector
 from bloasis.storage import create_all, get_engine, metadata
 
 if TYPE_CHECKING:
+    from sqlalchemy import Engine
+
     from bloasis.broker import BrokerAdapter
     from bloasis.signal import CandidateData
 
@@ -1211,6 +1213,18 @@ def trade_paper(
             config_json=cfg.model_dump_json(),
         )
         console.print(f"[dim]paper session: {session} (id={session_id})[/dim]")
+        # PR51 — reconcile any prior submissions before generating today's
+        # signals. Cron writes paper_orders rows with status='accepted'
+        # because the cron fires hours before US market open; the fill
+        # data arrives later and never makes it into our DB unless we
+        # pull it back. Doing this at the START of each cron means
+        # friction analysis always sees yesterday's realised fills.
+        try:
+            n_reconciled = _reconcile_session(session_id, engine)
+            if n_reconciled:
+                console.print(f"[dim]reconciled {n_reconciled} prior orders[/dim]")
+        except Exception as exc:  # noqa: BLE001 — non-fatal, log + continue
+            console.print(f"[yellow]reconcile skipped: {exc}[/yellow]")
 
     broker = AlpacaBrokerAdapter(mode="paper")
     _execute_against_broker(cfg, candidates, broker, label="paper", session_id=session_id)
@@ -1926,6 +1940,112 @@ def paper_close(
     engine = get_engine()
     writers.close_paper_session(engine, session_id=sid)
     console.print(f"[green]✓[/green] session '{session_name}' (id={sid}) closed")
+
+
+# Alpaca / Cron 의 비대칭 — submit 시점 응답은 status='accepted', filled_qty=0.
+# 실제 fill 은 시장 open (Mon 22:30 KST) 에 broker side 에서 일어나는데, 우리
+# DB 는 안 따라감. 결과: paper friction 이 영구히 "no filled orders". reconcile
+# 이 매 cron 시작 시 (또는 수동 호출 시) Alpaca 에 client_order_id 로 다시
+# 물어 fill 데이터를 backfill 한다.
+_RECONCILE_TERMINAL = {"filled", "rejected", "canceled", "expired"}
+
+
+def _reconcile_session(
+    session_id: int,
+    engine: Engine,
+    *,
+    console_obj: Console | None = None,
+) -> int:
+    """Backfill realised fill data for all non-terminal paper_orders rows
+    in this session. Returns the number of rows updated."""
+    from sqlalchemy import select as _select
+
+    from bloasis.broker import AlpacaBrokerAdapter
+    from bloasis.storage import paper_orders as _ord_table
+    from bloasis.storage import writers as _writers
+
+    out = console_obj or console
+
+    with engine.connect() as conn:
+        rows = conn.execute(
+            _select(_ord_table).where(
+                _ord_table.c.session_id == session_id,
+                _ord_table.c.broker_status.not_in(list(_RECONCILE_TERMINAL)),
+            )
+        ).fetchall()
+
+    if not rows:
+        return 0
+
+    broker = AlpacaBrokerAdapter(mode="paper")
+    updated = 0
+    for r in rows:
+        if r.broker_order_id is None:
+            continue
+        try:
+            alpaca_order = broker._client.get_order_by_client_id(r.broker_order_id)
+        except Exception as exc:  # noqa: BLE001 — broker may 404 on canceled, etc.
+            out.print(f"[yellow]skip {r.broker_order_id}: {exc}[/yellow]")
+            continue
+        new_status = _translate_alpaca_status(str(alpaca_order.status))
+        filled_qty = float(getattr(alpaca_order, "filled_qty", 0) or 0)
+        filled_avg = float(getattr(alpaca_order, "filled_avg_price", 0) or 0)
+        slip: float | None = None
+        if (
+            r.side == "buy"
+            and filled_avg > 0
+            and r.entry_price_hint is not None
+            and r.entry_price_hint > 0
+        ):
+            slip = ((filled_avg - r.entry_price_hint) / r.entry_price_hint) * 10_000.0
+        _writers.update_paper_order_fill(
+            engine,
+            client_order_id=r.broker_order_id,
+            broker_status=new_status,
+            filled_qty=filled_qty,
+            filled_avg_price=filled_avg,
+            slippage_bps=slip,
+        )
+        updated += 1
+    return updated
+
+
+def _translate_alpaca_status(raw: str) -> str:
+    """Normalize alpaca OrderStatus to our broker_status vocabulary."""
+    s = raw.lower()
+    if "filled" in s and "partial" in s:
+        return "partially_filled"
+    if s.endswith("filled") or s == "filled":
+        return "filled"
+    if "reject" in s:
+        return "rejected"
+    if "cancel" in s:
+        return "canceled"
+    if "expire" in s:
+        return "expired"
+    return "accepted"
+
+
+@paper_app.command("reconcile")
+def paper_reconcile(
+    session_name: str = typer.Argument(...),  # noqa: B008
+) -> None:
+    """Backfill realised fill data from Alpaca for this session's orders.
+
+    paper_orders rows are written at cron-submit time with
+    `broker_status='accepted'` and `filled_qty=0` because US market is
+    closed at 08:00 KST. After market open, Alpaca fills the order but
+    our DB has no fill data — `paper friction` returns "no filled
+    orders" forever. Run this command (or have the daily cron run it
+    automatically) to pull the realised fill back into the DB.
+    """
+    sid = _resolve_session_id(session_name)
+    engine = get_engine()
+    n = _reconcile_session(sid, engine)
+    if n == 0:
+        console.print(f"[yellow]no non-terminal orders to reconcile in '{session_name}'[/yellow]")
+    else:
+        console.print(f"[green]✓[/green] reconciled {n} orders in '{session_name}'")
 
 
 if __name__ == "__main__":

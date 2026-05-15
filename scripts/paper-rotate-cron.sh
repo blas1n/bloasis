@@ -15,12 +15,19 @@ REPO=/Users/blasin/Works/bloasis/main
 SESSION_NAME="edgar-rolling2-paper-2026-05"
 CONFIG="configs/edgar-rolling2.yaml"
 
-# Top 20 SP500 by market cap (as of 2024-12-31). Edit when expanding
-# the universe — make sure DB-resident session keeps the same name so
-# equity continuity is preserved across symbol changes.
+# Top 50 SP500 by market cap (as of 2024-12-31). Wider than top 20
+# because top decile of 20 with EDGAR-eligible filter (≥ 2 prior 10-Ks)
+# was producing only 1 buyable name; 50 should give 3-5 holdings for
+# meaningful diversification + friction sample size.
+#
+# Edit when expanding the universe — keep DB-resident session NAME the
+# same so equity continuity is preserved across symbol changes.
 SYMBOLS=(
   NVDA AAPL MSFT GOOGL AMZN META BRK-B AVGO TSLA JPM
   WMT LLY V MA ORCL XOM COST NFLX JNJ HD
+  PG BAC ABBV CRM CVX KO TMUS WFC CSCO MRK
+  ADBE PEP MCD ABT TMO LIN ACN AMD GE BX
+  IBM PM AXP CAT QCOM DIS T VZ INTC NOW
 )
 
 cd "$REPO"
