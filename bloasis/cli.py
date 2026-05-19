@@ -73,7 +73,7 @@ grid_app = typer.Typer(
 )
 paper_app = typer.Typer(
     name="paper",
-    help="Inspect paper-trading sessions (PR47): list, show details, friction, close.",
+    help="Inspect paper-trading sessions: list, show, entry-gap, reconcile, close.",
 )
 app.add_typer(config_app, name="config")
 app.add_typer(universe_app, name="universe")
@@ -1884,11 +1884,31 @@ def paper_show(
     console.print(table)
 
 
-@paper_app.command("friction")
-def paper_friction(
+@paper_app.command("entry-gap")
+def paper_entry_gap(
     session_name: str = typer.Argument(...),  # noqa: B008
 ) -> None:
-    """Median/p25/p75 slippage in bps for filled BUY orders in this session."""
+    """Signal-close → fill-open price drift in bps for filled BUY orders.
+
+    IMPORTANT — this is NOT execution slippage. The stored `slippage_bps`
+    is `(filled_avg_price - entry_price_hint) / entry_price_hint`, where
+    `entry_price_hint` is the *signal-time close* and `filled_avg_price`
+    is the *next market open*. The difference is dominated by overnight /
+    weekend market movement, not broker execution quality.
+
+    Why it still matters:
+      - The backtester also fills at next-day open, so the close→open
+        gap is in both — it is NOT a paper-vs-backtest divergence.
+      - BUT Monday cron entries span a 3-day weekend gap while the
+        backtester models a 1-day gap. Monday entries therefore carry
+        extra gap risk the backtest understates.
+      - True execution slippage (fill vs official open) cannot be
+        measured on an Alpaca *paper* account — its fills are simulated.
+        That needs a real-money account.
+
+    So: read this as "how far did the entry price drift between signal
+    and fill", not as a friction / cost-of-trading number.
+    """
     import statistics
 
     from sqlalchemy import select
@@ -1906,12 +1926,12 @@ def paper_friction(
             )
         ).fetchall()
 
-    table = RichTable(title=f"paper friction — {session_name}")
+    table = RichTable(title=f"paper entry-gap (signal-close → fill-open) — {session_name}")
     table.add_column("metric", style="cyan")
     table.add_column("value", justify="right")
 
     if not rows:
-        console.print(f"[yellow]no filled orders with slippage data in '{session_name}'[/yellow]")
+        console.print(f"[yellow]no filled orders with drift data in '{session_name}'[/yellow]")
         return
 
     bps_values = [float(r.slippage_bps) for r in rows]
@@ -1922,11 +1942,15 @@ def paper_friction(
     p75 = bps_sorted[min(n - 1, (3 * n) // 4)] if n > 1 else bps_sorted[0]
 
     table.add_row("filled orders", str(n))
-    table.add_row("median slippage", f"{median:.1f} bps")
-    table.add_row("p25 slippage", f"{p25:.1f} bps")
-    table.add_row("p75 slippage", f"{p75:.1f} bps")
-    table.add_row("max slippage", f"{max(bps_values):.1f} bps")
+    table.add_row("median gap drift", f"{median:.1f} bps")
+    table.add_row("p25 gap drift", f"{p25:.1f} bps")
+    table.add_row("p75 gap drift", f"{p75:.1f} bps")
+    table.add_row("max gap drift", f"{max(bps_values):.1f} bps")
     console.print(table)
+    console.print(
+        "[dim]gap drift = (fill open − signal close) / signal close. "
+        "Overnight/weekend market move, not execution slippage.[/dim]"
+    )
 
 
 @paper_app.command("close")
