@@ -1,4 +1,4 @@
-"""CLI tests for `bloasis paper {sessions,show,friction,close}` (PR47).
+"""CLI tests for `bloasis paper {sessions,show,entry-gap,close}` (PR47/PR52).
 
 Populates the paper_* tables directly via writers, then invokes the
 analysis subcommands and asserts on the rendered output.
@@ -125,26 +125,26 @@ def test_paper_show_unknown_session(db_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# bloasis paper friction <session> — slippage analysis
+# bloasis paper entry-gap <session> — signal-close → fill-open drift
 # ---------------------------------------------------------------------------
 
 
-def test_paper_friction_summarizes_slippage(db_path: Path) -> None:
+def test_paper_entry_gap_summarizes_drift(db_path: Path) -> None:
     engine = get_engine(db_path)
-    _seed_session(engine, "frict-test", n_orders=4)
+    _seed_session(engine, "gap-test", n_orders=4)
 
-    res = runner.invoke(app, ["paper", "friction", "frict-test"])
+    res = runner.invoke(app, ["paper", "entry-gap", "gap-test"])
     assert res.exit_code == 0, res.output
-    # Median slippage across 4 orders all at 25 bps = 25 bps
+    # Median drift across 4 orders all at 25 bps = 25 bps
     assert "25" in res.output  # bps value should appear
-    assert "frict-test" in res.output
+    assert "gap-test" in res.output
 
 
-def test_paper_friction_no_filled_orders(db_path: Path) -> None:
+def test_paper_entry_gap_no_filled_orders(db_path: Path) -> None:
     engine = get_engine(db_path)
-    _seed_session(engine, "empty-frict", n_orders=0)
+    _seed_session(engine, "empty-gap", n_orders=0)
 
-    res = runner.invoke(app, ["paper", "friction", "empty-frict"])
+    res = runner.invoke(app, ["paper", "entry-gap", "empty-gap"])
     # Either a clean "no fills" message or exit with code != 0 — both acceptable.
     assert res.exit_code == 0 or "no" in res.output.lower()
 
