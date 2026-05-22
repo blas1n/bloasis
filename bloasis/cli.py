@@ -75,6 +75,10 @@ paper_app = typer.Typer(
     name="paper",
     help="Inspect paper-trading sessions: list, show, entry-gap, reconcile, close.",
 )
+research_app = typer.Typer(
+    name="research",
+    help="Exploratory analysis (PR53+): correlations, event-study. Historical data.",
+)
 app.add_typer(config_app, name="config")
 app.add_typer(universe_app, name="universe")
 app.add_typer(fetch_app, name="fetch")
@@ -83,6 +87,7 @@ app.add_typer(trade_app, name="trade")
 app.add_typer(ml_app, name="ml")
 app.add_typer(grid_app, name="grid")
 app.add_typer(paper_app, name="paper")
+app.add_typer(research_app, name="research")
 
 console = Console()
 
@@ -2070,6 +2075,102 @@ def paper_reconcile(
         console.print(f"[yellow]no non-terminal orders to reconcile in '{session_name}'[/yellow]")
     else:
         console.print(f"[green]✓[/green] reconciled {n} orders in '{session_name}'")
+
+
+# ---------------------------------------------------------------------------
+# Research analysis (PR53) — exploratory, historical-data only
+# ---------------------------------------------------------------------------
+
+
+@research_app.command("correlations")
+def research_correlations(
+    symbols: list[str] = typer.Argument(  # noqa: B008
+        None, help="Symbols to analyze. Omit to use a paper session's holdings."
+    ),
+    session: str = typer.Option(  # noqa: B008
+        None,
+        "--session",
+        help="Use this paper session's current holdings as the symbol set.",
+    ),
+    days: int = typer.Option(180, "--days", min=30),  # noqa: B008
+    threshold: float = typer.Option(0.7, "--threshold", min=0.0, max=1.0),  # noqa: B008
+    config_path: Path = typer.Option(None, "--config", "-c"),  # noqa: B008
+    top: int = typer.Option(10, "--top", min=1),  # noqa: B008
+) -> None:
+    """Return-correlation matrix + cluster + concentration report.
+
+    Historical OHLCV only (no paper data needed). Use `--session NAME` to
+    pull the held symbols and flag concentration — e.g. if two holdings
+    sit in the same correlation cluster the strategy is doubly exposed to
+    one bloc.
+    """
+    from bloasis.analysis.correlations import (
+        cluster_symbols,
+        concentration_report,
+        correlation_matrix,
+        returns_from_closes,
+        top_pairs,
+    )
+    from bloasis.data.cache import ParquetCache
+    from bloasis.data.fetchers.yfinance_ohlcv import YfOhlcvFetcher
+
+    holdings: list[str] = []
+    syms = [s.upper() for s in (symbols or [])]
+    if session is not None:
+        from bloasis.broker import AlpacaBrokerAdapter
+
+        broker = AlpacaBrokerAdapter(mode="paper")
+        holdings = [p.symbol for p in broker.get_positions()]
+        syms = sorted(set(syms) | set(holdings)) if syms else holdings
+
+    if len(syms) < 2:
+        raise typer.BadParameter("need >= 2 symbols (pass args or --session with >=2 holdings)")
+
+    cfg = _load_or_default_config(config_path)
+    cache = ParquetCache(cfg.data.cache_dir, namespace="ohlcv")
+    fetcher = YfOhlcvFetcher(cache=cache, max_age_hours=cfg.data.ohlcv_cache_max_age_hours)
+    end = datetime.now(tz=UTC).date()
+    start = end - timedelta(days=days)
+
+    closes = {}
+    for sym in syms:
+        try:
+            bars = fetcher.fetch(sym, start, end)
+            closes[sym] = bars["close"]
+        except Exception as exc:  # noqa: BLE001
+            console.print(f"[yellow]skip {sym}: {exc}[/yellow]")
+    if len(closes) < 2:
+        raise typer.BadParameter("fewer than 2 symbols had usable OHLCV")
+
+    returns = returns_from_closes(closes)
+    corr = correlation_matrix(returns)
+    clusters = cluster_symbols(corr, threshold=threshold)
+
+    pairs = top_pairs(corr, n=top)
+    pair_table = RichTable(title=f"top {len(pairs)} correlated pairs ({days}d returns)")
+    pair_table.add_column("pair", style="cyan")
+    pair_table.add_column("corr", justify="right")
+    for s1, s2, c in pairs:
+        pair_table.add_row(f"{s1} ~ {s2}", f"{c:+.2f}")
+    console.print(pair_table)
+
+    clu_table = RichTable(title=f"clusters (|corr| >= {threshold})")
+    clu_table.add_column("#", justify="right")
+    clu_table.add_column("size", justify="right")
+    clu_table.add_column("symbols")
+    for i, members in enumerate(clusters):
+        clu_table.add_row(str(i + 1), str(len(members)), ", ".join(members))
+    console.print(clu_table)
+
+    if holdings:
+        report = concentration_report(corr, holdings=holdings, threshold=threshold)
+        multi = [grp for grp in report if len(grp) > 1]
+        if multi:
+            console.print("[yellow]⚠ concentration — holdings in the same cluster:[/yellow]")
+            for grp in multi:
+                console.print(f"  [yellow]{', '.join(grp)}[/yellow]")
+        else:
+            console.print("[green]✓ holdings are spread across distinct clusters[/green]")
 
 
 if __name__ == "__main__":
