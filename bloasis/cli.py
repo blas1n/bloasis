@@ -2173,5 +2173,177 @@ def research_correlations(
             console.print("[green]✓ holdings are spread across distinct clusters[/green]")
 
 
+@research_app.command("post-spike")
+def research_post_spike(
+    symbols: list[str] = typer.Argument(...),  # noqa: B008
+    spike: float = typer.Option(0.05, "--spike", min=0.005),  # noqa: B008
+    horizon: int = typer.Option(5, "--horizon", min=1),  # noqa: B008
+    direction: str = typer.Option("up", "--direction"),  # noqa: B008
+    days: int = typer.Option(730, "--days", min=60),  # noqa: B008
+    config_path: Path = typer.Option(None, "--config", "-c"),  # noqa: B008
+) -> None:
+    """Post-spike mean-reversion study (the 'chasing news' question).
+
+    For each symbol, find days with a single-day move >= --spike in
+    --direction, then measure the cumulative return over the next
+    --horizon days. A negative mean = buying after the spike loses
+    on average (mean reversion). This is the systematic generalization
+    of "heard the news on the call, bought, watched it fall".
+    """
+    from bloasis.analysis.event_study import (
+        find_spike_dates,
+        forward_cum_returns,
+        summarize_forward,
+    )
+    from bloasis.data.cache import ParquetCache
+    from bloasis.data.fetchers.yfinance_ohlcv import YfOhlcvFetcher
+
+    if direction not in ("up", "down", "both"):
+        raise typer.BadParameter("--direction must be up|down|both")
+
+    cfg = _load_or_default_config(config_path)
+    cache = ParquetCache(cfg.data.cache_dir, namespace="ohlcv")
+    fetcher = YfOhlcvFetcher(cache=cache, max_age_hours=cfg.data.ohlcv_cache_max_age_hours)
+    end = datetime.now(tz=UTC).date()
+    start = end - timedelta(days=days)
+
+    all_fwd: list[float] = []
+    table = RichTable(
+        title=f"post-spike forward {horizon}d return (spike>={spike:.0%} {direction}, {days}d)"
+    )
+    table.add_column("symbol", style="cyan")
+    table.add_column("spikes", justify="right")
+    table.add_column("mean fwd", justify="right")
+    table.add_column("median", justify="right")
+    table.add_column("win%", justify="right")
+
+    for sym in [s.upper() for s in symbols]:
+        try:
+            bars = fetcher.fetch(sym, start, end)
+        except Exception as exc:  # noqa: BLE001
+            console.print(f"[yellow]skip {sym}: {exc}[/yellow]")
+            continue
+        spikes = find_spike_dates(bars["close"], threshold=spike, direction=direction)  # type: ignore[arg-type]
+        fwd = forward_cum_returns(bars["close"], spikes, horizon=horizon)
+        all_fwd.extend(fwd)
+        s = summarize_forward(fwd)
+        table.add_row(
+            sym,
+            str(int(s["n"])),
+            f"{s['mean']:+.2%}",
+            f"{s['median']:+.2%}",
+            f"{s['win_rate']:.0%}",
+        )
+
+    console.print(table)
+    agg = summarize_forward(all_fwd)
+    verdict = (
+        "chasing spikes LOSES (mean reverts)"
+        if agg["mean"] < 0
+        else "spikes continue (momentum)"
+        if agg["mean"] > 0
+        else "no edge"
+    )
+    console.print(
+        f"[bold]pooled[/bold] n={int(agg['n'])} mean={agg['mean']:+.2%} "
+        f"median={agg['median']:+.2%} win={agg['win_rate']:.0%} → {verdict}"
+    )
+
+
+@research_app.command("hub-earnings")
+def research_hub_earnings(
+    hub: str = typer.Argument(..., help="Hub ticker whose earnings drive the event."),  # noqa: B008
+    related: list[str] = typer.Argument(  # noqa: B008
+        ..., help="Related tickers to measure drift on after the hub reports."
+    ),
+    horizon: int = typer.Option(5, "--horizon", min=1),  # noqa: B008
+    days: int = typer.Option(1095, "--days", min=120),  # noqa: B008
+    config_path: Path = typer.Option(None, "--config", "-c"),  # noqa: B008
+) -> None:
+    """Cohen-Frazzini economic-link drift: do related names drift after
+    the hub reports earnings?
+
+    Uses the hub's historical earnings dates as events and measures each
+    related stock's forward --horizon return from the trading day after
+    the report. Positive mean = linked names react with a tradeable lag.
+    """
+    import pandas as pd
+
+    from bloasis.analysis.event_study import forward_cum_returns, summarize_forward
+    from bloasis.data.cache import ParquetCache
+    from bloasis.data.fetchers.yfinance_earnings import YfEarningsFetcher
+    from bloasis.data.fetchers.yfinance_ohlcv import YfOhlcvFetcher
+
+    cfg = _load_or_default_config(config_path)
+    cache = ParquetCache(cfg.data.cache_dir, namespace="ohlcv")
+    fetcher = YfOhlcvFetcher(cache=cache, max_age_hours=cfg.data.ohlcv_cache_max_age_hours)
+    earnings_cache = ParquetCache(cfg.data.cache_dir, namespace="earnings")
+    earnings_fetcher = YfEarningsFetcher(
+        cache=earnings_cache, max_age_hours=cfg.data.fundamentals_cache_max_age_hours
+    )
+
+    hub_u = hub.upper()
+    try:
+        earnings = earnings_fetcher.fetch(hub_u)
+    except Exception as exc:  # noqa: BLE001
+        raise typer.BadParameter(f"could not fetch {hub_u} earnings: {exc}") from exc
+    if earnings is None or earnings.empty:
+        console.print(f"[yellow]no earnings dates found for {hub_u}[/yellow]")
+        raise typer.Exit(code=1)
+    earnings_dates = [pd.Timestamp(d) for d in earnings.index]
+
+    end = datetime.now(tz=UTC).date()
+    start = end - timedelta(days=days)
+
+    table = RichTable(
+        title=f"{hub_u} earnings → related {horizon}d drift ({len(earnings_dates)} events)"
+    )
+    table.add_column("related", style="cyan")
+    table.add_column("events", justify="right")
+    table.add_column("mean drift", justify="right")
+    table.add_column("baseline", justify="right")
+    table.add_column("excess", justify="right")
+    table.add_column("win%", justify="right")
+
+    for sym in [s.upper() for s in related]:
+        try:
+            bars = fetcher.fetch(sym, start, end)
+        except Exception as exc:  # noqa: BLE001
+            console.print(f"[yellow]skip {sym}: {exc}[/yellow]")
+            continue
+        # Align earnings dates to the related stock's trading index — use
+        # the first trading day on/after each earnings date as the entry.
+        idx = bars.index
+        entries: list[pd.Timestamp] = []
+        for ed in earnings_dates:
+            after = idx[idx >= ed]
+            if len(after) > 0:
+                entries.append(after[0])
+        fwd = forward_cum_returns(bars["close"], entries, horizon=horizon)
+        s = summarize_forward(fwd)
+        # Baseline — unconditional mean forward return over EVERY trading
+        # day. Without this, a positive event drift can't be distinguished
+        # from "the whole name trended up this window" (regime/beta). The
+        # honest signal is the EXCESS of event drift over baseline.
+        all_days = list(idx[:-horizon]) if len(idx) > horizon else []
+        baseline = summarize_forward(forward_cum_returns(bars["close"], all_days, horizon=horizon))
+        excess = s["mean"] - baseline["mean"]
+        table.add_row(
+            sym,
+            str(int(s["n"])),
+            f"{s['mean']:+.2%}",
+            f"{baseline['mean']:+.2%}",
+            f"{excess:+.2%}",
+            f"{s['win_rate']:.0%}",
+        )
+
+    console.print(table)
+    console.print(
+        "[dim]drift = mean fwd return after hub earnings. baseline = mean fwd "
+        "return on ALL days. EXCESS (drift − baseline) is the real signal — "
+        "raw drift alone is mostly regime/beta. Daily bars miss intraday reaction.[/dim]"
+    )
+
+
 if __name__ == "__main__":
     app()
