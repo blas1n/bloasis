@@ -416,3 +416,53 @@ paper_equity_snapshots = Table(
     Column("n_positions", Integer, nullable=False),
     PrimaryKeyConstraint("session_id", "ts", name="pk_paper_equity_snapshots"),
 )
+
+
+# ---------------------------------------------------------------------------
+# Social-post mention pipeline (PR55) — Trump/CEO/etc. mention event study
+# ---------------------------------------------------------------------------
+# social_posts: raw post cache (re-fetchable, idempotent on post_id).
+# social_post_mentions: LLM-extracted (post, ticker) pairs with sentiment.
+# Separate table so multiple mentions per post are first-class rows and
+# re-extraction with a newer model just adds rows tagged with a new
+# extractor_version.
+
+social_posts = Table(
+    "social_posts",
+    metadata,
+    Column("post_id", String(64), primary_key=True),
+    Column("source", String(32), nullable=False),  # 'truth_social' / 'twitter'
+    Column("posted_at", DateTime(timezone=True), nullable=False),
+    Column("content", Text, nullable=False),
+    Column("url", String(512), nullable=True),
+    Column("fetched_at", DateTime(timezone=True), nullable=False),
+    Column("mentions_extracted_at", DateTime(timezone=True), nullable=True),
+    Column("extractor_version", Integer, nullable=True),
+)
+
+Index("idx_social_posts_posted_at", social_posts.c.posted_at)
+Index("idx_social_posts_extracted", social_posts.c.mentions_extracted_at)
+
+
+social_post_mentions = Table(
+    "social_post_mentions",
+    metadata,
+    Column(
+        "post_id",
+        String(64),
+        ForeignKey("social_posts.post_id"),
+        nullable=False,
+    ),
+    Column("ticker", String(16), nullable=False),
+    Column("sentiment", String(16), nullable=False),
+    Column("confidence", Float, nullable=False),
+    Column("extracted_at", DateTime(timezone=True), nullable=False),
+    Column("extractor_version", Integer, nullable=False),
+    PrimaryKeyConstraint("post_id", "ticker", "extractor_version", name="pk_social_post_mentions"),
+    CheckConstraint(
+        "sentiment IN ('positive', 'negative', 'neutral')",
+        name="ck_social_post_mentions_sentiment",
+    ),
+)
+
+Index("idx_social_post_mentions_ticker", social_post_mentions.c.ticker)

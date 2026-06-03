@@ -2345,5 +2345,230 @@ def research_hub_earnings(
     )
 
 
+# ---------------------------------------------------------------------------
+# Social-post mention pipeline (PR55) — Trump Truth Social event study
+# ---------------------------------------------------------------------------
+
+
+@research_app.command("mentions-fetch")
+def research_mentions_fetch(
+    config_path: Path = typer.Option(None, "--config", "-c"),  # noqa: B008
+) -> None:
+    """Pull the public Truth Social archive into social_posts (idempotent)."""
+    from bloasis.analysis.mention_pipeline import fetch_archive_to_db
+    from bloasis.storage import create_all
+
+    cfg = _load_or_default_config(config_path)
+    engine = get_engine()
+    create_all(engine)
+    _ = cfg  # config currently unused; reserved for future archive-URL knobs
+    n = fetch_archive_to_db(engine, console=console)
+    console.print(f"[green]✓[/green] processed {n} posts (existing skipped)")
+
+
+@research_app.command("mentions-extract")
+def research_mentions_extract(
+    limit: int = typer.Option(  # noqa: B008
+        500,
+        "--limit",
+        min=1,
+        help="Max posts to extract this batch. Re-run until 0 remain.",
+    ),
+    only_after: str = typer.Option(  # noqa: B008
+        None, "--after", help="ISO date — skip posts older than this."
+    ),
+    model: str = typer.Option(  # noqa: B008
+        "ollama_chat/llama3.2:3b", "--model"
+    ),
+    api_base: str = typer.Option(  # noqa: B008
+        "http://localhost:11434", "--api-base"
+    ),
+    config_path: Path = typer.Option(None, "--config", "-c"),  # noqa: B008
+) -> None:
+    """LLM-extract (ticker, sentiment) from un-processed posts.
+
+    Filters output against the SP500 ticker whitelist so the model can't
+    invent tickers. Idempotent — re-running picks up new posts only.
+    """
+    from datetime import UTC, datetime
+
+    from bloasis.analysis.mention_pipeline import (
+        MentionExtractor,
+        load_sp500_tickers,
+        run_extraction_batch,
+    )
+    from bloasis.storage import create_all
+
+    cfg = _load_or_default_config(config_path)
+    engine = get_engine()
+    create_all(engine)
+
+    after_dt = None
+    if only_after is not None:
+        after_dt = datetime.fromisoformat(only_after).replace(tzinfo=UTC)
+
+    whitelist = load_sp500_tickers(cfg.data.cache_dir)
+    console.print(f"[dim]ticker whitelist size: {len(whitelist)}[/dim]")
+    extractor = MentionExtractor(ticker_whitelist=whitelist, model=model, api_base=api_base)
+    n_posts, n_mentions = run_extraction_batch(
+        engine,
+        extractor,
+        limit=limit,
+        only_after=after_dt,
+        console=console,
+    )
+    console.print(f"[green]✓[/green] extracted {n_posts} posts, {n_mentions} mentions")
+
+
+@research_app.command("mentions-study")
+def research_mentions_study(
+    ticker: str = typer.Option(  # noqa: B008
+        None, "--ticker", help="Restrict to one ticker. Omit for all."
+    ),
+    sentiment: str = typer.Option(  # noqa: B008
+        None, "--sentiment", help="positive | negative | neutral"
+    ),
+    horizon: int = typer.Option(5, "--horizon", min=1),  # noqa: B008
+    since: str = typer.Option("2024-01-01", "--since"),  # noqa: B008
+    config_path: Path = typer.Option(None, "--config", "-c"),  # noqa: B008
+) -> None:
+    """Decompose mention impact into gap / intraday / forward by timing bucket.
+
+    For each (mention, ticker) event, classify the post's UTC timestamp
+    into IN_HOURS / AFTER_HOURS / OVERNIGHT / WEEKEND, then look up the
+    entry-open date and compute gap/intraday/forward. Aggregate by
+    timing bucket so we can see WHERE the move sits.
+
+    A high gap-fraction = HFT/insiders captured the bulk; retail only
+    gets the residual. Low gap-fraction with positive forward = the
+    Cohen-Frazzini lag is alive and retail-feasible.
+    """
+    from datetime import UTC, datetime
+
+    from sqlalchemy import select
+
+    from bloasis.analysis.mention_event_study import (
+        decompose_event_return,
+        summarize_decomposed,
+    )
+    from bloasis.analysis.mention_timing import (
+        MentionTiming,
+        classify_mention_timing,
+        entry_open_date,
+    )
+    from bloasis.data.cache import ParquetCache
+    from bloasis.data.fetchers.yfinance_ohlcv import YfOhlcvFetcher
+    from bloasis.storage import social_post_mentions, social_posts
+
+    cfg = _load_or_default_config(config_path)
+    engine = get_engine()
+    since_dt = datetime.fromisoformat(since).replace(tzinfo=UTC)
+
+    with engine.connect() as conn:
+        q = (
+            select(
+                social_posts.c.post_id,
+                social_posts.c.posted_at,
+                social_post_mentions.c.ticker,
+                social_post_mentions.c.sentiment,
+            )
+            .select_from(
+                social_posts.join(
+                    social_post_mentions,
+                    social_posts.c.post_id == social_post_mentions.c.post_id,
+                )
+            )
+            .where(social_posts.c.posted_at >= since_dt)
+        )
+        if ticker is not None:
+            q = q.where(social_post_mentions.c.ticker == ticker.upper())
+        if sentiment is not None:
+            q = q.where(social_post_mentions.c.sentiment == sentiment.lower())
+        events = conn.execute(q).fetchall()
+
+    if not events:
+        console.print(f"[yellow]no mentions matched (since={since})[/yellow]")
+        raise typer.Exit(code=1)
+
+    cache = ParquetCache(cfg.data.cache_dir, namespace="ohlcv")
+    fetcher = YfOhlcvFetcher(cache=cache, max_age_hours=cfg.data.ohlcv_cache_max_age_hours)
+
+    # Group events by bucket; fetch OHLCV per-ticker once.
+    bars_cache: dict[str, object] = {}
+    end_d = datetime.now(tz=UTC).date()
+    start_d = since_dt.date()
+    by_bucket: dict[MentionTiming, list[dict[str, float]]] = {t: [] for t in MentionTiming}
+    skipped = 0
+    for ev in events:
+        sym = ev.ticker
+        if sym not in bars_cache:
+            try:
+                bars_cache[sym] = fetcher.fetch(sym, start_d, end_d)
+            except Exception as exc:  # noqa: BLE001
+                console.print(f"[yellow]skip {sym}: {exc}[/yellow]")
+                bars_cache[sym] = None
+        bars = bars_cache[sym]
+        if bars is None or getattr(bars, "empty", True):
+            skipped += 1
+            continue
+        bucket = classify_mention_timing(ev.posted_at)
+        entry_d = entry_open_date(ev.posted_at)
+        decomp = decompose_event_return(
+            bars,  # type: ignore[arg-type]
+            entry_date=entry_d,
+            horizon=horizon,
+        )
+        if decomp is None:
+            skipped += 1
+            continue
+        by_bucket[bucket].append(decomp)
+
+    table = RichTable(
+        title=f"Trump mentions: gap / intraday / forward (h={horizon}d, since {since})"
+    )
+    table.add_column("timing", style="cyan")
+    table.add_column("n", justify="right")
+    table.add_column("mean gap", justify="right")
+    table.add_column("mean intraday", justify="right")
+    table.add_column("mean fwd", justify="right")
+    table.add_column("mean total", justify="right")
+    table.add_column("gap %", justify="right")
+
+    for bucket in MentionTiming:
+        s = summarize_decomposed(by_bucket[bucket])
+        table.add_row(
+            bucket.value,
+            str(int(s["n"])),
+            f"{s['mean_gap']:+.2%}",
+            f"{s['mean_intraday']:+.2%}",
+            f"{s['mean_forward']:+.2%}",
+            f"{s['mean_total']:+.2%}",
+            f"{s['gap_fraction'] * 100:.0f}%",
+        )
+
+    # pooled across buckets
+    all_rows = [r for rows in by_bucket.values() for r in rows]
+    pooled = summarize_decomposed(all_rows)
+    table.add_row(
+        "[bold]pooled[/bold]",
+        f"[bold]{int(pooled['n'])}[/bold]",
+        f"[bold]{pooled['mean_gap']:+.2%}[/bold]",
+        f"[bold]{pooled['mean_intraday']:+.2%}[/bold]",
+        f"[bold]{pooled['mean_forward']:+.2%}[/bold]",
+        f"[bold]{pooled['mean_total']:+.2%}[/bold]",
+        f"[bold]{pooled['gap_fraction'] * 100:.0f}%[/bold]",
+    )
+
+    console.print(table)
+    console.print(
+        f"[dim]events used: {pooled['n']} | skipped (no bars / no forward): {skipped}[/dim]"
+    )
+    console.print(
+        "[dim]gap = pre-market / overnight reaction (HFT-captured). "
+        "intraday + forward = retail-feasible residual. high gap % = "
+        "retail too late.[/dim]"
+    )
+
+
 if __name__ == "__main__":
     app()

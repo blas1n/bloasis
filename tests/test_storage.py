@@ -58,9 +58,8 @@ def test_create_all_is_idempotent(tmp_db_path: Path) -> None:
 
 
 def test_metadata_table_count_matches() -> None:
-    # Sanity: schema module exposes 7 backtest/live tables + 3 paper tables
-    # (paper_sessions, paper_orders, paper_equity_snapshots) added in PR45.
-    assert len(metadata.tables) == 10
+    # Sanity: 7 backtest/live + 3 paper (PR45) + 2 social (PR55) = 12.
+    assert len(metadata.tables) == 12
 
 
 # ---------------------------------------------------------------------------
