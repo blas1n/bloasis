@@ -17,6 +17,8 @@ from bloasis.storage.schema import (
     paper_orders,
     paper_sessions,
     positions,
+    social_post_mentions,
+    social_posts,
     trades,
 )
 
@@ -33,6 +35,8 @@ __all__ = [
     "paper_orders",
     "paper_sessions",
     "positions",
+    "social_post_mentions",
+    "social_posts",
     "trades",
     "writers",
 ]

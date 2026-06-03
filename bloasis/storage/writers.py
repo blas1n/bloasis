@@ -420,3 +420,93 @@ def update_paper_order_fill(
                 slippage_bps=slippage_bps,
             )
         )
+
+
+# ---------------------------------------------------------------------------
+# Social-post mention pipeline (PR55)
+# ---------------------------------------------------------------------------
+
+
+def upsert_social_post(
+    engine: Engine,
+    *,
+    post_id: str,
+    source: str,
+    posted_at: datetime,
+    content: str,
+    url: str | None,
+) -> None:
+    """Insert-or-ignore a post by post_id. Re-fetching the same archive
+    is idempotent — same post_id won't duplicate, content / engagement
+    fields are NOT updated (we trust the first capture)."""
+    from bloasis.storage.schema import social_posts
+
+    now = datetime.now(tz=UTC)
+    with engine.begin() as conn:
+        existing = conn.execute(
+            select(social_posts.c.post_id).where(social_posts.c.post_id == post_id)
+        ).fetchone()
+        if existing is not None:
+            return
+        conn.execute(
+            insert(social_posts).values(
+                post_id=post_id,
+                source=source,
+                posted_at=posted_at,
+                content=content,
+                url=url,
+                fetched_at=now,
+            )
+        )
+
+
+def write_mention(
+    engine: Engine,
+    *,
+    post_id: str,
+    ticker: str,
+    sentiment: str,
+    confidence: float,
+    extractor_version: int,
+) -> None:
+    """Insert one (post, ticker, version) mention row. Composite PK
+    (post_id, ticker, extractor_version) makes re-extraction with a
+    newer model additive rather than destructive."""
+    from bloasis.storage.schema import social_post_mentions
+
+    now = datetime.now(tz=UTC)
+    with engine.begin() as conn:
+        existing = conn.execute(
+            select(social_post_mentions).where(
+                social_post_mentions.c.post_id == post_id,
+                social_post_mentions.c.ticker == ticker,
+                social_post_mentions.c.extractor_version == extractor_version,
+            )
+        ).fetchone()
+        if existing is not None:
+            return
+        conn.execute(
+            insert(social_post_mentions).values(
+                post_id=post_id,
+                ticker=ticker,
+                sentiment=sentiment,
+                confidence=confidence,
+                extracted_at=now,
+                extractor_version=extractor_version,
+            )
+        )
+
+
+def mark_post_extracted(engine: Engine, *, post_id: str, extractor_version: int) -> None:
+    """Stamp a post as extracted so the batch job skips it next time.
+    Used even when zero tickers were detected — null result is still a
+    result and shouldn't be re-processed by the same extractor."""
+    from bloasis.storage.schema import social_posts
+
+    now = datetime.now(tz=UTC)
+    with engine.begin() as conn:
+        conn.execute(
+            update(social_posts)
+            .where(social_posts.c.post_id == post_id)
+            .values(mentions_extracted_at=now, extractor_version=extractor_version)
+        )
