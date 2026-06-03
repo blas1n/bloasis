@@ -2448,6 +2448,7 @@ def research_mentions_study(
     from sqlalchemy import select
 
     from bloasis.analysis.mention_event_study import (
+        compute_baseline_forward,
         decompose_event_return,
         summarize_decomposed,
     )
@@ -2493,8 +2494,13 @@ def research_mentions_study(
     cache = ParquetCache(cfg.data.cache_dir, namespace="ohlcv")
     fetcher = YfOhlcvFetcher(cache=cache, max_age_hours=cfg.data.ohlcv_cache_max_age_hours)
 
-    # Group events by bucket; fetch OHLCV per-ticker once.
+    # Group events by bucket; fetch OHLCV per-ticker once. Per-ticker
+    # baseline (PR56) — unconditional mean forward return over the
+    # window. The honest mention edge is mean_excess = mean_forward −
+    # mean_baseline; without baseline, +0.7% pooled fwd in a tech bull
+    # market is indistinguishable from regime drift.
     bars_cache: dict[str, object] = {}
+    baseline_cache: dict[str, float] = {}
     end_d = datetime.now(tz=UTC).date()
     start_d = since_dt.date()
     by_bucket: dict[MentionTiming, list[dict[str, float]]] = {t: [] for t in MentionTiming}
@@ -2507,6 +2513,12 @@ def research_mentions_study(
             except Exception as exc:  # noqa: BLE001
                 console.print(f"[yellow]skip {sym}: {exc}[/yellow]")
                 bars_cache[sym] = None
+            bars_obj = bars_cache[sym]
+            if bars_obj is not None and not getattr(bars_obj, "empty", True):
+                baseline_cache[sym] = compute_baseline_forward(
+                    bars_obj,  # type: ignore[arg-type]
+                    horizon=horizon,
+                )
         bars = bars_cache[sym]
         if bars is None or getattr(bars, "empty", True):
             skipped += 1
@@ -2521,6 +2533,7 @@ def research_mentions_study(
         if decomp is None:
             skipped += 1
             continue
+        decomp["baseline"] = baseline_cache.get(sym, 0.0)
         by_bucket[bucket].append(decomp)
 
     table = RichTable(
@@ -2531,42 +2544,48 @@ def research_mentions_study(
     table.add_column("mean gap", justify="right")
     table.add_column("mean intraday", justify="right")
     table.add_column("mean fwd", justify="right")
+    table.add_column("baseline", justify="right")
+    table.add_column("excess", justify="right")
     table.add_column("mean total", justify="right")
     table.add_column("gap %", justify="right")
 
-    for bucket in MentionTiming:
-        s = summarize_decomposed(by_bucket[bucket])
+    def _row(label: str, s: dict[str, float], *, bold: bool) -> None:
+        def fmt(x: float) -> str:
+            return f"[bold]{x:+.2%}[/bold]" if bold else f"{x:+.2%}"
+
+        baseline = s.get("mean_baseline", 0.0)
+        excess = s.get("mean_excess", s["mean_forward"])
         table.add_row(
-            bucket.value,
-            str(int(s["n"])),
-            f"{s['mean_gap']:+.2%}",
-            f"{s['mean_intraday']:+.2%}",
-            f"{s['mean_forward']:+.2%}",
-            f"{s['mean_total']:+.2%}",
-            f"{s['gap_fraction'] * 100:.0f}%",
+            f"[bold]{label}[/bold]" if bold else label,
+            f"[bold]{int(s['n'])}[/bold]" if bold else str(int(s["n"])),
+            fmt(s["mean_gap"]),
+            fmt(s["mean_intraday"]),
+            fmt(s["mean_forward"]),
+            fmt(baseline),
+            fmt(excess),
+            fmt(s["mean_total"]),
+            f"[bold]{s['gap_fraction'] * 100:.0f}%[/bold]"
+            if bold
+            else f"{s['gap_fraction'] * 100:.0f}%",
         )
+
+    for bucket in MentionTiming:
+        _row(bucket.value, summarize_decomposed(by_bucket[bucket]), bold=False)
 
     # pooled across buckets
     all_rows = [r for rows in by_bucket.values() for r in rows]
-    pooled = summarize_decomposed(all_rows)
-    table.add_row(
-        "[bold]pooled[/bold]",
-        f"[bold]{int(pooled['n'])}[/bold]",
-        f"[bold]{pooled['mean_gap']:+.2%}[/bold]",
-        f"[bold]{pooled['mean_intraday']:+.2%}[/bold]",
-        f"[bold]{pooled['mean_forward']:+.2%}[/bold]",
-        f"[bold]{pooled['mean_total']:+.2%}[/bold]",
-        f"[bold]{pooled['gap_fraction'] * 100:.0f}%[/bold]",
-    )
+    _row("pooled", summarize_decomposed(all_rows), bold=True)
 
     console.print(table)
+    pooled = summarize_decomposed(all_rows)
     console.print(
         f"[dim]events used: {pooled['n']} | skipped (no bars / no forward): {skipped}[/dim]"
     )
     console.print(
         "[dim]gap = pre-market / overnight reaction (HFT-captured). "
-        "intraday + forward = retail-feasible residual. high gap % = "
-        "retail too late.[/dim]"
+        "intraday + forward = retail-feasible residual. baseline = mean "
+        "forward return on ALL days for the same ticker (regime). "
+        "EXCESS (fwd − baseline) is the honest mention edge.[/dim]"
     )
 
 

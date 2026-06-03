@@ -127,6 +127,32 @@ NAME_TO_TICKER: dict[str, str] = {
     "morgan stanley": "MS",
     "citi": "C",
     "citigroup": "C",
+    # ------------------------------------------------------------------
+    # CEO / founder names (PR56)
+    #
+    # Trump rarely uses company names — he uses people's names. "Bezos"
+    # for Amazon (Washington Post angle), "Zuckerberg" for Meta, "Tim
+    # Cook" for Apple (tariff calls), "Elon" for Tesla, "Jensen Huang"
+    # for Nvidia (chip-export decisions). Without these, the v2 prefilter
+    # misses every personality-mode mention.
+    #
+    # Single-token names are added only when the token is rare in prose
+    # ('bezos', 'zuckerberg' don't collide; 'cook' / 'jensen' do, so we
+    # require the full phrase 'tim cook' / 'jensen huang').
+    # ------------------------------------------------------------------
+    "bezos": "AMZN",
+    "zuckerberg": "META",
+    "zuck": "META",
+    "tim cook": "AAPL",
+    "elon": "TSLA",
+    "elon musk": "TSLA",
+    "jensen huang": "NVDA",
+    "sundar pichai": "GOOGL",
+    "satya nadella": "MSFT",
+    "jamie dimon": "JPM",
+    "warren buffett": "BRK-B",
+    "larry fink": "BLK",
+    "andy jassy": "AMZN",
 }
 
 # Ticker symbols that are common English words — never match these on
@@ -270,7 +296,7 @@ class MentionExtractor:
     api_base: str = "http://localhost:11434"
     temperature: float = 0.0
     max_tokens: int = 32
-    extractor_version: int = 2  # bumped: hybrid extractor (was monolithic LLM in v1)
+    extractor_version: int = 3  # PR56: NAME_TO_TICKER + CEO/founder names
 
     # Hybrid design: deterministic NER (is_stock_candidate) + LLM sentiment.
     # The earlier v1 prompted the LLM to do both, which made llama3.2:3b

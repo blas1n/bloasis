@@ -141,3 +141,71 @@ def test_extractor_parses_sentiment_falls_back_to_neutral() -> None:
 def test_extractor_clamps_invalid_sentiment_label() -> None:
     s, _ = MentionExtractor._parse_sentiment('{"sentiment":"bullish","confidence":0.7}')
     assert s == "neutral"
+
+
+# ---------------------------------------------------------------------------
+# PR56 — CEO / founder names expansion
+#
+# Trump rarely says "Amazon" — he says "Bezos". Same for Zuckerberg / META,
+# Tim Cook / AAPL, Elon / TSLA, Jensen Huang / NVDA. The v2 dictionary
+# missed every CEO-referencing post; v3 adds the names directly. Composite
+# PK on extractor_version means re-extraction accumulates new (CEO-
+# referencing) mentions without overwriting v2 rows.
+# ---------------------------------------------------------------------------
+
+
+def test_prefilter_matches_bezos_to_amzn() -> None:
+    """'Bezos' (Trump's typical Amazon reference) routes to AMZN."""
+    content = "Bezos and the Washington Post are at it again."
+    assert is_stock_candidate(content, _SP500) == {"AMZN"}
+
+
+def test_prefilter_matches_zuckerberg_to_meta() -> None:
+    content = "Zuckerberg has destroyed our democracy."
+    assert is_stock_candidate(content, _SP500) == {"META"}
+
+
+def test_prefilter_matches_tim_cook_to_aapl() -> None:
+    """Multi-word 'tim cook' must be matched as a phrase, not 'cook'."""
+    content = "I had a great call with Tim Cook today about tariffs."
+    assert is_stock_candidate(content, _SP500) == {"AAPL"}
+
+
+def test_prefilter_matches_elon_to_tsla() -> None:
+    content = "Elon is making fantastic electric cars in Texas."
+    assert is_stock_candidate(content, _SP500) == {"TSLA"}
+
+
+def test_prefilter_matches_jensen_huang_to_nvda() -> None:
+    """The KOSPI-rally trigger phrase from June 2026."""
+    content = "Jensen Huang visited Korea and met with Samsung leadership."
+    assert is_stock_candidate(content, _SP500) == {"NVDA"}
+
+
+def test_prefilter_matches_warren_buffett_to_brk() -> None:
+    content = "Warren Buffett is a great American."
+    assert NAME_TO_TICKER.get("warren buffett") == "BRK-B"
+    assert is_stock_candidate(content, _SP500 | {"BRK-B"}) == {"BRK-B"}
+
+
+def test_prefilter_jensen_alone_does_not_collide() -> None:
+    """Bare 'jensen' (without huang) should NOT match — only the full
+    name routes to NVDA. Avoids collisions with other Jensens."""
+    content = "Jensen wrote a letter to Congress."
+    assert is_stock_candidate(content, _SP500) == set()
+
+
+def test_prefilter_cook_alone_does_not_collide() -> None:
+    """Bare 'cook' must not match AAPL — common verb in prose ('cook the
+    books', 'cook dinner'). Only the phrase 'tim cook'."""
+    content = "We need to cook up a better trade deal."
+    assert is_stock_candidate(content, _SP500) == set()
+
+
+def test_extractor_version_bumped_to_3_for_ceo_expansion() -> None:
+    """v3 = NAME_TO_TICKER expanded with CEO/founder names. Composite PK
+    (post_id, ticker, extractor_version) means re-extraction creates NEW
+    rows rather than overwriting v2 — historical data is preserved.
+    """
+    ex = MentionExtractor(ticker_whitelist=_SP500)
+    assert ex.extractor_version == 3

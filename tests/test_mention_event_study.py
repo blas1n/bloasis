@@ -18,6 +18,7 @@ import pandas as pd
 import pytest
 
 from bloasis.analysis.mention_event_study import (
+    compute_baseline_forward,
     decompose_event_return,
     summarize_decomposed,
 )
@@ -103,3 +104,81 @@ def test_summarize_decomposed_zero_total_avoids_divzero() -> None:
     rows = [{"gap": 0.0, "intraday": 0.0, "forward": 0.0, "total": 0.0}]
     s = summarize_decomposed(rows)
     assert s["gap_fraction"] == 0.0
+
+
+# ---------------------------------------------------------------------------
+# PR56 — baseline (regime control) for the forward leg
+#
+# A positive mean forward return after Trump mentions doesn't prove a
+# Trump-mention edge — over 2024-2026 a basket of AMZN/AAPL/META/NVDA
+# drifted up regardless. The honest comparison is excess = event_forward
+# − baseline_forward_of_same_ticker. compute_baseline_forward measures
+# the per-ticker unconditional mean of close[T+h]/open[T]-1 over every
+# valid trading day in the window.
+# ---------------------------------------------------------------------------
+
+
+def test_compute_baseline_forward_basic() -> None:
+    """Mean over all valid (T, T+h) pairs of close[T+h]/open[T]-1."""
+    bars = _bars()
+    # horizon=1 → valid T's are positions 0..len-2 (5 of 6 bars). Per-T
+    # forward = close[T+1] / open[T] - 1.
+    h = 1
+    expected = (
+        (112 / 100 - 1) + (114 / 110 - 1) + (117 / 113 - 1) + (119 / 115 - 1) + (122 / 118 - 1)
+    ) / 5
+    assert compute_baseline_forward(bars, horizon=h) == pytest.approx(expected)
+
+
+def test_compute_baseline_forward_horizon2() -> None:
+    bars = _bars()
+    # horizon=2 → valid T's are positions 0..len-3 (4 of 6 bars).
+    h = 2
+    expected = ((114 / 100 - 1) + (117 / 110 - 1) + (119 / 113 - 1) + (122 / 115 - 1)) / 4
+    assert compute_baseline_forward(bars, horizon=h) == pytest.approx(expected)
+
+
+def test_compute_baseline_forward_too_few_bars_returns_zero() -> None:
+    """When len(bars) <= horizon, no valid forward window exists."""
+    bars = pd.DataFrame(
+        {"open": [100.0, 110.0], "close": [102.0, 112.0]},
+        index=pd.DatetimeIndex(["2026-06-01", "2026-06-02"], tz="UTC"),
+    )
+    assert compute_baseline_forward(bars, horizon=2) == 0.0
+    assert compute_baseline_forward(bars, horizon=5) == 0.0
+
+
+def test_compute_baseline_forward_filters_zero_open() -> None:
+    """Zero / negative opens must not produce inf or NaN baseline."""
+    bars = pd.DataFrame(
+        {
+            "open": [100.0, 0.0, 113.0, 115.0],
+            "close": [102.0, 112.0, 114.0, 117.0],
+        },
+        index=pd.DatetimeIndex(["2026-06-01", "2026-06-02", "2026-06-03", "2026-06-04"], tz="UTC"),
+    )
+    # horizon=1: valid pairs are (T=0: 112/100), (T=2: 117/113). T=1 (open=0)
+    # is filtered out.
+    h = 1
+    expected = ((112 / 100 - 1) + (117 / 113 - 1)) / 2
+    assert compute_baseline_forward(bars, horizon=h) == pytest.approx(expected)
+
+
+def test_summarize_decomposed_reports_mean_baseline_when_present() -> None:
+    """If rows carry 'baseline', summary returns mean_baseline + mean_excess."""
+    rows = [
+        {"gap": 0.01, "intraday": 0.00, "forward": 0.05, "total": 0.06, "baseline": 0.02},
+        {"gap": 0.02, "intraday": 0.00, "forward": 0.03, "total": 0.05, "baseline": 0.01},
+    ]
+    s = summarize_decomposed(rows)
+    assert s["mean_baseline"] == pytest.approx(0.015)
+    assert s["mean_excess"] == pytest.approx(s["mean_forward"] - s["mean_baseline"])
+
+
+def test_summarize_decomposed_excess_absent_when_no_baseline() -> None:
+    """Rows without 'baseline' key → no mean_baseline / mean_excess fields
+    (preserves backward compat with v1 callers)."""
+    rows = [{"gap": 0.01, "intraday": 0.00, "forward": 0.05, "total": 0.06}]
+    s = summarize_decomposed(rows)
+    assert "mean_baseline" not in s
+    assert "mean_excess" not in s
