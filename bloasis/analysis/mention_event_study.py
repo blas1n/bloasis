@@ -71,12 +71,46 @@ def decompose_event_return(
     }
 
 
+def compute_baseline_forward(bars: pd.DataFrame, *, horizon: int) -> float:
+    """Unconditional mean forward return (close[T+h] / open[T] − 1).
+
+    Per-ticker regime baseline against which event-conditioned forward
+    returns should be compared. Without subtracting this, a positive
+    mention-driven forward return can't be distinguished from "the
+    ticker was drifting up in this window regardless" (bull market /
+    beta). The honest signal is excess = event_forward − baseline.
+
+    Computed over every valid trading day in the window; opens of zero
+    or below are filtered (suspicious bars, skip rather than blow the
+    mean to inf / NaN). Returns 0.0 when no valid (T, T+h) pair exists.
+    """
+    if horizon < 1:
+        raise ValueError("horizon must be >= 1")
+    n = len(bars)
+    if n <= horizon:
+        return 0.0
+    opens = bars["open"].iloc[:-horizon].to_numpy()
+    closes = bars["close"].iloc[horizon:].to_numpy()
+    valid = opens > 0
+    if not valid.any():
+        return 0.0
+    returns = closes[valid] / opens[valid] - 1.0
+    return float(returns.mean())
+
+
 def summarize_decomposed(rows: list[EventRow]) -> dict[str, float]:
     """Aggregate per-event decompositions.
 
     ``gap_fraction`` answers the retail question: what share of the
     average event total move was the opening gap? Approaches 1 = HFT
     captured everything; approaches 0 = move played out post-open.
+
+    When every row carries a ``baseline`` field (per-ticker
+    unconditional forward return from ``compute_baseline_forward``),
+    the summary also reports ``mean_baseline`` and ``mean_excess``
+    (= mean_forward − mean_baseline) — the regime-adjusted edge.
+    Mixed presence is treated as absent to avoid silently biasing
+    the mean over a partial subset.
     """
     n = len(rows)
     if n == 0:
@@ -93,7 +127,7 @@ def summarize_decomposed(rows: list[EventRow]) -> dict[str, float]:
     mean_forward = sum(r["forward"] for r in rows) / n
     mean_total = sum(r["total"] for r in rows) / n
     gap_fraction = mean_gap / mean_total if mean_total != 0 else 0.0
-    return {
+    out: dict[str, float] = {
         "n": n,
         "mean_gap": mean_gap,
         "mean_intraday": mean_intraday,
@@ -101,3 +135,8 @@ def summarize_decomposed(rows: list[EventRow]) -> dict[str, float]:
         "mean_total": mean_total,
         "gap_fraction": gap_fraction,
     }
+    if all("baseline" in r for r in rows):
+        mean_baseline = sum(r["baseline"] for r in rows) / n
+        out["mean_baseline"] = mean_baseline
+        out["mean_excess"] = mean_forward - mean_baseline
+    return out
