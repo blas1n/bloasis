@@ -58,8 +58,8 @@ def test_create_all_is_idempotent(tmp_db_path: Path) -> None:
 
 
 def test_metadata_table_count_matches() -> None:
-    # Sanity: 7 backtest/live + 3 paper (PR45) + 2 social (PR55) = 12.
-    assert len(metadata.tables) == 12
+    # 7 backtest/live + 3 paper (PR45) + 2 social (PR55) + 1 predictions (PR57) = 13.
+    assert len(metadata.tables) == 13
 
 
 # ---------------------------------------------------------------------------

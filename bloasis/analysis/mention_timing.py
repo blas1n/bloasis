@@ -19,7 +19,7 @@ The bucket is what lets us split "gap" (HFT-captured) from "intraday
 
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from enum import StrEnum
 from zoneinfo import ZoneInfo
 
@@ -47,7 +47,16 @@ def _in_session(et_dt: datetime) -> bool:
 
 
 def classify_mention_timing(ts_utc: datetime) -> MentionTiming:
-    """Bucket a UTC timestamp by its position relative to the US session."""
+    """Bucket a UTC timestamp by its position relative to the US session.
+
+    Naive datetimes are treated as UTC. SQLite strips tzinfo on
+    round-trip, and treating naive-as-system-tz would silently shift
+    every bucket on a non-UTC host (e.g. KST). Writers always store
+    UTC, so the assumption is safe and matches what the persisted data
+    actually represents.
+    """
+    if ts_utc.tzinfo is None:
+        ts_utc = ts_utc.replace(tzinfo=UTC)
     et = ts_utc.astimezone(_ET)
     if et.weekday() >= 5:  # Sat=5, Sun=6
         return MentionTiming.WEEKEND
@@ -81,6 +90,8 @@ def entry_open_date(ts_utc: datetime) -> date:
       AFTER_HOURS → next day's open
       WEEKEND    → next Monday's open (handled by _next_business_day)
     """
+    if ts_utc.tzinfo is None:
+        ts_utc = ts_utc.replace(tzinfo=UTC)
     timing = classify_mention_timing(ts_utc)
     et = ts_utc.astimezone(_ET)
     if timing is MentionTiming.OVERNIGHT:

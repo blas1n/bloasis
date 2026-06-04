@@ -12,8 +12,8 @@ in-sample bias when measuring the ML scorer).
 
 from __future__ import annotations
 
-from datetime import datetime
-from typing import TYPE_CHECKING
+from datetime import date, datetime, timedelta
+from typing import TYPE_CHECKING, Any
 
 import pandas as pd
 from sqlalchemy import select
@@ -23,6 +23,7 @@ from bloasis.storage import feature_log
 
 if TYPE_CHECKING:
     from sqlalchemy import Engine
+    from sqlalchemy.engine import Row
 
 VALID_LABEL_COLUMNS = ("forward_return_5d", "forward_return_20d", "forward_return_60d")
 
@@ -80,3 +81,89 @@ def load_labeled_feature_log(
     for col in (*FEATURE_COLUMNS, label_column):
         df[col] = pd.to_numeric(df[col], errors="coerce")
     return df
+
+
+# ---------------------------------------------------------------------------
+# Mention predictions (PR57)
+# ---------------------------------------------------------------------------
+
+
+def list_unsettled_mention_predictions(engine: Engine, *, as_of: date) -> list[Row[Any]]:
+    """Rows where entry_date + horizon_days <= as_of AND settled_at IS NULL.
+
+    Returns SQLAlchemy ``Row`` objects (mapped attribute access). The
+    daily settle job iterates these to fill realized_fwd / baseline /
+    excess from yfinance OHLCV.
+    """
+    from bloasis.storage import mention_predictions
+
+    # SQLite-friendly date comparison: entry_date + horizon_days <= as_of_dt.
+    # We do the math in Python via two-pass — first fetch unsettled, then
+    # filter ripeness — to avoid dialect-specific date arithmetic.
+    stmt = (
+        select(mention_predictions)
+        .where(mention_predictions.c.settled_at.is_(None))
+        .order_by(mention_predictions.c.entry_date.asc())
+    )
+    with engine.connect() as conn:
+        rows = conn.execute(stmt).all()
+    out: list[Row[Any]] = []
+    for r in rows:
+        ed: datetime = r.entry_date
+        ed_d = ed.date() if isinstance(ed, datetime) else ed
+        if ed_d + timedelta(days=r.horizon_days) <= as_of:
+            out.append(r)
+    return out
+
+
+def list_untracked_mentions(
+    engine: Engine, *, extractor_version: int, horizon_days: int
+) -> list[Row[Any]]:
+    """Negative + (after_hours | overnight) mentions with NO prediction
+    row at (extractor_version, horizon_days) yet. These are the
+    candidates for the daily ``mentions-track`` predict pass.
+
+    The bucket filter is done in Python so the timing classifier
+    (``mention_timing``) stays the single source of truth — the DB does
+    not store the bucket on the mention row.
+    """
+    from bloasis.analysis.mention_timing import MentionTiming, classify_mention_timing
+    from bloasis.storage import mention_predictions, social_post_mentions, social_posts
+
+    # Join mention + post to get posted_at, exclude rows already predicted
+    # at this (extractor_version, horizon_days).
+    existing = select(
+        mention_predictions.c.post_id,
+        mention_predictions.c.ticker,
+    ).where(
+        mention_predictions.c.extractor_version == extractor_version,
+        mention_predictions.c.horizon_days == horizon_days,
+    )
+    stmt = (
+        select(
+            social_post_mentions.c.post_id,
+            social_post_mentions.c.ticker,
+            social_post_mentions.c.sentiment,
+            social_post_mentions.c.extractor_version,
+            social_posts.c.posted_at,
+        )
+        .select_from(
+            social_post_mentions.join(
+                social_posts,
+                social_post_mentions.c.post_id == social_posts.c.post_id,
+            )
+        )
+        .where(social_post_mentions.c.extractor_version == extractor_version)
+        .where(social_post_mentions.c.sentiment == "negative")
+    )
+    out: list[Row[Any]] = []
+    with engine.connect() as conn:
+        existing_pairs = {(r.post_id, r.ticker) for r in conn.execute(existing).all()}
+        rows = conn.execute(stmt).all()
+    out_of_hours = {MentionTiming.AFTER_HOURS, MentionTiming.OVERNIGHT}
+    for r in rows:
+        if (r.post_id, r.ticker) in existing_pairs:
+            continue
+        if classify_mention_timing(r.posted_at) in out_of_hours:
+            out.append(r)
+    return out

@@ -466,3 +466,56 @@ social_post_mentions = Table(
 )
 
 Index("idx_social_post_mentions_ticker", social_post_mentions.c.ticker)
+
+
+# ---------------------------------------------------------------------------
+# mention_predictions (PR57)
+#
+# Forward-tracking: every new negative + out-of-hours mention writes a
+# row predicting +X% excess vs the per-ticker baseline at horizon=5d.
+# After entry_date + horizon_days bars exist, settle the row with
+# realized fwd / baseline / excess. Aggregating realized − predicted
+# over time is how we falsify (or confirm) the PR56 retrospective edge.
+#
+# Composite PK lets the same mention be tracked at multiple horizons
+# (5d / 10d / 20d) without a schema change. horizon_days is part of the
+# key so re-running the daily job is idempotent.
+# ---------------------------------------------------------------------------
+
+mention_predictions = Table(
+    "mention_predictions",
+    metadata,
+    Column("post_id", String(64), ForeignKey("social_posts.post_id"), nullable=False),
+    Column("ticker", String(16), nullable=False),
+    Column("extractor_version", Integer, nullable=False),
+    Column("horizon_days", Integer, nullable=False),
+    Column("posted_at", DateTime(timezone=True), nullable=False),
+    Column("sentiment", String(16), nullable=False),
+    Column("timing_bucket", String(16), nullable=False),
+    Column("entry_date", DateTime(timezone=True), nullable=False),
+    Column("baseline_at_pred", Float, nullable=False),
+    Column("predicted_excess", Float, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("realized_fwd", Float, nullable=True),
+    Column("realized_baseline", Float, nullable=True),
+    Column("realized_excess", Float, nullable=True),
+    Column("settled_at", DateTime(timezone=True), nullable=True),
+    PrimaryKeyConstraint(
+        "post_id",
+        "ticker",
+        "extractor_version",
+        "horizon_days",
+        name="pk_mention_predictions",
+    ),
+    CheckConstraint(
+        "sentiment IN ('positive', 'negative', 'neutral')",
+        name="ck_mention_predictions_sentiment",
+    ),
+    CheckConstraint(
+        "timing_bucket IN ('in_hours', 'after_hours', 'overnight', 'weekend')",
+        name="ck_mention_predictions_bucket",
+    ),
+)
+
+Index("idx_mention_predictions_entry", mention_predictions.c.entry_date)
+Index("idx_mention_predictions_unsettled", mention_predictions.c.settled_at)

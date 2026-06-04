@@ -2589,5 +2589,221 @@ def research_mentions_study(
     )
 
 
+# ---------------------------------------------------------------------------
+# Mention forward-tracking (PR57) — falsifies PR56's retrospective edge
+# ---------------------------------------------------------------------------
+
+
+# PR56's pooled excess for negative + out-of-hours is +1.32% (n=129).
+# This is the prediction we commit to per mention. Re-running the daily
+# job over months tells us whether forward realized excess matches.
+_DEFAULT_PREDICTED_EXCESS = 0.0132
+_TRACKED_HORIZON_DAYS = 5
+_TRACKED_EXTRACTOR_VERSION = 3
+
+
+@research_app.command("mentions-track")
+def research_mentions_track(
+    horizon: int = typer.Option(_TRACKED_HORIZON_DAYS, "--horizon", min=1),  # noqa: B008
+    extractor_version: int = typer.Option(  # noqa: B008
+        _TRACKED_EXTRACTOR_VERSION, "--extractor-version", min=1
+    ),
+    predicted_excess: float = typer.Option(  # noqa: B008
+        _DEFAULT_PREDICTED_EXCESS, "--predicted-excess"
+    ),
+    config_path: Path = typer.Option(None, "--config", "-c"),  # noqa: B008
+) -> None:
+    """Forward-track negative + out-of-hours mentions.
+
+    Two passes, both idempotent:
+
+      1. PREDICT — every NEW (post, ticker) that is negative + AH/overnight
+         and has no prediction row yet gets one written. Records the
+         baseline at the time of prediction (so later baseline drift
+         doesn't retroactively change the bet).
+
+      2. SETTLE — every existing prediction whose entry_date + horizon
+         is in the past gets realized fwd/baseline/excess filled from
+         current OHLCV.
+
+    Designed to run daily from cron. Re-runs are no-ops on already-handled
+    rows. The realized aggregate vs predicted_excess is the falsification
+    signal for PR56's +1.32% retrospective claim.
+    """
+    from datetime import UTC, datetime
+
+    from bloasis.analysis.mention_event_study import (
+        compute_baseline_forward,
+        decompose_event_return,
+    )
+    from bloasis.analysis.mention_timing import classify_mention_timing, entry_open_date
+    from bloasis.data.cache import ParquetCache
+    from bloasis.data.fetchers.yfinance_ohlcv import YfOhlcvFetcher
+    from bloasis.storage import create_all, writers
+    from bloasis.storage.readers import (
+        list_unsettled_mention_predictions,
+        list_untracked_mentions,
+    )
+
+    cfg = _load_or_default_config(config_path)
+    engine = get_engine()
+    create_all(engine)
+
+    cache = ParquetCache(cfg.data.cache_dir, namespace="ohlcv")
+    fetcher = YfOhlcvFetcher(cache=cache, max_age_hours=cfg.data.ohlcv_cache_max_age_hours)
+    bars_cache: dict[str, object] = {}
+
+    def _bars(sym: str) -> object | None:
+        if sym not in bars_cache:
+            end_d = datetime.now(tz=UTC).date()
+            # PR56 baseline window: same 2024+ corpus the retrospective ran on.
+            start_d = datetime(2024, 1, 1, tzinfo=UTC).date()
+            try:
+                bars_cache[sym] = fetcher.fetch(sym, start_d, end_d)
+            except Exception as exc:  # noqa: BLE001
+                console.print(f"[yellow]skip {sym}: {exc}[/yellow]")
+                bars_cache[sym] = None
+        return bars_cache[sym]
+
+    # ---- PREDICT pass --------------------------------------------------
+    untracked = list_untracked_mentions(
+        engine, extractor_version=extractor_version, horizon_days=horizon
+    )
+    n_pred = 0
+    for r in untracked:
+        bars = _bars(r.ticker)
+        if bars is None or getattr(bars, "empty", True):
+            continue
+        baseline = compute_baseline_forward(bars, horizon=horizon)  # type: ignore[arg-type]
+        bucket = classify_mention_timing(r.posted_at)
+        entry_d = entry_open_date(r.posted_at)
+        writers.upsert_mention_prediction(
+            engine,
+            post_id=r.post_id,
+            ticker=r.ticker,
+            extractor_version=extractor_version,
+            horizon_days=horizon,
+            posted_at=r.posted_at,
+            sentiment=r.sentiment,
+            timing_bucket=bucket.value,
+            entry_date=entry_d,
+            baseline_at_pred=baseline,
+            predicted_excess=predicted_excess,
+        )
+        n_pred += 1
+    console.print(f"[green]✓[/green] predicted {n_pred} new mentions")
+
+    # ---- SETTLE pass ---------------------------------------------------
+    ripe = list_unsettled_mention_predictions(engine, as_of=datetime.now(tz=UTC).date())
+    n_settled = 0
+    for p in ripe:
+        bars = _bars(p.ticker)
+        if bars is None or getattr(bars, "empty", True):
+            continue
+        entry_d = p.entry_date.date() if isinstance(p.entry_date, datetime) else p.entry_date
+        decomp = decompose_event_return(bars, entry_date=entry_d, horizon=horizon)  # type: ignore[arg-type]
+        if decomp is None:
+            continue  # entry_date / horizon bars not in panel yet — try later
+        realized_baseline = compute_baseline_forward(bars, horizon=horizon)  # type: ignore[arg-type]
+        realized_excess = decomp["forward"] - realized_baseline
+        writers.settle_mention_prediction(
+            engine,
+            post_id=p.post_id,
+            ticker=p.ticker,
+            extractor_version=extractor_version,
+            horizon_days=horizon,
+            realized_fwd=decomp["forward"],
+            realized_baseline=realized_baseline,
+            realized_excess=realized_excess,
+        )
+        n_settled += 1
+    console.print(f"[green]✓[/green] settled {n_settled} ripe predictions")
+
+
+@research_app.command("mentions-track-report")
+def research_mentions_track_report(
+    horizon: int = typer.Option(_TRACKED_HORIZON_DAYS, "--horizon", min=1),  # noqa: B008
+    extractor_version: int = typer.Option(  # noqa: B008
+        _TRACKED_EXTRACTOR_VERSION, "--extractor-version", min=1
+    ),
+) -> None:
+    """Predicted vs realized excess on settled mention predictions.
+
+    The headline: how does the prospective average excess on negative +
+    out-of-hours mentions compare to PR56's retrospective +1.32%?
+    The bucket split shows whether after_hours and overnight diverge.
+    """
+    from sqlalchemy import select
+
+    from bloasis.storage import mention_predictions
+
+    engine = get_engine()
+    with engine.connect() as conn:
+        rows = conn.execute(
+            select(mention_predictions).where(
+                mention_predictions.c.extractor_version == extractor_version,
+                mention_predictions.c.horizon_days == horizon,
+            )
+        ).fetchall()
+
+    if not rows:
+        console.print("[yellow]no predictions yet (run mentions-track first)[/yellow]")
+        raise typer.Exit(code=0)
+
+    settled = [r for r in rows if r.realized_excess is not None]
+    pending = len(rows) - len(settled)
+
+    table = RichTable(title=f"Mention forward-tracking — h={horizon}d, v{extractor_version}")
+    table.add_column("bucket", style="cyan")
+    table.add_column("predicted n", justify="right")
+    table.add_column("settled n", justify="right")
+    table.add_column("mean predicted", justify="right")
+    table.add_column("mean realized fwd", justify="right")
+    table.add_column("mean realized excess", justify="right")
+
+    for bucket in ("after_hours", "overnight"):
+        in_bucket = [r for r in rows if r.timing_bucket == bucket]
+        in_bucket_settled = [r for r in in_bucket if r.realized_excess is not None]
+        n_pred = len(in_bucket)
+        n_settled = len(in_bucket_settled)
+        mean_pred = sum(r.predicted_excess for r in in_bucket) / n_pred if n_pred else 0.0
+        mean_real_fwd = (
+            sum(r.realized_fwd for r in in_bucket_settled) / n_settled if n_settled else 0.0
+        )
+        mean_real_excess = (
+            sum(r.realized_excess for r in in_bucket_settled) / n_settled if n_settled else 0.0
+        )
+        table.add_row(
+            bucket,
+            str(n_pred),
+            str(n_settled),
+            f"{mean_pred:+.2%}",
+            f"{mean_real_fwd:+.2%}" if n_settled else "—",
+            f"{mean_real_excess:+.2%}" if n_settled else "—",
+        )
+
+    # combined neg + OOT row
+    n_pred_all = len(rows)
+    n_set_all = len(settled)
+    mean_pred_all = sum(r.predicted_excess for r in rows) / n_pred_all if n_pred_all else 0.0
+    mean_real_fwd_all = sum(r.realized_fwd for r in settled) / n_set_all if n_set_all else 0.0
+    mean_real_excess_all = sum(r.realized_excess for r in settled) / n_set_all if n_set_all else 0.0
+    table.add_row(
+        "[bold]combined[/bold]",
+        f"[bold]{n_pred_all}[/bold]",
+        f"[bold]{n_set_all}[/bold]",
+        f"[bold]{mean_pred_all:+.2%}[/bold]",
+        f"[bold]{mean_real_fwd_all:+.2%}[/bold]" if n_set_all else "—",
+        f"[bold]{mean_real_excess_all:+.2%}[/bold]" if n_set_all else "—",
+    )
+
+    console.print(table)
+    console.print(
+        f"[dim]{pending} predictions still pending (entry_date + {horizon}d not yet in OHLCV). "
+        f"Compare 'realized excess' to PR56 retrospective +1.32%. "
+        f"Sustained gap → edge dead.[/dim]"
+    )
+
+
 if __name__ == "__main__":
     app()
