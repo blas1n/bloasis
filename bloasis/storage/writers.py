@@ -510,3 +510,92 @@ def mark_post_extracted(engine: Engine, *, post_id: str, extractor_version: int)
             .where(social_posts.c.post_id == post_id)
             .values(mentions_extracted_at=now, extractor_version=extractor_version)
         )
+
+
+# ---------------------------------------------------------------------------
+# Mention predictions (PR57) — forward-tracking the PR56 retrospective edge
+# ---------------------------------------------------------------------------
+
+
+def upsert_mention_prediction(
+    engine: Engine,
+    *,
+    post_id: str,
+    ticker: str,
+    extractor_version: int,
+    horizon_days: int,
+    posted_at: datetime,
+    sentiment: str,
+    timing_bucket: str,
+    entry_date: object,
+    baseline_at_pred: float,
+    predicted_excess: float,
+) -> None:
+    """Insert a forward-tracking prediction row. Composite PK on
+    (post_id, ticker, extractor_version, horizon_days) means the daily
+    `mentions-track` job is idempotent — re-running re-checks the same
+    mentions without duplicating rows."""
+    from bloasis.storage.schema import mention_predictions
+
+    now = datetime.now(tz=UTC)
+    with engine.begin() as conn:
+        existing = conn.execute(
+            select(mention_predictions).where(
+                mention_predictions.c.post_id == post_id,
+                mention_predictions.c.ticker == ticker,
+                mention_predictions.c.extractor_version == extractor_version,
+                mention_predictions.c.horizon_days == horizon_days,
+            )
+        ).fetchone()
+        if existing is not None:
+            return
+        conn.execute(
+            insert(mention_predictions).values(
+                post_id=post_id,
+                ticker=ticker,
+                extractor_version=extractor_version,
+                horizon_days=horizon_days,
+                posted_at=posted_at,
+                sentiment=sentiment,
+                timing_bucket=timing_bucket,
+                entry_date=entry_date,
+                baseline_at_pred=baseline_at_pred,
+                predicted_excess=predicted_excess,
+                created_at=now,
+            )
+        )
+
+
+def settle_mention_prediction(
+    engine: Engine,
+    *,
+    post_id: str,
+    ticker: str,
+    extractor_version: int,
+    horizon_days: int,
+    realized_fwd: float,
+    realized_baseline: float,
+    realized_excess: float,
+) -> None:
+    """Fill the realized columns + stamp settled_at. Idempotent —
+    re-running OVERWRITES with the latest values (downstream OHLCV
+    can change after corporate actions; we trust the latest read)."""
+    from bloasis.storage.schema import mention_predictions
+
+    now = datetime.now(tz=UTC)
+    with engine.begin() as conn:
+        conn.execute(
+            update(mention_predictions)
+            .where(
+                mention_predictions.c.post_id == post_id,
+                mention_predictions.c.ticker == ticker,
+                mention_predictions.c.extractor_version == extractor_version,
+                mention_predictions.c.horizon_days == horizon_days,
+            )
+            .values(
+                realized_fwd=realized_fwd,
+                realized_baseline=realized_baseline,
+                realized_excess=realized_excess,
+                settled_at=now,
+            )
+        )
