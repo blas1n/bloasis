@@ -39,6 +39,15 @@ if TYPE_CHECKING:
 # Not exhaustive — the prefilter falls back to ticker-symbol matching for
 # the long tail. Multi-word names checked as substrings (e.g. "general
 # motors"); single-word as case-insensitive word boundaries.
+#
+# v4 (PR58) — bare surnames dropped because they collide with common
+# prose. First truly-prospective cron pass (2026-06-24) matched two
+# posts about US Congressman Dan Goldman as GS mentions. Same trap
+# class as v3's "cook" / "jensen" (blocked pre-emptively) but for the
+# CORE dict entries this time:
+#   - `goldman` → require `goldman sachs` (Dan Goldman, Congressman)
+#   - `ford`    → require `ford motor`    (Gerald Ford, Harrison Ford)
+#   - `carrier` → require `carrier corporation` (aircraft carrier, common word)
 NAME_TO_TICKER: dict[str, str] = {
     "apple": "AAPL",
     "amazon": "AMZN",
@@ -50,7 +59,7 @@ NAME_TO_TICKER: dict[str, str] = {
     "nvidia": "NVDA",
     "tesla": "TSLA",
     "boeing": "BA",
-    "ford": "F",
+    "ford motor": "F",
     "general motors": "GM",
     "dell": "DELL",
     "palantir": "PLTR",
@@ -72,7 +81,7 @@ NAME_TO_TICKER: dict[str, str] = {
     "exxon": "XOM",
     "chevron": "CVX",
     "jpmorgan": "JPM",
-    "goldman": "GS",
+    "goldman sachs": "GS",
     "wells fargo": "WFC",
     "disney": "DIS",
     "netflix": "NFLX",
@@ -114,7 +123,7 @@ NAME_TO_TICKER: dict[str, str] = {
     "pepsi": "PEP",
     "philip morris": "PM",
     "altria": "MO",
-    "carrier": "CARR",
+    "carrier corporation": "CARR",
     "trump media": "DJT",
     "rivian": "RIVN",
     "lucid": "LCID",
@@ -296,7 +305,7 @@ class MentionExtractor:
     api_base: str = "http://localhost:11434"
     temperature: float = 0.0
     max_tokens: int = 32
-    extractor_version: int = 3  # PR56: NAME_TO_TICKER + CEO/founder names
+    extractor_version: int = 4  # PR58: bare-surname collisions removed (goldman/ford/carrier)
 
     # Hybrid design: deterministic NER (is_stock_candidate) + LLM sentiment.
     # The earlier v1 prompted the LLM to do both, which made llama3.2:3b
