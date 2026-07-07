@@ -208,4 +208,70 @@ def test_extractor_version_bumped_to_3_for_ceo_expansion() -> None:
     rows rather than overwriting v2 — historical data is preserved.
     """
     ex = MentionExtractor(ticker_whitelist=_SP500)
-    assert ex.extractor_version == 3
+    assert ex.extractor_version == 4
+
+
+# ---------------------------------------------------------------------------
+# PR58 — bare-surname / common-word collisions
+#
+# First truly-prospective cron pass (2026-06-24) wrote 2 GS predictions
+# from posts about "Dan Goldman" (US Congressman) — bare "goldman" in
+# NAME_TO_TICKER collided with the surname. Same class as the v3 "cook" /
+# "jensen" traps but hit us for real. v4 drops the bare surnames and
+# keeps only multi-word forms.
+# ---------------------------------------------------------------------------
+
+
+def test_prefilter_dan_goldman_does_not_match_gs() -> None:
+    """The concrete post that triggered PR58 — Dan Goldman is a
+    Congressman, NOT Goldman Sachs."""
+    content = "Weak and pathetic Congressman Dan Goldman just lost, BIG!"
+    assert is_stock_candidate(content, _SP500) == set()
+
+
+def test_prefilter_goldman_sachs_phrase_still_matches_gs() -> None:
+    """The company reference (multi-word) must still route."""
+    content = "Goldman Sachs was ranked #1 in M&A advisory this quarter."
+    assert is_stock_candidate(content, _SP500) == {"GS"}
+
+
+def test_prefilter_gerald_ford_does_not_match_f() -> None:
+    """Bare 'ford' collides with President Gerald Ford, Harrison Ford,
+    and Ford as a common surname."""
+    content = "As President Ford once said, our long national nightmare is over."
+    assert is_stock_candidate(content, _SP500) == set()
+
+
+def test_prefilter_ford_motor_phrase_still_matches_f() -> None:
+    content = "Ford Motor announced a new plant in Michigan."
+    assert is_stock_candidate(content, _SP500) == {"F"}
+
+
+def test_prefilter_aircraft_carrier_does_not_match_carr() -> None:
+    """'Carrier' is a common English word (aircraft carrier, carrier signal)."""
+    content = "The aircraft carrier USS Gerald Ford will deploy next month."
+    assert is_stock_candidate(content, _SP500) == set()
+
+
+def test_prefilter_carrier_corporation_phrase_still_matches_carr() -> None:
+    """Trump's 2016 Indianapolis deal — 'Carrier Corporation' is the company."""
+    content = "Carrier Corporation kept 800 jobs in Indiana."
+    assert is_stock_candidate(content, _SP500) == {"CARR"}
+
+
+def test_name_dictionary_does_not_include_bare_goldman() -> None:
+    """Regression — bare 'goldman' removed in v4 (Dan Goldman collision)."""
+    assert "goldman" not in NAME_TO_TICKER
+    assert NAME_TO_TICKER.get("goldman sachs") == "GS"
+
+
+def test_name_dictionary_does_not_include_bare_ford() -> None:
+    """Regression — bare 'ford' removed in v4 (Gerald/Harrison Ford collision)."""
+    assert "ford" not in NAME_TO_TICKER
+    assert NAME_TO_TICKER.get("ford motor") == "F"
+
+
+def test_name_dictionary_does_not_include_bare_carrier() -> None:
+    """Regression — bare 'carrier' removed in v4 (aircraft carrier collision)."""
+    assert "carrier" not in NAME_TO_TICKER
+    assert NAME_TO_TICKER.get("carrier corporation") == "CARR"
