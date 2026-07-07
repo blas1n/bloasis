@@ -44,21 +44,32 @@ import httpx
 
 DEFAULT_DATASET_URL = (
     "https://raw.githubusercontent.com/fja05680/sp500/master/"
-    "S%26P%20500%20Historical%20Components%20%26%20Changes(02-21-2025).csv"
+    "S%26P%20500%20Historical%20Components%20%26%20Changes%20(Updated).csv"
 )
 GITHUB_CONTENTS_URL = "https://api.github.com/repos/fja05680/sp500/contents/"
 
-# Pattern: "S&P 500 Historical Components & Changes(MM-DD-YYYY).csv"
+# Discovery priority — lower rank number wins.
+#   1: "(Updated).csv" — the maintainer's live-updated canonical file.
+#   2: "S&P 500 Historical Components & Changes.csv" — the frozen snapshot.
+#   3: legacy dated "…(MM-DD-YYYY).csv" (kept for backward compat if the
+#      maintainer re-adds one; latest date within this class wins the tiebreak).
+_UPDATED_CSV_NAME = "S&P 500 Historical Components & Changes (Updated).csv"
+_BARE_CSV_NAME = "S&P 500 Historical Components & Changes.csv"
 _DATED_CSV_RE = re.compile(
-    r"S&P 500 Historical Components & Changes\((\d{2})-(\d{2})-(\d{4})\)\.csv$"
+    r"^S&P 500 Historical Components & Changes\((\d{2})-(\d{2})-(\d{4})\)\.csv$"
 )
 
 
 def _resolve_dataset_url() -> str:
     """Pick a source URL.
 
-    Order: env var > GitHub contents API (latest dated CSV) > hardcoded default.
-    Network failure on the API call falls back to the default.
+    Order: env var > GitHub contents API (best CSV per priority) > hardcoded default.
+    Network / parse failure on the API call falls back to the default.
+
+    Upstream (fja05680/sp500) reorganised in mid-2026: dated CSVs were
+    consolidated into `(Updated).csv` + a frozen historical snapshot. The old
+    dated-filename picker fell through to the default, which then 404'd —
+    silently degrading callers to `whitelist = 0`.
     """
     override = os.environ.get("SP500_HISTORICAL_URL")
     if override:
@@ -70,22 +81,32 @@ def _resolve_dataset_url() -> str:
     except (httpx.HTTPError, ValueError):
         return DEFAULT_DATASET_URL
 
-    best_key: tuple[int, int, int] | None = None
+    # rank tuple: (priority, tiebreaker). Smaller priority = better.
+    # Tiebreaker: for dated legacy, use the negative of (year, month, day)
+    # so the latest date sorts lowest.
+    best_rank: tuple[int, tuple[int, int, int]] | None = None
     best_url: str | None = None
     for entry in entries:
         if not isinstance(entry, dict):
             continue
         name = entry.get("name", "")
-        match = _DATED_CSV_RE.search(name)
-        if not match:
+        download = entry.get("download_url")
+        if not isinstance(download, str):
             continue
-        month, day, year = (int(g) for g in match.groups())
-        key = (year, month, day)
-        if best_key is None or key > best_key:
-            best_key = key
-            url = entry.get("download_url")
-            if isinstance(url, str):
-                best_url = url
+        if name == _UPDATED_CSV_NAME:
+            rank: tuple[int, tuple[int, int, int]] = (1, (0, 0, 0))
+        elif name == _BARE_CSV_NAME:
+            rank = (2, (0, 0, 0))
+        else:
+            m = _DATED_CSV_RE.match(name)
+            if not m:
+                continue
+            month, day, year = (int(g) for g in m.groups())
+            # Negate so latest date wins the min-comparison.
+            rank = (3, (-year, -month, -day))
+        if best_rank is None or rank < best_rank:
+            best_rank = rank
+            best_url = download
     return best_url or DEFAULT_DATASET_URL
 
 
