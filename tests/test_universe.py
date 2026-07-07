@@ -66,6 +66,15 @@ def test_resolve_url_uses_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
     get.assert_not_called()
 
 
+def test_default_dataset_url_points_at_current_upstream() -> None:
+    """PR59 — upstream reorganised to `(Updated).csv` (canonical, live-updated)
+    from the old `(MM-DD-YYYY).csv` naming. The frozen default MUST match the
+    file the maintainer keeps alive so a network-free / API-down environment
+    still lands on an existing URL."""
+    assert "(Updated).csv" in DEFAULT_DATASET_URL
+    assert "raw.githubusercontent.com/fja05680/sp500" in DEFAULT_DATASET_URL
+
+
 def test_resolve_url_picks_latest_from_github_api() -> None:
     api_response = MagicMock(
         status_code=200,
@@ -105,6 +114,82 @@ def test_resolve_url_falls_back_on_api_failure() -> None:
     ):
         url = _resolve_dataset_url()
     assert url == DEFAULT_DATASET_URL
+
+
+def test_resolve_url_prefers_updated_csv_over_bare() -> None:
+    """PR59 — upstream reorganised: (Updated).csv is the actively-maintained
+    file, bare .csv is the frozen historical snapshot. Prefer Updated."""
+    api_response = MagicMock(
+        status_code=200,
+        json=lambda: [
+            {
+                "name": "S&P 500 Historical Components & Changes.csv",
+                "download_url": "https://raw.test/bare.csv",
+                "type": "file",
+            },
+            {
+                "name": "S&P 500 Historical Components & Changes (Updated).csv",
+                "download_url": "https://raw.test/updated.csv",
+                "type": "file",
+            },
+            {"name": "README.md", "download_url": "x", "type": "file"},
+        ],
+    )
+    api_response.raise_for_status = MagicMock()
+    with patch(
+        "bloasis.data.universe.sp500_historical.httpx.get",
+        return_value=api_response,
+    ):
+        url = _resolve_dataset_url()
+    assert url == "https://raw.test/updated.csv"
+
+
+def test_resolve_url_falls_back_to_bare_csv_when_updated_missing() -> None:
+    """If only the frozen historical file is present, use it."""
+    api_response = MagicMock(
+        status_code=200,
+        json=lambda: [
+            {
+                "name": "S&P 500 Historical Components & Changes.csv",
+                "download_url": "https://raw.test/bare.csv",
+                "type": "file",
+            },
+        ],
+    )
+    api_response.raise_for_status = MagicMock()
+    with patch(
+        "bloasis.data.universe.sp500_historical.httpx.get",
+        return_value=api_response,
+    ):
+        url = _resolve_dataset_url()
+    assert url == "https://raw.test/bare.csv"
+
+
+def test_resolve_url_updated_beats_dated_legacy() -> None:
+    """If both new-format (Updated) and legacy dated files coexist, prefer Updated —
+    the maintainer's canonical live copy."""
+    api_response = MagicMock(
+        status_code=200,
+        json=lambda: [
+            {
+                "name": "S&P 500 Historical Components & Changes(02-21-2025).csv",
+                "download_url": "https://raw.test/legacy-dated.csv",
+                "type": "file",
+            },
+            {
+                "name": "S&P 500 Historical Components & Changes (Updated).csv",
+                "download_url": "https://raw.test/updated.csv",
+                "type": "file",
+            },
+        ],
+    )
+    api_response.raise_for_status = MagicMock()
+    with patch(
+        "bloasis.data.universe.sp500_historical.httpx.get",
+        return_value=api_response,
+    ):
+        url = _resolve_dataset_url()
+    assert url == "https://raw.test/updated.csv"
 
 
 def test_resolve_url_falls_back_when_no_csv_in_api_response() -> None:
