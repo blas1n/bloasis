@@ -153,3 +153,68 @@ uv run bloasis research mentions-track-report
 Predicted vs realized excess per bucket + combined. Sustained negative
 realized excess after ~3 months → PR56 edge falsified. Comparable
 positive → edge replicates forward.
+
+## `weekly-report.sh` (PR61)
+
+Monday-morning consolidated brief pushed to Telegram so the phone shows
+paper + mention state without needing SSH into the Mac Mini.
+
+### What it does
+
+1. `scripts/measure_bloasis.py` — reads Alpaca paper API + local
+   `bloasis.db` + `logs/mentions-track.log`, prints Markdown (equity /
+   vol / Sharpe, FIFO round-trips, open positions, mention-tracker
+   extraction counts, forward-prediction realized vs predicted, last 7
+   cron runs).
+2. `scripts/weekly-report.sh` — sources `.env`, calls the measurer,
+   saves `logs/weekly-report-YYYYMMDD.md`, and pushes the report to
+   Telegram in ≤3500-char chunks (sendMessage 4096-char limit).
+3. `com.bloasis.report.plist` — launchd, Mon 09:30 KST (1h after
+   `mentions-track`, 1h30m after `paper-rotate`, so today's data is fresh).
+
+### Setup
+
+Add to `.env` (already gitignored) — see `.env.example`:
+
+```bash
+TELEGRAM_BOT_TOKEN=<@BotFather token>
+TELEGRAM_CHAT_ID=<your chat_id from getUpdates>
+```
+
+Then create `~/Library/LaunchAgents/com.bloasis.report.plist`:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key><string>com.bloasis.report</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/blasin/Works/bloasis/main/scripts/weekly-report.sh</string>
+    </array>
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Weekday</key><integer>1</integer>
+        <key>Hour</key><integer>9</integer>
+        <key>Minute</key><integer>30</integer>
+    </dict>
+    <key>RunAtLoad</key><false/>
+    <key>StandardOutPath</key><string>/Users/blasin/Works/bloasis/main/logs/launchd.report.out.log</string>
+    <key>StandardErrorPath</key><string>/Users/blasin/Works/bloasis/main/logs/launchd.report.err.log</string>
+</dict>
+</plist>
+```
+
+```bash
+launchctl load ~/Library/LaunchAgents/com.bloasis.report.plist
+launchctl list | grep bloasis          # verify registration
+bash scripts/weekly-report.sh          # one-shot smoke test to phone
+```
+
+### Note
+
+Report is *sent* to Telegram, not stored there — telegram is a delivery
+channel, not the archive. Archived Markdown lives in
+`logs/weekly-report-*.md`.
