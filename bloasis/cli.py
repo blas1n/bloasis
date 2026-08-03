@@ -2599,7 +2599,7 @@ def research_mentions_study(
 # job over months tells us whether forward realized excess matches.
 _DEFAULT_PREDICTED_EXCESS = 0.0132
 _TRACKED_HORIZON_DAYS = 5
-_TRACKED_EXTRACTOR_VERSION = 3
+_TRACKED_EXTRACTOR_VERSION = 4  # PR58 v4 dict — bare-surname collisions removed
 
 
 @research_app.command("mentions-track")
