@@ -5,58 +5,102 @@ machine-verifiable gate; we do not advance phases on vibes.
 
 ---
 
-## Phase 1 — M2 Foundation (current)
+## Phase 1 — M2 Foundation (✅ SHIPPED)
 
 **Mission**: Match SPY return with lower max drawdown.
 **Cost**: $0 (yfinance + Finnhub free).
-**Time**: 4-6 weeks of evening/weekend work.
+**Outcome**: shipped in ~2 months (PR1 → PR20).
 
-### Scope
+### Scope (all done)
 
-- [ ] **PR1** — Skeleton (CLI, config, DB schema, docs)
-- [ ] **PR2** — Data layer (Universe loaders, Fetcher Protocols, yfinance, Finnhub)
-- [ ] **PR3** — FeatureExtractor (pure, look-ahead protected) + 18 raw features + 7 composites
-- [ ] **PR4** — RuleBasedScorer + Rationale + SignalGenerator + RiskEvaluator + ML stub
-- [ ] **PR5** — Backtest engine + walk-forward + metrics + statistical tests stub + acceptance gates
-- [ ] **PR6** — CLI commands (`runs list/compare/explain`) + Alpaca paper adapter + composer
+- [x] **PR1** — Skeleton (CLI, config, DB schema, docs)
+- [x] **PR2** — Data layer (Universe loaders, Fetcher Protocols, yfinance, Finnhub)
+- [x] **PR3** — FeatureExtractor (pure, look-ahead protected) + raw features + composites
+- [x] **PR4** — RuleBasedScorer + Rationale + SignalGenerator + RiskEvaluator + ML stub
+- [x] **PR5** — Backtest engine + walk-forward + metrics + statistical tests + acceptance gates
+- [x] **PR6** — CLI (`runs list/compare/explain`) + Alpaca paper adapter + composer
+- [x] **PR20** — `edgar-rolling2` shipped (sharpe 1.334 / α +4.09%/yr / DD 0.80) —
+      first config to clear the live-trading gate
+- [x] **PR21-23** — Grid runner + 41 combo sweep. Confirmed `edgar-rolling2`
+      is the uncontested winner; PEAD / knob sweeps / EDGAR∩JT intersect
+      all falsified against baseline
+- [x] **PR45-49** — Paper trading layer (schema/writers/SELL rotation/scorer
+      factory/unified backtest+live runner). Alpaca paper + launchd cron
+      Mon-Fri 08:00 KST since 2026-05-10
+- [x] **PR51-52** — Fill reconciliation + `friction` → `entry-gap` honest
+      renaming (gap drift is regime, not execution slippage)
 
-### Phase 1 Exit Gate
+### Phase 1 Exit Gate (met by `configs/edgar-rolling2.yaml`)
 
 ```yaml
 walk_forward_min_folds: 5
-median_alpha_annualized: -0.005
-median_sharpe_vs_spy: 1.0
-median_max_dd_ratio_to_spy: 0.85
+median_alpha_annualized: -0.005      # measured +4.09% (PR20)
+median_sharpe_vs_spy: 1.0            # measured 1.334 (PR20)
+median_max_dd_ratio_to_spy: 0.85     # measured 0.80 (PR20)
 ```
-
-If we cannot meet this on 5+ years of S&P 500 data, the strategy is not
-worth deploying. Reset, simplify, or halt.
 
 ---
 
-## Phase 2 — M2+ Signal Edge (within free data)
+## Phase 2 — M2+ Signal Edge (in progress)
 
-**Mission**: Modest sustained alpha (~+1%) through known but underexploited
-signals.
+**Mission**: Modest sustained alpha (~+1%) through underexploited signals.
 **Cost**: $0.
-**Time**: 4-6 weeks after Phase 1 gate clears.
+**Status**: Multiple research tracks — one shipped, several falsified,
+one live-tracking.
 
-### Additions
+### Research tracks
 
-- **Earnings calendar + PEAD** — Finnhub provides earnings dates;
-  post-earnings drift is a documented anomaly.
-- **Analyst rating changes** — Finnhub recommendation trends as a feature.
-- **Cross-asset regime context** — TLT (bonds), GLD (gold), HYG (high yield)
-  as additional regime inputs beyond VIX/SPY.
-- **Walk-forward optimization** — Optuna or grid search bounded to OOS folds.
-- **Sector relative strength** — cross-sectional momentum within sector.
+- ✅ **EDGAR text-diff scorer** (Cohen-Malloy-Nguyen "Lazy Prices") —
+      shipped as `edgar-rolling2`. Buys names whose 10-K language
+      changes least YoY.
+- ❌ **PEAD** (post-earnings announcement drift) — falsified in PR22-23
+      grid measurement. Signal did not survive walk-forward on the
+      universe we use.
+- ❌ **Regime overlay** — hurt EDGAR-rolling2 performance in grid measurement.
+- ❌ **Knob sweep / EDGAR∩JT intersect** — 12 combos measured, none
+      beat baseline. Hypothesis falsified (PR22).
+- ✅ **Position size 0.03/0.05** — α +4.2% variant shipped-adjacent
+      (small lift from PR23 grid).
+- ❌ **`fundamental_llm` scorer** — llama3.2:3b too weak; documented
+      but not promoted.
+- ~ **Correlation clustering / event-study CLIs** (PR53-54) — research
+      tooling, not scorers. Support hypothesis generation.
+- 🔄 **Trump mention pipeline** (PR55-60) — Truth Social → hybrid
+      extractor → per-ticker baseline-corrected excess study.
+      Retrospective on 2024-2026 corpus: pooled excess −0.51% (mention
+      average trails baseline), but negative + out-of-hours cell shows
+      +1.32% pooled edge (n=129, corrected +0.50% at n=52 after tz
+      fix). Currently forward-tracked via daily cron (PR57 + PR60);
+      real prospective signal accumulating from 2026-06-05. Falsify or
+      confirm target: end of 2026-Q3.
+- 🔄 **LightGBM ML scorer** (PR13-17) — trained end-to-end but only
+      +0.28 sharpe shift vs rule scorer, still failed acceptance.
+      Available in `bloasis ml` if we accumulate more OOS features.
 
 ### Phase 2 Exit Gate
 
 ```yaml
-median_alpha_annualized: 0.015
+median_alpha_annualized: 0.015       # +1.5%
 bootstrap_alpha_p_value: 0.10
 ```
+
+`edgar-rolling2` alone likely won't pass. A confirmed mention edge or
+another additive signal is what we're hunting for.
+
+### Living issues surfaced during Phase 2
+
+- **L001** — Survivorship bias (universe). `sp500_historical` mode
+  mitigates for 2024+ backtests.
+- **Upstream data-source rename risk** (surfaced PR59) —
+  `fja05680/sp500` renamed files in mid-2026, silently degrading the
+  loader to `whitelist=0` for 4 weeks. Fix landed in PR59 with
+  rank-and-order auto-discovery; a downstream sanity floor (raise if
+  whitelist < 400) is still pending.
+- **tz-strip bucket misclassification** (PR57 fix) — SQLite +
+  SQLAlchemy `DateTime(timezone=True)` round-trip loses tzinfo. On a
+  non-UTC host, downstream `.astimezone()` silently shifted every
+  mention-timing bucket by ~13 hours until PR57's defensive
+  normalization.
 
 ---
 
@@ -64,16 +108,16 @@ bootstrap_alpha_p_value: 0.10
 
 **Mission**: Credible alpha (+1.5% to +3%) backed by clean data.
 **Cost**: ~$30/month (EODHD or equivalent).
-**Time**: 6-8 weeks after Phase 2 gate clears.
+**Status**: not started. Gated on Phase 2 clearance.
 
-### Additions
+### Planned additions
 
 - **Point-in-time fundamentals** — eliminates fundamentals look-ahead bias
-- **Delisted equity history** — eliminates survivorship bias
+- **Delisted equity history** — eliminates survivorship bias (closes L001)
 - **Russell 1000 universe** — broader, less efficient names
-- **LightGBM scorer activated** — replaces RuleBasedScorer once enough OOS
-  features are logged
-- **SHAP-based per-trade explainability**
+- **LightGBM scorer promotion** — replaces RuleBasedScorer once enough
+  OOS features are logged; the trained pipeline already exists
+- **SHAP-based per-trade explainability** (PR16 tooling, currently unused)
 
 ### Phase 3 Exit Gate
 
@@ -89,7 +133,7 @@ forward_test_alpha_6mo: 0.01
 
 **Mission**: Sustained, statistically significant alpha.
 **Cost**: $200+/month or independent research effort.
-**Time**: indefinite — this is a research program, not a sprint.
+**Status**: intentionally undefined until Phase 3 evidence lands.
 
 ### Candidate directions (one or more)
 
@@ -99,19 +143,18 @@ forward_test_alpha_6mo: 0.01
 - Cross-asset macro overlay (full TAA framework)
 - Online ML with regime-conditional retraining
 
-This phase is intentionally vague — by the time we reach it, we will know
-much more about which direction has the best evidence.
-
 ---
 
 ## Stage progression rules
 
-1. **No phase advance without gate clearance.** A failing gate means "stay,
-   improve, or halt" — never "skip to next phase".
-2. **Backtests use walk-forward only.** Full-history optimization is forbidden.
-3. **Each phase ends with documented retrospective** in
-   `docs/retrospectives/phase-N.md`: what worked, what didn't, what changed
-   in the mission.
+1. **No phase advance without gate clearance.** A failing gate means
+   "stay, improve, or halt" — never "skip to next phase".
+2. **Backtests use walk-forward only.** Full-history optimization is
+   forbidden.
+3. **Each phase ends with documented retrospective**. Phase 1 → PR20
+   measurement + Phase 2 postmortem sit under `~/Docs/bloasis/`.
+   Phase 2 will close with a written "did the mention edge replicate?"
+   answer once forward data has accumulated.
 4. **Mission can revise downward but not upward without evidence.** If
-   Phase 1 keeps failing M2, downgrade to "match SPY return only" before
-   reaching for M1.
+   Phase 2 keeps failing +1% alpha, downgrade to "edgar-rolling2
+   parity" before reaching further.
