@@ -426,11 +426,13 @@ def test_mentions_track_report_aggregates_settled_rows(tmp_path: Path, monkeypat
     _seed_post_mention(
         eng, post_id="truth:2", ticker="META", sentiment="negative", posted_at=posted_at
     )
+    # Seed at v4 to match the current CLI default (`_TRACKED_EXTRACTOR_VERSION`).
+    # If the default rises again the seed AND the CLI defaults must move in lockstep.
     writers.upsert_mention_prediction(
         eng,
         post_id="truth:1",
         ticker="AMZN",
-        extractor_version=3,
+        extractor_version=4,
         horizon_days=5,
         posted_at=posted_at,
         sentiment="negative",
@@ -443,7 +445,7 @@ def test_mentions_track_report_aggregates_settled_rows(tmp_path: Path, monkeypat
         eng,
         post_id="truth:2",
         ticker="META",
-        extractor_version=3,
+        extractor_version=4,
         horizon_days=5,
         posted_at=posted_at,
         sentiment="negative",
@@ -456,7 +458,7 @@ def test_mentions_track_report_aggregates_settled_rows(tmp_path: Path, monkeypat
         eng,
         post_id="truth:1",
         ticker="AMZN",
-        extractor_version=3,
+        extractor_version=4,
         horizon_days=5,
         realized_fwd=0.022,
         realized_baseline=0.005,
@@ -466,7 +468,7 @@ def test_mentions_track_report_aggregates_settled_rows(tmp_path: Path, monkeypat
         eng,
         post_id="truth:2",
         ticker="META",
-        extractor_version=3,
+        extractor_version=4,
         horizon_days=5,
         realized_fwd=0.020,
         realized_baseline=0.006,

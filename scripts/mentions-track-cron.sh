@@ -40,11 +40,12 @@ uv run bloasis research mentions-extract \
   --limit 1000 \
   --after 2024-01-01
 
-# Step 3: predict + settle pass. horizon=5 + extractor_version=3 match
-# the PR56 retrospective. predicted_excess defaults to +1.32% (PR56
-# pooled neg+OOT). Adjust only when re-baselining against a new study.
+# Step 3: predict + settle pass. horizon=5 + extractor_version=4.
+# v4 dropped bare-surname collisions (Dan Goldman → GS false-positive
+# etc., see PR58). predicted_excess defaults to +1.32% (PR56 pooled
+# neg+OOT retrospective). Adjust only when re-baselining against a new study.
 uv run bloasis research mentions-track \
   --horizon 5 \
-  --extractor-version 3
+  --extractor-version 4
 
 echo "===== $(date '+%Y-%m-%d %H:%M:%S %Z') mentions-track END   ====="
