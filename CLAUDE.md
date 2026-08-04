@@ -17,8 +17,10 @@ on US large caps with optional ML and LLM sentiment.
   Configure via `LLM_API_KEY`, `LLM_MODEL`, `LLM_BASE_URL`. Default is
   Claude Haiku for cost; users may switch via `.env`.
 - TA-Lib (technical indicators)
-- LightGBM + SHAP (Phase 3 ML stub now)
-- Alpaca (paper trading)
+- LightGBM + SHAP (Phase 2 trained end-to-end via PR13-17, parked at
+  +0.28 sharpe shift vs rule scorer — available in `bloasis ml`, not
+  yet promoted over `edgar-rolling2`)
+- Alpaca (paper trading — live via launchd `dev.bloasis.paper-rotate`)
 - ruff (lint/format), mypy strict, pytest
 
 ## Quick Commands
@@ -41,9 +43,10 @@ column exists on user-scoped tables but always `0` in v1.
 
 ### 2. Pure scoring layer
 
-`bloasis/scoring/` and `bloasis/data/extractor.py` must have **no I/O**.
-Same code runs in live and backtest paths. Any I/O lives in
-`bloasis/data/fetchers/` and `bloasis/storage/`.
+`bloasis/scoring/` (including `scoring/extractor.py`) must have **no I/O**.
+Same code runs in live and backtest paths via `bloasis/strategy/runner.py`
+(PR49 unified). Any I/O lives in `bloasis/data/fetchers/` and
+`bloasis/storage/`.
 
 ### 3. Look-ahead bias protection
 
