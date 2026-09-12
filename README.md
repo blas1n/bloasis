@@ -160,7 +160,7 @@ tests/                      # pytest, ~770 tests, 84%+ coverage, mypy strict
    without walk-forward clearance.
 6. **Retrospectives are load-bearing** — losing paths (PEAD, monolithic
    LLM extractor, bare-surname prefilter, hardcoded upstream URLs) are
-   documented in `docs/limitations.md` and `~/Docs/bloasis/` so we
+   documented in `docs/limitations.md` and `docs/research/` so we
    don't rewalk them.
 
 ## License

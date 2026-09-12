@@ -5,7 +5,7 @@ Loads (X, y, timestamps), runs purged walk-forward CV via
 (Spearman-style: pearson on numerical predictions vs labels), then
 refits the final model on all training data.
 
-Mission Phase 2 §PR14 — see ~/Docs/bloasis/Phase2_ML_Design_Lockin_2026-05-07.md.
+Mission Phase 2 §PR14 — see docs/research/Phase2_ML_Design_Lockin_2026-05-07.md.
 """
 
 from __future__ import annotations

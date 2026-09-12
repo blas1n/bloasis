@@ -373,7 +373,7 @@ class RegimeOverlayConfig(BaseModel):
 
     When enabled, multiplies per-trade position size_pct by a scale factor
     derived from SPY's recent realized vol and 24-month return state. See
-    `bloasis/scoring/regime_overlay.py` for math + ~/Docs/bloasis/
+    `bloasis/scoring/regime_overlay.py` for math + docs/research/
     Research_DM_Dynamic_Momentum.md for derivation.
     """
 

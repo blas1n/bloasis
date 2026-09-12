@@ -152,7 +152,7 @@ forward_test_alpha_6mo: 0.01
 2. **Backtests use walk-forward only.** Full-history optimization is
    forbidden.
 3. **Each phase ends with documented retrospective**. Phase 1 → PR20
-   measurement + Phase 2 postmortem sit under `~/Docs/bloasis/`.
+   measurement + Phase 2 postmortem sit under `docs/research/`.
    Phase 2 will close with a written "did the mention edge replicate?"
    answer once forward data has accumulated.
 4. **Mission can revise downward but not upward without evidence.** If

@@ -3,7 +3,7 @@
 # Pure rank-based Jegadeesh-Titman 12-1 momentum. Single signal:
 # top-decile of momentum_252_21 → buy candidate, others rejected.
 #
-# Why: PR12-17 measurement (~/Docs/bloasis/Phase2_Postmortem_2026-05-07.md)
+# Why: PR12-17 measurement (docs/research/Phase2_Postmortem_2026-05-07.md)
 # showed bloasis's 7-composite blend + cross-section threshold framework
 # structurally fails to clear acceptance on long-only S&P 500. The post-
 # mortem identified the JT 12-1 standalone pilot (sharpe 1.21, alpha
@@ -16,7 +16,7 @@
 # Acceptance gate set to paper-trading thresholds (mission.md §Paper-trading
 # gate, M2 entry). Live-money still gated separately.
 #
-# See ~/Docs/bloasis/Redesign_Brief_2026-05-07.md §Path E.
+# See docs/research/Redesign_Brief_2026-05-07.md §Path E.
 
 universe:
   source: sp500

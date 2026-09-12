@@ -8,7 +8,7 @@ Signal: stocks with a recent positive earnings surprise drift upward for
 gets unit score 0.99 (passes entry threshold), rest 0.0.
 
 References: Bernard-Thomas 1989, Sloan 1996. Phase 3 spec —
-`~/Docs/bloasis/Phase3_Modern_Candidates_2026-05-08.md` §Candidate A.
+`docs/research/Phase3_Modern_Candidates_2026-05-08.md` §Candidate A.
 """
 
 from __future__ import annotations

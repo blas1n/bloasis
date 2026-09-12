@@ -6,7 +6,7 @@ a small local model via Ollama) to produce a fundamental-health score in
 [-1, 1]. Cache by (symbol, quarter_end) → score so backtests are
 deterministic after the first scoring pass.
 
-Spec: ~/Docs/bloasis/Phase3_Modern_Candidates_2026-05-08.md §B-modern
+Spec: docs/research/Phase3_Modern_Candidates_2026-05-08.md §B-modern
 """
 
 from __future__ import annotations

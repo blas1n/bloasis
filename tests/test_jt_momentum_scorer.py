@@ -6,7 +6,7 @@ Bypasses the 7-composite blend that PR12-17 measurement showed dilutes
 the signal.
 
 JT 12-1 standalone pilot baseline: sharpe 1.21, alpha +7.6% on the same
-universe (~/Docs/bloasis/Quant_Robustness_2026-05-07.md).
+universe (docs/research/Quant_Robustness_2026-05-07.md).
 """
 
 from __future__ import annotations

@@ -17,7 +17,7 @@ on the *short* leg (loser-as-call), which we don't have. We therefore
 favour the simpler BSC variant + DM bear gate as a layered safety net,
 not the full GJR-GARCH dynamic optimal weight from DM Appendix C.
 
-See ~/Docs/bloasis/Research_DM_Dynamic_Momentum.md for the full
+See docs/research/Research_DM_Dynamic_Momentum.md for the full
 derivation and references.
 """
 
@@ -58,7 +58,7 @@ def compute_regime_scale(
     Multiply per-trade `size_pct` by this value at entry. Always returns a
     finite number; cold start and degenerate states yield 1.0 (pass-through).
 
-    Acceptance anchors (see ~/Docs/bloasis/Research_DM_Dynamic_Momentum.md):
+    Acceptance anchors (see docs/research/Research_DM_Dynamic_Momentum.md):
         2020-03 (COVID panic)         → ~0.30
         2009-03 (post-GFC bear gate)  → ≤ 0.20
         2017-06 (calm bull, ceiling)  → 1.5
