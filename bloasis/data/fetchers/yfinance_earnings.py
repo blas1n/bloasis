@@ -3,7 +3,7 @@
 Returns a DataFrame indexed by earnings announcement date with columns
 `eps_estimate`, `reported_eps`, `surprise_pct`. Used by `PEADScorer`
 (Phase 3 Candidate A) — see
-`~/Docs/bloasis/Phase3_Modern_Candidates_2026-05-08.md` §A.
+`docs/research/Phase3_Modern_Candidates_2026-05-08.md` §A.
 
 yfinance limit: typically 2-3 years of historical earnings dates per
 ticker. For multi-year backtests this is a hard ceiling — see Phase 3

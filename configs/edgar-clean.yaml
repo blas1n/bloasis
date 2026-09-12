@@ -4,7 +4,7 @@
 # signal. Top decile by year-over-year cosine similarity (HIGH cos =
 # stable disclosure = positive long-only candidate).
 #
-# Config rationale (see ~/Docs/bloasis/Phase3D_Final_Measurement_2026-05-09.md):
+# Config rationale (see docs/research/Phase3D_Final_Measurement_2026-05-09.md):
 # - signal.atr_stop_multiplier 100 / atr_tp_multiplier 100 / profit_tiers []:
 #   EDGAR is annual-filing-driven (low-turnover); friction settings have
 #   no measured effect on alpha or sharpe. Effectively disabled.

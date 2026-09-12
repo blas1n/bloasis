@@ -3,7 +3,7 @@
 Phase 2: forward-return labeling (PR13), LightGBM training (PR14),
 ML scorer (PR15), SHAP rationale (PR16).
 
-Mission roadmap §Phase 2 — see ~/Docs/bloasis/Phase2_ML_Design_Lockin_2026-05-07.md.
+Mission roadmap §Phase 2 — see docs/research/Phase2_ML_Design_Lockin_2026-05-07.md.
 """
 
 from bloasis.ml.labeling import (

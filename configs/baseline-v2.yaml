@@ -16,7 +16,7 @@
 # qlib KBAR microstructure features, liquidity includes corr_pv_20.
 # `feature_version: 2` extracted features, see FEATURE_COLUMNS.
 #
-# See ~/Docs/bloasis/PR12_Design_Lockin_2026-05-07.md for full rationale.
+# See docs/research/PR12_Design_Lockin_2026-05-07.md for full rationale.
 
 universe:
   source: sp500

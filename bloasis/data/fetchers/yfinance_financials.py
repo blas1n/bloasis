@@ -4,7 +4,7 @@ Returns a normalized DataFrame indexed by fiscal year-end date with a
 fixed set of canonical columns (Revenue, EBITDA, NetIncome, FreeCashFlow,
 TotalDebt, StockholdersEquity). Used by `FundamentalLLMScorer`
 (Phase 3 Candidate B-modern) — see
-`~/Docs/bloasis/Phase3_Modern_Candidates_2026-05-08.md` §B.
+`docs/research/Phase3_Modern_Candidates_2026-05-08.md` §B.
 
 yfinance returns ~5 fiscal years of annual statements (vs only 5
 quarters of quarterly), so multi-year backtest (2021-2025+) is feasible.

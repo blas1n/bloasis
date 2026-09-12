@@ -817,7 +817,7 @@ class PEADScorer:
     `top_pct` by `last_eps_surprise_pct` get score 0.99 (passes
     `entry_threshold=0.65`); rest 0.0.
 
-    Spec: ~/Docs/bloasis/Phase3_Modern_Candidates_2026-05-08.md §A
+    Spec: docs/research/Phase3_Modern_Candidates_2026-05-08.md §A
     """
 
     def __init__(

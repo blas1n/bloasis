@@ -1,7 +1,7 @@
 """Tests for `bloasis.scoring.regime_overlay`.
 
 Barroso-Santa-Clara constant-vol scaling + Daniel-Moskowitz bear gate.
-See ~/Docs/bloasis/Research_DM_Dynamic_Momentum.md for derivation.
+See docs/research/Research_DM_Dynamic_Momentum.md for derivation.
 """
 
 from __future__ import annotations

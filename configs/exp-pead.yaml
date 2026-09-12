@@ -4,7 +4,7 @@
 # Top decile of `last_eps_surprise_pct` (where days_since_earnings <= 60
 # AND surprise_pct > 0) → score 0.99, rest 0.0.
 #
-# Spec: ~/Docs/bloasis/Phase3_Modern_Candidates_2026-05-08.md §A
+# Spec: docs/research/Phase3_Modern_Candidates_2026-05-08.md §A
 #
 # yfinance limit: ~2-3 yrs historical earnings → multi-year backtest
 # stretched. First check: 2022-2024 walk-forward.

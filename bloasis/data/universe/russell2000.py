@@ -3,7 +3,7 @@
 iShares publishes a daily-updated CSV of the Russell 2000 components
 (~2000 small-cap US stocks). Cached locally with a 24h TTL.
 
-Spec: ~/Docs/bloasis/Modern_Alpha_Research_2026-05-09.md — small-cap
+Spec: docs/research/Modern_Alpha_Research_2026-05-09.md — small-cap
 universe is more academically aligned with Cohen-Malloy "Lazy Prices"
 and similar disclosure-change signals (large caps are too stable).
 """

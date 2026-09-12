@@ -5,7 +5,7 @@ Fetches:
 - list of 10-K filings per CIK with filing dates
 - 10-K HTML → Item 1A "Risk Factors" plaintext
 
-Used by Phase 3 Candidate D (`~/Docs/bloasis/Phase3_Modern_Candidates_2026-05-08.md`).
+Used by Phase 3 Candidate D (`docs/research/Phase3_Modern_Candidates_2026-05-08.md`).
 
 EDGAR rate limit: 10 req/sec. We sleep 0.15s between calls; refetches
 hit parquet/text caches keyed by (cik, accession).
