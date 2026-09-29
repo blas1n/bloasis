@@ -7,8 +7,11 @@ Fetches:
 
 Used by Phase 3 Candidate D (`docs/research/Phase3_Modern_Candidates_2026-05-08.md`).
 
-EDGAR rate limit: 10 req/sec. We sleep 0.15s between calls; refetches
-hit parquet/text caches keyed by (cik, accession).
+EDGAR rate limit: 10 req/sec. We sleep 0.15s after every request (failed
+ones too); refetches hit parquet/text caches keyed by (cik, accession).
+
+`tickers.json` and the submissions snapshots expire after `max_age_hours`
+(issue #72); a failed refresh serves the stale copy with a warning.
 
 References:
 - https://www.sec.gov/os/accessing-edgar-data
@@ -18,16 +21,22 @@ References:
 from __future__ import annotations
 
 import json
+import logging
 import re
 import time
 import urllib.error
 import urllib.request
 from datetime import date
 from pathlib import Path
-from typing import TypedDict
+from typing import Any, TypedDict
+
+logger = logging.getLogger(__name__)
 
 USER_AGENT = "BSVibe Bloasis Research bloasis@bsvibe.dev"
 BASE_DELAY = 0.15  # 10 req/sec cap → 0.15s headroom
+DEFAULT_MAX_AGE_HOURS = 24
+# SEC throttling answers: once seen, more requests this run only dig deeper.
+_THROTTLED = (403, 429)
 
 
 class TenKFiling(TypedDict):
@@ -49,28 +58,96 @@ class EdgarClient:
     """EDGAR HTTP client + ticker→CIK + 10-K list + Item 1A extraction.
 
     All disk caches under `cache_dir/edgar/`:
-    - tickers.json  — global ticker → CIK lookup (refreshed every N days)
-    - filings/{cik}.json — submissions response
-    - risk_factors/{cik}_{accession}.txt — extracted Item 1A text
+    - tickers.json  — global ticker → CIK lookup (expires after max_age_hours)
+    - filings/{cik}.json — submissions response (expires after max_age_hours)
+    - filings/CIK…-submissions-NNN.json — older pages; valid only while no
+      older than their snapshot, since page boundaries move with new filings
+    - risk_factors/{cik}_{accession}.txt — extracted Item 1A text (immutable)
     """
 
-    def __init__(self, cache_dir: Path | str) -> None:
+    def __init__(
+        self, cache_dir: Path | str, *, max_age_hours: float = DEFAULT_MAX_AGE_HOURS
+    ) -> None:
         self._root = Path(cache_dir).expanduser() / "edgar"
         (self._root / "filings").mkdir(parents=True, exist_ok=True)
         (self._root / "risk_factors").mkdir(parents=True, exist_ok=True)
         self._tickers: dict[str, str] | None = None
+        self._max_age_s = max_age_hours * 3600
+        self._refresh_disabled = False
+
+    # ------------------------------------------------------------------
+    # expiring JSON cache
+    # ------------------------------------------------------------------
+    def _cached_json(self, path: Path, url: str, *, kind: str, valid_since: float | None) -> Any:
+        """Cached JSON at `path`, refetched from `url` when invalid.
+
+        The copy is valid while its mtime is at/after `valid_since` (None:
+        within max age). A failed refetch serves the invalid copy with a
+        warning; with no copy on disk the failure propagates.
+        """
+        if not path.exists():
+            data = self._fetch_json(url)
+            path.write_text(json.dumps(data))
+            return data
+        mtime = path.stat().st_mtime
+        if valid_since is None:
+            valid_since = time.time() - self._max_age_s
+        if mtime >= valid_since or self._refresh_disabled:
+            return json.loads(path.read_text())
+        try:
+            data = self._fetch_json(url)
+        except (OSError, ValueError) as exc:
+            age_h = round((time.time() - mtime) / 3600, 1)
+            logger.warning(
+                "edgar_refresh_failed kind=%s path=%s age_hours=%s error=%r",
+                kind,
+                path,
+                age_h,
+                exc,
+                extra={"edgar_kind": kind, "edgar_path": str(path), "edgar_age_hours": age_h},
+            )
+            code = getattr(exc, "code", None)
+            if not isinstance(exc, urllib.error.HTTPError) or code in _THROTTLED:
+                # Network down or SEC throttling: every further stale file
+                # would wait out its own timeout. Serve stale for the run.
+                self._refresh_disabled = True
+                logger.warning(
+                    "edgar_refresh_disabled reason=%r; serving stale EDGAR cache for this run",
+                    exc,
+                    extra={"edgar_kind": kind},
+                )
+            return json.loads(path.read_text())
+        path.write_text(json.dumps(data))
+        return data
+
+    @staticmethod
+    def _fetch_json(url: str) -> Any:
+        try:
+            return json.loads(_http_get(url))
+        finally:
+            time.sleep(BASE_DELAY)
+
+    def _submissions(self, cik: str) -> tuple[dict[str, Any], float]:
+        """Submissions snapshot and the mtime its pages must not predate."""
+        path = self._root / "filings" / f"{cik}.json"
+        sub: dict[str, Any] = self._cached_json(
+            path,
+            f"https://data.sec.gov/submissions/CIK{cik}.json",
+            kind="submissions",
+            valid_since=None,
+        )
+        return sub, path.stat().st_mtime
 
     # ------------------------------------------------------------------
     # ticker → CIK
     # ------------------------------------------------------------------
     def _load_tickers(self) -> dict[str, str]:
-        path = self._root / "tickers.json"
-        if path.exists():
-            data = json.loads(path.read_text())
-        else:
-            data = json.loads(_http_get("https://www.sec.gov/files/company_tickers.json"))
-            path.write_text(json.dumps(data))
-            time.sleep(BASE_DELAY)
+        data = self._cached_json(
+            self._root / "tickers.json",
+            "https://www.sec.gov/files/company_tickers.json",
+            kind="tickers",
+            valid_since=None,
+        )
         return {v["ticker"]: str(v["cik_str"]).zfill(10) for v in data.values()}
 
     def cik(self, ticker: str) -> str | None:
@@ -90,19 +167,14 @@ class EdgarClient:
         filings; for heavy filers (big banks issue thousands of 424B2 notes a
         year) that is a few months, so older 10-Ks live in the paginated
         `filings.files` pages. Pages whose `filingTo` is on/after `since`
-        (all pages when `since` is None) are read too and cached like the
-        submissions snapshot itself.
+        (all pages when `since` is None) are read too; a cached page older
+        than its snapshot is refetched, because new filings shift the page
+        boundaries and a stale page can miss rows the snapshot moved out.
         """
         cik = self.cik(ticker)
         if cik is None:
             return []
-        cache = self._root / "filings" / f"{cik}.json"
-        if cache.exists():
-            sub = json.loads(cache.read_text())
-        else:
-            sub = json.loads(_http_get(f"https://data.sec.gov/submissions/CIK{cik}.json"))
-            cache.write_text(json.dumps(sub))
-            time.sleep(BASE_DELAY)
+        sub, snapshot_mtime = self._submissions(cik)
         filings = sub.get("filings", {})
         blocks = [filings.get("recent", {})]
         for page in filings.get("files", []):
@@ -115,7 +187,7 @@ class EdgarClient:
                         continue
                 except (KeyError, ValueError):
                     pass
-            blocks.append(self._submissions_page(name))
+            blocks.append(self._submissions_page(name, snapshot_mtime))
         # Page boundaries shift as new filings arrive, so a snapshot cached
         # earlier can overlap a page fetched later — keep each accession once.
         by_accession: dict[str, TenKFiling] = {}
@@ -127,14 +199,13 @@ class EdgarClient:
         out.sort(key=lambda f: f["filed"], reverse=True)
         return out
 
-    def _submissions_page(self, name: str) -> dict[str, list[str]]:
-        cache = self._root / "filings" / name
-        if cache.exists():
-            page: dict[str, list[str]] = json.loads(cache.read_text())
-            return page
-        page = json.loads(_http_get(f"https://data.sec.gov/submissions/{name}"))
-        cache.write_text(json.dumps(page))
-        time.sleep(BASE_DELAY)
+    def _submissions_page(self, name: str, snapshot_mtime: float) -> dict[str, list[str]]:
+        page: dict[str, list[str]] = self._cached_json(
+            self._root / "filings" / name,
+            f"https://data.sec.gov/submissions/{name}",
+            kind="submissions_page",
+            valid_since=snapshot_mtime,
+        )
         return page
 
     # ------------------------------------------------------------------
@@ -150,13 +221,7 @@ class EdgarClient:
         cik = self.cik(ticker)
         if cik is None:
             return []
-        cache = self._root / "filings" / f"{cik}.json"
-        if cache.exists():
-            sub = json.loads(cache.read_text())
-        else:
-            sub = json.loads(_http_get(f"https://data.sec.gov/submissions/CIK{cik}.json"))
-            cache.write_text(json.dumps(sub))
-            time.sleep(BASE_DELAY)
+        sub, _snapshot_mtime = self._submissions(cik)
         recent = sub.get("filings", {}).get("recent", {})
         forms = recent.get("form", [])
         out: list[dict[str, object]] = []

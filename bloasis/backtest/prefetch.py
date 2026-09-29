@@ -112,7 +112,9 @@ def prefetch_backtest_data(
     if types & set(_EDGAR_TEXT_SCORERS):
         from bloasis.data.fetchers.sec_edgar import EdgarClient
 
-        edgar = EdgarClient(cache_dir=cfg.data.cache_dir)
+        edgar = EdgarClient(
+            cache_dir=cfg.data.cache_dir, max_age_hours=cfg.data.edgar_cache_max_age_hours
+        )
         window_start = start_d - timedelta(days=5 * 365)
         for sym in bars:
             try:
@@ -136,7 +138,9 @@ def prefetch_backtest_data(
     if types & set(_FORM4_SCORERS):
         from bloasis.data.fetchers.sec_edgar import EdgarClient
 
-        edgar = EdgarClient(cache_dir=cfg.data.cache_dir)
+        edgar = EdgarClient(
+            cache_dir=cfg.data.cache_dir, max_age_hours=cfg.data.edgar_cache_max_age_hours
+        )
         for sym in bars:
             try:
                 fl = edgar.list_filings(sym, form_type="4")
@@ -150,7 +154,9 @@ def prefetch_backtest_data(
     if types & set(_FORM8K_SCORERS):
         from bloasis.data.fetchers.sec_edgar import EdgarClient
 
-        edgar = EdgarClient(cache_dir=cfg.data.cache_dir)
+        edgar = EdgarClient(
+            cache_dir=cfg.data.cache_dir, max_age_hours=cfg.data.edgar_cache_max_age_hours
+        )
         for sym in bars:
             try:
                 fl = edgar.list_filings(sym, form_type="8-K")

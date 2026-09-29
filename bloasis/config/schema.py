@@ -336,6 +336,9 @@ class DataConfig(BaseModel):
     ohlcv_cache_max_age_hours: int = Field(default=24, ge=0)
     fundamentals_cache_max_age_hours: int = Field(default=24, ge=0)
     sentiment_cache_max_age_hours: int = Field(default=6, ge=0)
+    # EDGAR tickers.json + submissions snapshots (issue #72). One refresh per
+    # daily run: ~1 request per name at the client's 0.15s spacing.
+    edgar_cache_max_age_hours: int = Field(default=24, ge=0)
     finnhub_rate_per_minute: int = Field(default=60, ge=1, le=300)
     sentiment_lookback_days: int = Field(default=7, ge=1, le=30)
 
