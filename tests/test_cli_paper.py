@@ -391,3 +391,72 @@ def test_paper_run_no_sell_when_no_held_positions(
         orders = conn.execute(select(paper_orders)).fetchall()
     assert all(o.side == "buy" for o in orders)
     assert len(orders) == 2
+
+
+def test_paper_run_universe_resolves_symbols_for_candidate_builder(
+    baseline_config: Path,
+    db_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`--universe sp500` feeds the resolved constituent list to the scorer,
+    so paper trades the same universe the backtest measured."""
+    _patch_broker_and_pipeline(monkeypatch, ["AAPL", "MSFT"])
+    monkeypatch.setattr(
+        "bloasis.data.universe.sp500.list_sp500",
+        lambda cache_dir: ["AAPL", "MSFT", "NVDA"],
+    )
+    seen: list[list[str]] = []
+
+    def _capture(cfg, symbols, days):  # type: ignore[no-untyped-def]
+        seen.append(list(symbols))
+        return [MagicMock(symbol=s) for s in symbols], {}
+
+    monkeypatch.setattr("bloasis.cli._build_live_candidates", _capture)
+
+    res = runner.invoke(app, ["trade", "paper", "--universe", "sp500", "-c", str(baseline_config)])
+    assert res.exit_code == 0, res.output
+    assert seen == [["AAPL", "MSFT", "NVDA"]]
+
+
+def test_paper_run_rejects_universe_with_explicit_symbols(
+    baseline_config: Path,
+    db_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Symbols and a universe together are ambiguous — refuse instead of
+    silently preferring one."""
+    broker = _patch_broker_and_pipeline(monkeypatch, ["AAPL", "MSFT"])
+
+    res = runner.invoke(
+        app,
+        [
+            "trade",
+            "paper",
+            "--universe",
+            "sp500",
+            "-s",
+            "AAPL",
+            "-s",
+            "MSFT",
+            "-c",
+            str(baseline_config),
+        ],
+    )
+    assert res.exit_code != 0
+    assert "No such option" not in res.output, res.output
+    broker.place_market_order.assert_not_called()
+
+
+def test_paper_run_rejects_unknown_universe(
+    baseline_config: Path,
+    db_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    broker = _patch_broker_and_pipeline(monkeypatch, ["AAPL", "MSFT"])
+
+    res = runner.invoke(
+        app, ["trade", "paper", "--universe", "nasdaq9000", "-c", str(baseline_config)]
+    )
+    assert res.exit_code != 0
+    assert "No such option" not in res.output, res.output
+    broker.place_market_order.assert_not_called()

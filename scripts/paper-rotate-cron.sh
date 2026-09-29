@@ -7,28 +7,20 @@
 # Alpaca paper account. Persists session/orders/equity_snapshots via
 # the PR45-47 paper-trading layer.
 #
-# Edit SESSION_NAME / SYMBOLS / CONFIG as the smoke phase progresses.
+# Edit SESSION_NAME / UNIVERSE / CONFIG as the smoke phase progresses.
 
 set -euo pipefail
 
 REPO=/Users/blasin/Works/bloasis/main
-SESSION_NAME="edgar-rolling2-paper-2026-05"
+# 2026-09-29: switched from a hard-coded 50-name list to the SP500
+# universe the edgar-rolling2 backtest measured. On 50 names the top
+# decile was 4 stocks (~8% invested) and the held set never changed
+# between annual 10-K filings, so the paper session could not test the
+# backtest claim. New session name = clean equity series for the new
+# universe; the old session was closed.
+SESSION_NAME="edgar-rolling2-sp500-paper-2026-09"
 CONFIG="configs/edgar-rolling2.yaml"
-
-# Top 50 SP500 by market cap (as of 2024-12-31). Wider than top 20
-# because top decile of 20 with EDGAR-eligible filter (≥ 2 prior 10-Ks)
-# was producing only 1 buyable name; 50 should give 3-5 holdings for
-# meaningful diversification + friction sample size.
-#
-# Edit when expanding the universe — keep DB-resident session NAME the
-# same so equity continuity is preserved across symbol changes.
-SYMBOLS=(
-  NVDA AAPL MSFT GOOGL AMZN META BRK-B AVGO TSLA JPM
-  WMT LLY V MA ORCL XOM COST NFLX JNJ HD
-  PG BAC ABBV CRM CVX KO TMUS WFC CSCO MRK
-  ADBE PEP MCD ABT TMO LIN ACN AMD GE BX
-  IBM PM AXP CAT QCOM DIS T VZ INTC NOW
-)
+UNIVERSE="sp500"
 
 cd "$REPO"
 
@@ -40,12 +32,6 @@ if [[ -f .env ]]; then
   source .env
   set +a
 fi
-
-# Build -s SYM args
-SYM_ARGS=()
-for sym in "${SYMBOLS[@]}"; do
-  SYM_ARGS+=(-s "$sym")
-done
 
 # launchd's PATH is minimal; ensure uv + brew bins are discoverable.
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
@@ -73,7 +59,7 @@ if orders:
 "
 
 uv run bloasis trade paper \
-  "${SYM_ARGS[@]}" \
+  --universe "$UNIVERSE" \
   -c "$CONFIG" \
   --session "$SESSION_NAME"
 
