@@ -64,7 +64,10 @@ class YfEarningsFetcher:
 
     def _download(self, symbol: str) -> pd.DataFrame:
         import pandas as pd
-        import yfinance as yf
+
+        from bloasis.data.fetchers._yfinance import import_yfinance
+
+        yf = import_yfinance()
 
         ticker = yf.Ticker(symbol)
         try:

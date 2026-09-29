@@ -41,7 +41,10 @@ class YfFundamentalsFetcher:
     """Bulk fundamentals via yfinance.Screener with ticker.info fallback."""
 
     def fetch_bulk(self, max_count: int = 1000) -> list[FundamentalRow]:
-        from yfinance import EquityQuery, Screener
+        from bloasis.data.fetchers._yfinance import import_yfinance
+
+        yf = import_yfinance()
+        EquityQuery, Screener = yf.EquityQuery, yf.Screener
 
         query = EquityQuery("eq", ["region", "us"])
         screener = Screener()
@@ -80,7 +83,9 @@ class YfFundamentalsFetcher:
         return rows
 
     def fetch_single(self, symbol: str) -> FundamentalRow | None:
-        import yfinance as yf
+        from bloasis.data.fetchers._yfinance import import_yfinance
+
+        yf = import_yfinance()
 
         info = yf.Ticker(symbol).info
         if not info:
