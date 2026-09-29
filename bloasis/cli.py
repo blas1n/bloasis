@@ -1505,6 +1505,7 @@ def _execute_against_broker(
         # End-of-run mark-to-market: account state already reflects the
         # orders we just placed (broker / sim mutated it inline).
         positions_value = max(0.0, account_after.equity - account_after.cash)
+        positions_after = broker.get_positions()
         writers.snapshot_paper_equity(
             engine,
             session_id=session_id,
@@ -1512,7 +1513,7 @@ def _execute_against_broker(
             cash=account_after.cash,
             positions_value=positions_value,
             equity=account_after.equity,
-            n_positions=len(step.submitted),
+            n_positions=len(positions_after),
         )
 
 
