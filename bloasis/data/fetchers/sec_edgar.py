@@ -26,9 +26,11 @@ import re
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Iterable
+from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import Any, NotRequired, TypedDict
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +46,56 @@ class TenKFiling(TypedDict):
     primary_doc: str  # "aapl-20250927.htm"
     filed: date
     period: date  # report period end (fiscal year end)
+    cik: NotRequired[str]  # registrant whose archive holds the filing
+
+
+# Forms by which a new registrant takes over a predecessor's registration
+# (Exchange Act Rule 12g-3). Amendments keep the evidence.
+_SUCCESSION_FORMS = frozenset({"8-K12B", "8-K12B/A", "8-K12G3", "8-K12G3/A"})
+
+
+def _normalize_cik(value: object) -> str:
+    text = str(value).strip()
+    if not text.isdigit() or len(text) > 10:
+        raise ValueError(f"CIK must be up to 10 digits, got {value!r}")
+    return text.zfill(10)
+
+
+@dataclass(frozen=True)
+class CikSuccession:
+    """`successor_cik` took over `predecessor_cik`'s registration.
+
+    EDGAR's submissions JSON has no predecessor field, so the link is
+    declared here and cites the successor's 8-K12B / 8-K12G3. It is followed
+    only while the successor's own submissions list that accession under a
+    succession form — never because a ticker used to map elsewhere, since
+    tickers get reused by unrelated companies (issue #75).
+    """
+
+    # YAML spells a CIK as a bare number; pydantic reads this when the
+    # table comes from config.
+    __pydantic_config__ = {"coerce_numbers_to_str": True, "extra": "forbid"}
+
+    successor_cik: str
+    predecessor_cik: str
+    evidence_accession: str
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "successor_cik", _normalize_cik(self.successor_cik))
+        object.__setattr__(self, "predecessor_cik", _normalize_cik(self.predecessor_cik))
+
+
+# ExxonMobil Holdings Corp (2115436) became the successor registrant of
+# Exxon Mobil Corp (34088) in the 2026-07-01 redomiciliation merger; its
+# 8-K12B says so under Rule 12g-3(a). Every Exxon 10-K through 2026-02-18
+# is filed under 34088.
+DEFAULT_SUCCESSIONS: tuple[CikSuccession, ...] = (
+    CikSuccession(
+        successor_cik="0002115436",
+        predecessor_cik="0000034088",
+        evidence_accession="0001193125-26-291990",
+    ),
+)
 
 
 def _http_get(url: str, *, accept: str = "text/html") -> bytes:
@@ -66,7 +118,11 @@ class EdgarClient:
     """
 
     def __init__(
-        self, cache_dir: Path | str, *, max_age_hours: float = DEFAULT_MAX_AGE_HOURS
+        self,
+        cache_dir: Path | str,
+        *,
+        max_age_hours: float = DEFAULT_MAX_AGE_HOURS,
+        successions: Iterable[CikSuccession] = (),
     ) -> None:
         self._root = Path(cache_dir).expanduser() / "edgar"
         (self._root / "filings").mkdir(parents=True, exist_ok=True)
@@ -74,6 +130,7 @@ class EdgarClient:
         self._tickers: dict[str, str] | None = None
         self._max_age_s = max_age_hours * 3600
         self._refresh_disabled = False
+        self._predecessors: dict[str, CikSuccession] = {s.successor_cik: s for s in successions}
 
     # ------------------------------------------------------------------
     # expiring JSON cache
@@ -170,13 +227,37 @@ class EdgarClient:
         (all pages when `since` is None) are read too; a cached page older
         than its snapshot is refetched, because new filings shift the page
         boundaries and a stale page can miss rows the snapshot moved out.
+
+        When the ticker's CIK is a declared, verified successor
+        (`CikSuccession`), the predecessor's 10-Ks are included, so a
+        reorganized issuer keeps its history until it files its own.
         """
         cik = self.cik(ticker)
         if cik is None:
             return []
+        # Page boundaries shift as new filings arrive, so a snapshot cached
+        # earlier can overlap a page fetched later — and a 10-K filed jointly
+        # by a successor and its predecessor sits in both registrants'
+        # submissions. Keep each accession once, the newest registrant's copy.
+        by_accession: dict[str, TenKFiling] = {}
+        seen: set[str] = set()
+        current: str | None = cik
+        while current is not None and current not in seen:
+            seen.add(current)
+            blocks = self._submission_blocks(current, since)
+            for block in blocks:
+                for row in _tenk_rows(block, current):
+                    by_accession.setdefault(row["accession"], row)
+            current = self._verified_predecessor(current, blocks)
+        out = list(by_accession.values())
+        # sort by filing date descending
+        out.sort(key=lambda f: f["filed"], reverse=True)
+        return out
+
+    def _submission_blocks(self, cik: str, since: date | None) -> list[dict[str, list[str]]]:
         sub, snapshot_mtime = self._submissions(cik)
         filings = sub.get("filings", {})
-        blocks = [filings.get("recent", {})]
+        blocks: list[dict[str, list[str]]] = [filings.get("recent", {})]
         for page in filings.get("files", []):
             name = str(page.get("name", ""))
             if not name:
@@ -188,16 +269,27 @@ class EdgarClient:
                 except (KeyError, ValueError):
                     pass
             blocks.append(self._submissions_page(name, snapshot_mtime))
-        # Page boundaries shift as new filings arrive, so a snapshot cached
-        # earlier can overlap a page fetched later — keep each accession once.
-        by_accession: dict[str, TenKFiling] = {}
+        return blocks
+
+    def _verified_predecessor(self, cik: str, blocks: list[dict[str, list[str]]]) -> str | None:
+        """Predecessor CIK when `cik` has a declared succession whose cited
+        filing its own submissions list under a succession form."""
+        succession = self._predecessors.get(cik)
+        if succession is None:
+            return None
         for block in blocks:
-            for row in _tenk_rows(block):
-                by_accession.setdefault(row["accession"], row)
-        out = list(by_accession.values())
-        # sort by filing date descending
-        out.sort(key=lambda f: f["filed"], reverse=True)
-        return out
+            accessions = block.get("accessionNumber", [])
+            forms = block.get("form", [])
+            for accession, form in zip(accessions, forms, strict=False):
+                if accession == succession.evidence_accession and form in _SUCCESSION_FORMS:
+                    return succession.predecessor_cik
+        logger.warning(
+            "edgar_succession_unverified successor=%s predecessor=%s evidence=%s",
+            cik,
+            succession.predecessor_cik,
+            succession.evidence_accession,
+        )
+        return None
 
     def _submissions_page(self, name: str, snapshot_mtime: float) -> dict[str, list[str]]:
         page: dict[str, list[str]] = self._cached_json(
@@ -246,7 +338,8 @@ class EdgarClient:
     # Item 1A extraction
     # ------------------------------------------------------------------
     def risk_factors(self, ticker: str, filing: TenKFiling) -> str | None:
-        cik = self.cik(ticker)
+        # A successor's history includes filings in the predecessor's archive.
+        cik = filing.get("cik") or self.cik(ticker)
         if cik is None:
             return None
         acc_clean = filing["accession"].replace("-", "")
@@ -271,7 +364,7 @@ class EdgarClient:
         return section
 
 
-def _tenk_rows(block: dict[str, list[str]]) -> list[TenKFiling]:
+def _tenk_rows(block: dict[str, list[str]], cik: str) -> list[TenKFiling]:
     forms = block.get("form", [])
     out: list[TenKFiling] = []
     for i, form in enumerate(forms):
@@ -288,6 +381,7 @@ def _tenk_rows(block: dict[str, list[str]]) -> list[TenKFiling]:
                 primary_doc=block["primaryDocument"][i],
                 filed=filed,
                 period=period,
+                cik=cik,
             )
         )
     return out
