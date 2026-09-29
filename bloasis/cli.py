@@ -1187,6 +1187,12 @@ def trade_paper(
         help="Persist orders + equity snapshots under this session name. "
         "Idempotent — re-running with the same name resumes the session.",
     ),
+    universe: str = typer.Option(  # noqa: B008
+        None,
+        "--universe",
+        help="Trade a whole universe (sp500, sp500_at:YYYY-MM-DD, russell2000) "
+        "instead of explicit --symbol entries.",
+    ),
 ) -> None:
     """Submit BUY/SELL signals to Alpaca paper account.
 
@@ -1198,10 +1204,14 @@ def trade_paper(
     from bloasis.broker import AlpacaBrokerAdapter
     from bloasis.storage import create_all, writers
 
+    cfg = _load_or_default_config(config_path)
+    if universe is not None:
+        if symbols:
+            raise typer.BadParameter("pass either --universe or --symbol/-s, not both")
+        symbols = _resolve_universe_symbols(universe, None, Path(cfg.data.cache_dir).expanduser())
     if not symbols or len(symbols) < 2:
         raise typer.BadParameter("at least 2 --symbol/-s entries required")
 
-    cfg = _load_or_default_config(config_path)
     candidates, _last_closes = _build_live_candidates(cfg, symbols, days)
     if not candidates:
         console.print("[yellow]no candidates produced[/yellow]")
