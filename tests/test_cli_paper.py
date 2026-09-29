@@ -460,3 +460,47 @@ def test_paper_run_rejects_unknown_universe(
     assert res.exit_code != 0
     assert "No such option" not in res.output, res.output
     broker.place_market_order.assert_not_called()
+
+
+def test_paper_snapshot_records_held_positions_not_orders_submitted(
+    baseline_config: Path,
+    db_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """n_positions is the count of names held after the run's orders —
+    not the number of orders submitted, and not the pre-run holdings."""
+    broker = _patch_broker_and_pipeline(monkeypatch, ["AAPL", "MSFT"])
+    before = [_fake_position("GOOG")]
+    after = [_fake_position("GOOG"), _fake_position("AAPL"), _fake_position("MSFT")]
+    calls = {"n": 0}
+
+    def _positions() -> list[MagicMock]:
+        calls["n"] += 1
+        return before if calls["n"] == 1 else after
+
+    broker.get_positions.side_effect = _positions
+
+    res = runner.invoke(
+        app,
+        [
+            "trade",
+            "paper",
+            "-s",
+            "AAPL",
+            "-s",
+            "MSFT",
+            "-c",
+            str(baseline_config),
+            "--session",
+            "n-positions",
+        ],
+    )
+    assert res.exit_code == 0, res.output
+    # 2 BUY orders submitted; 1 name held before, 3 after.
+    assert broker.place_market_order.call_count == 2
+
+    eng = get_engine(db_path)
+    with eng.connect() as conn:
+        snaps = conn.execute(select(paper_equity_snapshots)).fetchall()
+    assert len(snaps) == 1
+    assert snaps[0].n_positions == 3
