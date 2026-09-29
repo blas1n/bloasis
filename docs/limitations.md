@@ -188,6 +188,46 @@ also considered. Likely Phase 2 once live equity history accumulates.
 
 ---
 
+## L010 — EDGAR text-diff scorer cannot score every SP500 name
+
+**Status**: open (by design for the names listed below)
+**Severity**: low (~3% of the SP500 is never selectable)
+**Affected components**: `bloasis/data/fetchers/sec_edgar.py`,
+`bloasis/backtest/engine.py` (rolling cosine)
+
+**Impact**: `risk_factors_cosine` needs Item 1A text from at least two
+10-Ks filed on or before `today - edgar_filing_lag_days`. A NaN cosine
+means the name can never enter the top decile. Measured on the live SP500
+run of 2026-09-29, after the #70 fixes: 16 of 497 scored names have no
+cosine. Before the fixes the count was 25.
+
+| Reason | Names |
+|---|---|
+| No `Item 1A` heading at the section. The filing uses a cross-reference index or a plain "Risk Factors" heading | GE, MCD, INTC, CAH, SYF, WY, HON |
+| Item 1A incorporated by reference to the annual report exhibit (EX-13), which we do not fetch | WFC, USB |
+| No `Item` labels in the primary document at all | C, MS |
+| Fewer than two eligible 10-Ks (new registrant or spin-off) | PSKY, Q, SNDK, FDXF |
+| Ticker missing from the cached SEC map (renamed from BK) | BNY (see #72) |
+
+Fixed in #70 (no longer excluded): submissions pagination for heavy filers
+(JPM, BAC, GS, BLK), `Item 1(a)` / `Item 1.A.` / drop-cap `I TEM 1A`
+spellings (HAL, ROL, CHD), and sections ending at Item 1C or `Item 2`
+with no period (CINF, ICE). The strict parser still runs first, so every
+filing it already extracted is unchanged.
+
+**Current mitigation**: none needed for correctness. The backtest applies
+the same exclusion, so live and backtest agree. The Item 1A span is the
+longest `Item 1A` → next-item span. When a cross-reference precedes the
+real heading, the text includes some Item 1 prose. That happens the same
+way every year, so the year-over-year cosine stays comparable.
+
+**Planned resolution**: add heading-based extraction ("Risk Factors" →
+next heading) for cross-reference-index filers, and EX-13 fetch for
+incorporated-by-reference filers, only if backtests show the excluded
+names matter.
+
+---
+
 ## How to add a limitation
 
 1. Pick next free `L00N` ID.

@@ -116,7 +116,7 @@ def prefetch_backtest_data(
         window_start = start_d - timedelta(days=5 * 365)
         for sym in bars:
             try:
-                filings = edgar.list_10k(sym)
+                filings = edgar.list_10k(sym, since=window_start)
             except Exception as exc:  # noqa: BLE001
                 console.print(f"[yellow]skipping EDGAR list for {sym}: {exc}[/yellow]")
                 continue

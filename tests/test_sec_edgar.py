@@ -227,3 +227,148 @@ def test_list_filings_unknown_ticker_returns_empty(tmp_path: Path) -> None:
     (edgar / "tickers.json").write_text(json.dumps({}))
     client = EdgarClient(tmp_path)
     assert client.list_filings("ZZZZ", form_type="8-K") == []
+
+
+# ---------------------------------------------------------------------------
+# Issue #70 — coverage gaps that left ~5% of SP500 without a cosine
+# ---------------------------------------------------------------------------
+
+_LONG_RISK = "Risk content. " * 200
+
+
+def _write_tickers(edgar: Path, rows: dict[str, int]) -> None:
+    edgar.mkdir(parents=True, exist_ok=True)
+    (edgar / "tickers.json").write_text(
+        json.dumps(
+            {
+                str(i): {"ticker": t, "cik_str": c, "title": t}
+                for i, (t, c) in enumerate(rows.items())
+            }
+        )
+    )
+
+
+def test_cik_resolves_dot_class_ticker_to_sec_dash_form(tmp_path: Path) -> None:
+    # SEC lists share classes as "BRK-B"; the SP500 universe spells them "BRK.B".
+    _write_tickers(tmp_path / "edgar", {"BRK-B": 1067983})
+    client = EdgarClient(tmp_path)
+    assert client.cik("BRK.B") == "0001067983"
+
+
+def _filings_block(forms: list[str], dates: list[str]) -> dict[str, list[str]]:
+    return {
+        "form": forms,
+        "filingDate": dates,
+        "reportDate": dates,
+        "accessionNumber": [f"acc-{d}" for d in dates],
+        "primaryDocument": [f"doc-{d}.htm" for d in dates],
+    }
+
+
+def test_list_10k_reads_older_submission_pages(tmp_path: Path) -> None:
+    # Big banks file thousands of 424B2s a year, so the submissions API
+    # `recent` block covers only months; older 10-Ks live in `filings.files`.
+    edgar = tmp_path / "edgar"
+    (edgar / "filings").mkdir(parents=True)
+    _write_tickers(edgar, {"JPM": 19617})
+    (edgar / "filings" / "0000019617.json").write_text(
+        json.dumps(
+            {
+                "filings": {
+                    "recent": _filings_block(["10-K", "424B2"], ["2026-02-13", "2026-01-02"]),
+                    "files": [
+                        {"name": "CIK0000019617-submissions-001.json", "filingTo": "2025-12-30"},
+                        {"name": "CIK0000019617-submissions-002.json", "filingTo": "2019-01-01"},
+                    ],
+                }
+            }
+        )
+    )
+    page1 = _filings_block(["10-K", "424B2", "10-K"], ["2025-02-14", "2025-01-02", "2024-02-16"])
+    served: list[str] = []
+
+    def fake_get(url: str, *, accept: str = "text/html") -> bytes:
+        served.append(url)
+        assert url.endswith("CIK0000019617-submissions-001.json"), url
+        return json.dumps(page1).encode()
+
+    client = EdgarClient(tmp_path)
+    with (
+        patch("bloasis.data.fetchers.sec_edgar._http_get", side_effect=fake_get),
+        patch("bloasis.data.fetchers.sec_edgar.time.sleep"),
+    ):
+        out = client.list_10k("JPM", since=date(2020, 1, 1))
+        again = client.list_10k("JPM", since=date(2020, 1, 1))  # page served from cache
+
+    assert [f["filed"] for f in out] == [date(2026, 2, 13), date(2025, 2, 14), date(2024, 2, 16)]
+    assert again == out
+    # Page 002 ends before `since` → never fetched; page 001 fetched once.
+    assert len(served) == 1
+
+
+def test_extract_item_1a_parenthesised_item_numbers() -> None:
+    # HAL: "Item 1(a). Risk Factors" ... "Item 1(b). Unresolved Staff Comments"
+    html = (
+        f"<p>Item 1(a). Risk Factors</p><p>{_LONG_RISK}</p>"
+        "<p>Item 1(b). Unresolved Staff Comments</p><p>None.</p>"
+    )
+    section = _extract_item_1a(html)
+    assert section is not None and "Risk content" in section
+
+
+def test_extract_item_1a_dotted_item_numbers() -> None:
+    # ROL: "Item 1.A. Risk Factors" ... "Item 1.B. Unresolved Staff Comments"
+    html = f"<p>Item 1.A. Risk Factors</p><p>{_LONG_RISK}</p><p>Item 1.B. Unresolved</p>"
+    section = _extract_item_1a(html)
+    assert section is not None and "Risk content" in section
+
+
+def test_extract_item_1a_drop_cap_split_heading() -> None:
+    # CHD: drop-cap styling renders "<span>I</span><span>TEM</span> 1A" → "I TEM 1A",
+    # and the section ends at Item 1C (Item 1B heading is styled the same way).
+    html = (
+        f"<h2><span>I</span><span>TEM</span> 1A. RISK FACTORS</h2><p>{_LONG_RISK}</p>"
+        "<h2><span>I</span><span>TEM</span> 1C. CYBERSECURITY</h2>"
+    )
+    section = _extract_item_1a(html)
+    assert section is not None and "Risk content" in section
+
+
+def test_extract_item_1a_strict_result_wins_over_fallback() -> None:
+    # Filings the strict parser already handles must extract byte-identically,
+    # so cached texts and backtests on those names do not move. The relaxed
+    # pattern alone would start at the earlier "Item 1(a)" cross-reference.
+    html = (
+        f"<p>As discussed in Item 1(a) below. {'Business prose. ' * 100}</p>"
+        f"<h2>Item 1A. Risk Factors</h2><p>{_LONG_RISK}</p>"
+        "<h2>Item 1B. Unresolved Staff Comments</h2>"
+    )
+    section = _extract_item_1a(html)
+    assert section is not None
+    assert section.startswith("Item 1A. Risk Factors")
+
+
+def test_list_10k_dedupes_filings_seen_in_recent_and_a_page(tmp_path: Path) -> None:
+    # Page boundaries move as new filings arrive: a submissions snapshot cached
+    # earlier overlaps a page fetched later. A duplicated 10-K would be compared
+    # with itself (cosine 1.0) and look like the most stable filer in the index.
+    edgar = tmp_path / "edgar"
+    (edgar / "filings").mkdir(parents=True)
+    _write_tickers(edgar, {"USB": 36104})
+    (edgar / "filings" / "0000036104.json").write_text(
+        json.dumps(
+            {
+                "filings": {
+                    "recent": _filings_block(["10-K", "10-K"], ["2026-02-23", "2025-02-21"]),
+                    "files": [
+                        {"name": "CIK0000036104-submissions-001.json", "filingTo": "2025-03-01"}
+                    ],
+                }
+            }
+        )
+    )
+    (edgar / "filings" / "CIK0000036104-submissions-001.json").write_text(
+        json.dumps(_filings_block(["10-K", "10-K"], ["2025-02-21", "2024-02-20"]))
+    )
+    out = EdgarClient(tmp_path).list_10k("USB", since=date(2020, 1, 1))
+    assert [f["filed"] for f in out] == [date(2026, 2, 23), date(2025, 2, 21), date(2024, 2, 20)]
