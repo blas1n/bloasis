@@ -113,7 +113,9 @@ def prefetch_backtest_data(
         from bloasis.data.fetchers.sec_edgar import EdgarClient
 
         edgar = EdgarClient(
-            cache_dir=cfg.data.cache_dir, max_age_hours=cfg.data.edgar_cache_max_age_hours
+            cache_dir=cfg.data.cache_dir,
+            max_age_hours=cfg.data.edgar_cache_max_age_hours,
+            successions=cfg.data.edgar_successions,
         )
         window_start = start_d - timedelta(days=5 * 365)
         for sym in bars:
