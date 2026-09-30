@@ -83,15 +83,14 @@ class YfFundamentalsFetcher:
         return rows
 
     def fetch_single(self, symbol: str) -> FundamentalRow | None:
-        from bloasis.data.fetchers._yfinance import import_yfinance
+        from bloasis.data.fetchers._yfinance import ticker
 
-        yf = import_yfinance()
-
-        info = yf.Ticker(symbol).info
+        info = ticker(symbol).info
         if not info:
             return None
         info = dict(info)
-        info.setdefault("symbol", symbol)
+        # Yahoo echoes its own spelling ("BRK-B"); key the row by the caller's.
+        info["symbol"] = symbol
         return _quote_to_row(info, fetched_at=datetime.now(tz=UTC))
 
 

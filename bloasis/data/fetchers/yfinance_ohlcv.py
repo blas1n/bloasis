@@ -63,13 +63,11 @@ class YfOhlcvFetcher:
 
     @staticmethod
     def _download(symbol: str, start: date, end: date) -> pd.DataFrame:
-        from bloasis.data.fetchers._yfinance import import_yfinance
-
-        yf = import_yfinance()
+        from bloasis.data.fetchers._yfinance import ticker as yf_ticker
 
         # `auto_adjust=False` keeps unadjusted Close so callers can decide
         # adjustment themselves. Returns split-adjusted but not dividend-adj.
-        ticker = yf.Ticker(symbol)
+        ticker = yf_ticker(symbol)
         df = ticker.history(
             start=start.isoformat(),
             end=(end + timedelta(days=1)).isoformat(),

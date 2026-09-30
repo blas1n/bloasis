@@ -7,13 +7,19 @@ PYTHONWARNINGS / -W filter cannot silence it: `import yfinance` runs
 module='^yfinance')`, which is inserted in front of every startup filter.
 So this helper installs the ignore filter *after* that import, scoped to
 that one message from yfinance's own modules. Every other warning still shows.
+
+It is also the one place a symbol crosses into Yahoo's spelling (issue #78):
+index constituents and Alpaca write class shares with a dot (``BRK.B``),
+Yahoo with a dash (``BRK-B``) and returns no data for the dotted form. Every
+fetcher builds its handle through `ticker()`, so only the request is
+translated and callers keep the canonical dotted symbol everywhere else.
 """
 
 from __future__ import annotations
 
 import warnings
 from types import ModuleType
-from typing import cast
+from typing import Any, cast
 
 
 def import_yfinance() -> ModuleType:
@@ -26,3 +32,13 @@ def import_yfinance() -> ModuleType:
         module=r"yfinance\.",
     )
     return cast(ModuleType, yfinance)
+
+
+def yahoo_symbol(symbol: str) -> str:
+    """Yahoo's spelling of a canonical symbol: ``BRK.B`` -> ``BRK-B``."""
+    return symbol.replace(".", "-")
+
+
+def ticker(symbol: str) -> Any:
+    """`yfinance.Ticker` for a canonical symbol, requested in Yahoo's spelling."""
+    return import_yfinance().Ticker(yahoo_symbol(symbol))
