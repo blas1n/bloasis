@@ -16,7 +16,12 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from bloasis.data.fetchers.sec_edgar import DEFAULT_SUCCESSIONS, CikSuccession
+from bloasis.data.fetchers.sec_edgar import (
+    DEFAULT_SUCCESSIONS,
+    DEFAULT_TICKER_RENAMES,
+    CikSuccession,
+    TickerRename,
+)
 
 # ---------------------------------------------------------------------------
 # Universe
@@ -346,6 +351,10 @@ class DataConfig(BaseModel):
     edgar_successions: list[CikSuccession] = Field(
         default_factory=lambda: list(DEFAULT_SUCCESSIONS)
     )
+    # Constituent-list ticker → current trading ticker (issue #80), each
+    # citing an SEC filing and applied only while SEC's ticker map confirms
+    # the CIK. Replacing the list drops the defaults.
+    ticker_renames: list[TickerRename] = Field(default_factory=lambda: list(DEFAULT_TICKER_RENAMES))
     finnhub_rate_per_minute: int = Field(default=60, ge=1, le=300)
     sentiment_lookback_days: int = Field(default=7, ge=1, le=30)
 
