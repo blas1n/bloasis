@@ -88,11 +88,9 @@ class YfFinancialsFetcher:
     def _download(self, symbol: str) -> pd.DataFrame:
         import pandas as pd
 
-        from bloasis.data.fetchers._yfinance import import_yfinance
+        from bloasis.data.fetchers._yfinance import ticker as yf_ticker
 
-        yf = import_yfinance()
-
-        ticker = yf.Ticker(symbol)
+        ticker = yf_ticker(symbol)
         try:
             income = ticker.income_stmt  # annual, ~5 fiscal years
             cashflow = ticker.cashflow

@@ -65,11 +65,9 @@ class YfEarningsFetcher:
     def _download(self, symbol: str) -> pd.DataFrame:
         import pandas as pd
 
-        from bloasis.data.fetchers._yfinance import import_yfinance
+        from bloasis.data.fetchers._yfinance import ticker as yf_ticker
 
-        yf = import_yfinance()
-
-        ticker = yf.Ticker(symbol)
+        ticker = yf_ticker(symbol)
         try:
             raw = ticker.get_earnings_dates(limit=self._limit)
         except Exception as e:
