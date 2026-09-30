@@ -26,7 +26,7 @@ import re
 import time
 import urllib.error
 import urllib.request
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -96,6 +96,99 @@ DEFAULT_SUCCESSIONS: tuple[CikSuccession, ...] = (
         evidence_accession="0001193125-26-291990",
     ),
 )
+
+
+@dataclass(frozen=True)
+class TickerRename:
+    """A constituent source still lists `listed`; the company trades as `current`.
+
+    Index constituent lists lag ticker changes and carry no CIK, so the link
+    is declared here and cites an SEC filing whose cover page shows
+    `current` as the registrant's trading symbol (issue #80). It is followed
+    only while SEC's current ticker map says `current` belongs to `cik` and
+    `listed` belongs to no other registrant — never by name matching.
+
+    `current` is the canonical symbol from then on: data fetches, candidates,
+    broker orders and the paper session DB all use it, since it is the only
+    one the broker trades and reports positions under.
+    """
+
+    # YAML spells a CIK as a bare number; pydantic reads this when the
+    # table comes from config.
+    __pydantic_config__ = {"coerce_numbers_to_str": True, "extra": "forbid"}
+
+    listed: str
+    current: str
+    cik: str
+    evidence_accession: str
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "listed", self.listed.strip().upper())
+        object.__setattr__(self, "current", self.current.strip().upper())
+        object.__setattr__(self, "cik", _normalize_cik(self.cik))
+
+
+# EchoStar Corp (CIK 1415404) moved from SATS to ECHO on Nasdaq in June 2026:
+# its 8-K 0001415404-26-000027 (filed 2026-06-18) lists "SATS" as the trading
+# symbol, the next one, 0001415404-26-000030 (filed 2026-06-25), lists "ECHO".
+# The fja05680 S&P 500 list still prints SATS.
+DEFAULT_TICKER_RENAMES: tuple[TickerRename, ...] = (
+    TickerRename(
+        listed="SATS",
+        current="ECHO",
+        cik="0001415404",
+        evidence_accession="0001415404-26-000030",
+    ),
+)
+
+
+def resolve_current_symbols(
+    symbols: Iterable[str],
+    renames: Iterable[TickerRename],
+    cik_of: Callable[[str], str | None],
+) -> list[str]:
+    """Map listed constituents to the symbol they trade under today.
+
+    `cik_of` is SEC's current ticker → CIK map (`EdgarClient.cik`). It is
+    consulted only for symbols in `renames`; a rename it does not confirm,
+    or a failed lookup, leaves the listed symbol as is. Order is kept and a
+    symbol listed under both names appears once.
+    """
+    by_listed = {r.listed: r for r in renames}
+    out: list[str] = []
+    seen: set[str] = set()
+    for symbol in symbols:
+        resolved = symbol
+        rename = by_listed.get(symbol.upper())
+        if rename is not None:
+            try:
+                confirmed = cik_of(rename.current) == rename.cik and cik_of(rename.listed) in (
+                    None,
+                    rename.cik,
+                )
+            except Exception as exc:  # noqa: BLE001 — any SEC map failure
+                logger.warning(
+                    "ticker_rename_unverified listed=%s current=%s error=%r",
+                    rename.listed,
+                    rename.current,
+                    exc,
+                )
+                confirmed = False
+            else:
+                if not confirmed:
+                    logger.warning(
+                        "ticker_rename_refused listed=%s current=%s cik=%s: "
+                        "SEC ticker map does not confirm it",
+                        rename.listed,
+                        rename.current,
+                        rename.cik,
+                    )
+            if confirmed:
+                resolved = rename.current
+        if resolved not in seen:
+            seen.add(resolved)
+            out.append(resolved)
+    return out
 
 
 def _http_get(url: str, *, accept: str = "text/html") -> bytes:
