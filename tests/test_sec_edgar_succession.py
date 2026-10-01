@@ -25,7 +25,11 @@ import pytest
 from pydantic import ValidationError
 
 from bloasis.config import StrategyConfig
-from bloasis.data.fetchers.sec_edgar import CikSuccession, EdgarClient
+from bloasis.data.fetchers.sec_edgar import (
+    ITEM_1A_PARSER_VERSION,
+    CikSuccession,
+    EdgarClient,
+)
 
 _HTTP = "bloasis.data.fetchers.sec_edgar._http_get"
 _SLEEP = "bloasis.data.fetchers.sec_edgar.time.sleep"
@@ -246,7 +250,14 @@ def test_predecessor_filing_text_is_fetched_under_the_predecessor_cik(tmp_path: 
         "https://www.sec.gov/Archives/edgar/data/34088/000003408826000045/"
         "doc-0000034088-26-000045.htm"
     ]
-    assert (tmp_path / "edgar" / "risk_factors" / f"{PREDECESSOR}_000003408826000045.txt").exists()
+    cached = (
+        tmp_path
+        / "edgar"
+        / "risk_factors"
+        / ITEM_1A_PARSER_VERSION
+        / f"{PREDECESSOR}_000003408826000045.txt"
+    )
+    assert cached.exists()
 
 
 # ---------------------------------------------------------------------------
