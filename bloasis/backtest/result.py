@@ -25,9 +25,10 @@ class BacktestData:
     `universe_by_date` lets callers rebalance the universe over time
     (sp500_historical). When None, `symbols` is used for every date.
 
-    Sectors map symbol -> sector name (from fundamentals_cache or yfinance
-    info). Missing sectors are passed through as None and skip sector
-    concentration in risk evaluation.
+    Sectors map symbol -> GICS-like sector, filled by prefetch from each
+    registrant's EDGAR SIC code (#92). A missing sector is None, which the
+    risk evaluator buckets as `_unknown` — so an empty map turns the sector
+    cap into a cap on total invested fraction.
     """
 
     symbols: list[str]

@@ -316,6 +316,20 @@ class EdgarClient:
         # SEC spells share classes "BRK-B"; index constituents spell them "BRK.B".
         return self._tickers.get(upper) or self._tickers.get(upper.replace(".", "-"))
 
+    def sic(self, ticker: str) -> str | None:
+        """The registrant's 4-digit SIC code from its submissions snapshot.
+
+        Resolves the ticker exactly as `list_10k` does, so the sector and the
+        10-K text describe the same company. None for an unknown ticker or a
+        blank code.
+        """
+        cik = self.cik(ticker)
+        if cik is None:
+            return None
+        sub, _mtime = self._submissions(cik)
+        code = str(sub.get("sic") or "").strip()
+        return code or None
+
     # ------------------------------------------------------------------
     # 10-K list
     # ------------------------------------------------------------------

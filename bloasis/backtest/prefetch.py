@@ -33,6 +33,18 @@ _FORM4_SCORERS = ("insider_cluster",)
 _FORM8K_SCORERS = ("form_8k_event",)
 
 
+def sectors_needed(scorer_types: Iterable[str], sector_caps: Iterable[float]) -> bool:
+    """Whether a panel must carry a sector per symbol (#92).
+
+    True when any sector cap can bind, or when an EDGAR text scorer runs —
+    it reads every registrant's submissions snapshot anyway, so the sector
+    is free and the panel's sector sensor stays meaningful.
+    """
+    return bool(set(scorer_types) & set(_EDGAR_TEXT_SCORERS)) or any(
+        cap < 1.0 for cap in sector_caps
+    )
+
+
 def prefetch_backtest_data(
     cfg: StrategyConfig,
     symbols: list[str],
@@ -41,6 +53,7 @@ def prefetch_backtest_data(
     *,
     scorer_types: Iterable[str] | None = None,
     console: Console | None = None,
+    need_sectors: bool | None = None,
 ) -> BacktestData:
     """Build a ``BacktestData`` panel for the requested universe + window.
 
@@ -135,6 +148,28 @@ def prefetch_backtest_data(
             if history:
                 risk_factors_history[sym] = history
 
+    # Issue #92 — sector per symbol from its EDGAR SIC code. Needed whenever
+    # the sector cap can bind; also filled for the EDGAR scorers, which read
+    # the same submissions snapshots anyway.
+    if need_sectors is None:
+        need_sectors = sectors_needed(types, [cfg.risk.max_sector_concentration])
+    sectors: dict[str, str | None] = {}
+    if need_sectors:
+        from bloasis.data.fetchers.sec_edgar import EdgarClient
+        from bloasis.data.sectors import sector_for_sic
+
+        sector_client = EdgarClient(
+            cache_dir=cfg.data.cache_dir, max_age_hours=cfg.data.edgar_cache_max_age_hours
+        )
+        for sym in bars:
+            try:
+                sectors[sym] = sector_for_sic(sector_client.sic(sym))
+            except Exception as exc:  # noqa: BLE001
+                console.print(f"[yellow]no sector for {sym}: {exc}[/yellow]")
+                sectors[sym] = None
+        n_known = sum(1 for v in sectors.values() if v)
+        console.print(f"[cyan]sectors: {n_known}/{len(bars)} symbols mapped from SIC[/cyan]")
+
     insider_filings_dates: dict[str, list[date]] = {}
     form_8k_filings_dates: dict[str, list[date]] = {}
     if types & set(_FORM4_SCORERS):
@@ -175,6 +210,7 @@ def prefetch_backtest_data(
         bars=bars,
         vix_series=market_ctx.vix,
         spy_close_series=market_ctx.spy_close,
+        sectors=sectors,
         earnings_history=earnings_history,
         quarterly_financials=quarterly_financials,
         risk_factors_history=risk_factors_history,

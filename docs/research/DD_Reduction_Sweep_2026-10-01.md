@@ -263,6 +263,16 @@ orders are rejected. Which names get bought is then decided by the order
 signals arrive in, not by the sizing rule — the α is a property of that
 ordering, not of "3% positions".
 
+### Addendum — re-run with real sectors (#92)
+
+Same day, same protocol, after prefetch started filling sectors from EDGAR
+SIC codes (`sector map: 493 entries, 11 distinct`). The baseline reproduces
+exactly. The two arms that qualified above do not survive: `pos=0.02` with a
+real 20% sector cap gives DD 0.873 / 394 trades, and with a 40% cap it is
+identical to the baseline. **0 of 17 arms qualify.** This is the outcome
+"Reading" §1–2 predicted: what qualified was the single `_unknown` bucket, not
+sector diversification. Full re-run table: `docs/e2e/sic-sectors-checklist.md`.
+
 ### Decision (founder, 2026-10-01, after the result)
 
 - Paper trading on `edgar-rolling2` continues as evidence accumulation under a

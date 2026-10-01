@@ -337,3 +337,58 @@ def test_grid_show_invalid_sort_rejected(db_path: Path) -> None:
 
     assert res.exit_code != 0
     assert "wibble" in res.output.lower() or "invalid" in res.output.lower()
+
+
+# ---------------------------------------------------------------------------
+# Issue #92 — the shared prefetch must carry sectors if any combo needs them
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(("caps", "expected"), [([1.0, 0.3], True), ([1.0], False)])
+def test_grid_asks_prefetch_for_sectors_when_any_combo_caps_a_sector(
+    tmp_path: Path,
+    db_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caps: list[float],
+    expected: bool,
+) -> None:
+    base = tmp_path / "base.yaml"
+    base.write_text(
+        yaml.safe_dump({"scorer": {"type": "rule"}, "risk": {"max_sector_concentration": 1.0}})
+    )
+    spec = tmp_path / "grid.yaml"
+    spec.write_text(
+        yaml.safe_dump(
+            {
+                "name": "sector-grid",
+                "base": str(base),
+                "walk_forward": {
+                    "start": "2022-01-01",
+                    "end": "2023-01-01",
+                    "train_days": 90,
+                    "test_days": 30,
+                    "step_days": 30,
+                },
+                "symbols": ["AAPL", "MSFT"],
+                "axes": [{"path": "risk.max_sector_concentration", "values": caps}],
+            }
+        )
+    )
+    seen: list[object] = []
+
+    def fake_prefetch(*a: object, **k: object) -> BacktestData:
+        seen.append(k.get("need_sectors"))
+        return _fake_backtest_data()
+
+    def fake_backtester(cfg: object, data: object, **k: object) -> object:
+        bt = MagicMock()
+        bt.run.side_effect = lambda *a, run_id=0, **kw: _result(run_id, sharpe=1.0, alpha=0.0)
+        return bt
+
+    monkeypatch.setattr("bloasis.backtest.prefetch.prefetch_backtest_data", fake_prefetch)
+    monkeypatch.setattr("bloasis.backtest.grid.Backtester", fake_backtester)
+
+    res = runner.invoke(app, ["grid", "run", str(spec)])
+
+    assert res.exit_code == 0, res.output
+    assert seen == [expected]
