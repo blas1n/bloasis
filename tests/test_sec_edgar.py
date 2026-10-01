@@ -515,3 +515,37 @@ def test_risk_factors_ignores_text_cached_by_the_previous_parser(tmp_path: Path)
     assert out.startswith("Item 1A. Risk Factors.")
     versioned = edgar / "risk_factors" / ITEM_1A_PARSER_VERSION / "0000320193_a1.txt"
     assert versioned.read_text() == out
+
+
+def test_extract_item_1a_runs_past_an_item_2_cross_reference_in_prose() -> None:
+    # Issue #83, terminator side: AMGN FY2024 / UHS FY2022 / AEP FY2020 end
+    # their section with a mid-sentence "see Part I, Item 2. Management's
+    # Discussion", which truncated the span to 738-9,904 chars.
+    html = (
+        "<html><body>"
+        "<h2>Item 1A. Risk Factors</h2>"
+        f"<p>{_LONG_RISK}</p>"
+        "<p>Our facilities are listed in Item 2. Properties of this report.</p>"
+        f"<p>{'Later risk content. ' * 200}</p>"
+        "<h2>Item 1B. Unresolved Staff Comments</h2><p>None.</p>"
+        "</body></html>"
+    )
+    section = _extract_item_1a(html)
+    assert section is not None
+    assert "Later risk content." in section
+    assert "None." not in section
+
+
+def test_extract_item_1a_accepts_an_inline_terminator_when_no_heading_one_exists() -> None:
+    # CEG FY2023 styles no Item 1B/1C heading on its own line, so requiring a
+    # line-anchored terminator alone would drop the filing.
+    html = (
+        "<html><body>"
+        "<h2>Item 1A. Risk Factors</h2>"
+        f"<p>{_LONG_RISK} See ITEM 1C. CYBERSECURITY for more information.</p>"
+        "</body></html>"
+    )
+    section = _extract_item_1a(html)
+    assert section is not None
+    assert "Risk content." in section
+    assert "CYBERSECURITY" not in section

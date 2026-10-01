@@ -511,6 +511,11 @@ def _tenk_rows(block: dict[str, list[str]], cik: str) -> list[TenKFiling]:
 #   3. Reject a candidate whose span contains an `Item 1 ... Business`
 #      heading — this drops a table-of-contents entry whose nearest
 #      terminator is the real Item 1B far downstream.
+#   3b. The terminator is the next `Item 1B` / `1C` / `2` *heading* too — a
+#      mid-sentence "see Part I, Item 2. Management's Discussion" ended the
+#      span after 738 chars for UHS FY2022 and 9,904 for AMGN FY2024. A
+#      filing that styles no terminator on its own line falls back to the
+#      next occurrence anywhere (CEG FY2023).
 #   4. Only among the survivors does the longest span win; length is a
 #      tie-break between heading-anchored candidates (a running header
 #      repeating "Item 1A. Risk Factors" mid-section yields a shorter one),
@@ -587,12 +592,16 @@ def _section_span(
 ) -> tuple[int, int] | None:
     """Widest heading-anchored span that holds no Item 1 Business heading."""
     ends = [m.start() for m in end_re.finditer(text)]
+    heading_ends = [e for e in ends if _starts_a_line(text, e)]
     best: tuple[int, int] | None = None
     for match in start_re.finditer(text):
         s = match.start()
         if not _starts_a_line(text, s):
             continue  # a cross-reference inside a sentence, not a heading
-        after = [e for e in ends if e > s]
+        # The section ends at the next terminator *heading*; a filing that
+        # styles none on its own line (CEG FY2023) falls back to the next
+        # occurrence anywhere.
+        after = [e for e in heading_ends if e > s] or [e for e in ends if e > s]
         if not after:
             continue
         e = min(after)
