@@ -205,6 +205,22 @@ class SimulatedPortfolio:
                 reason="no fill bar available",
             )
 
+        # The runner sizes BUYs on equity, so a step's later BUYs can outrun
+        # cash. Report it the way PaperBroker / Alpaca do — a rejected order —
+        # instead of letting `apply()` raise and abort the backtest.
+        if fill.side == "buy":
+            cost = fill.quantity * fill.price + fill.fees
+            if cost > self.cash + 1e-6:
+                return OrderResult(
+                    order_id=order_id,
+                    client_order_id=order.client_order_id,
+                    status="rejected",
+                    filled_qty=0.0,
+                    filled_avg_price=0.0,
+                    submitted_at=submitted_at,
+                    reason=f"insufficient cash: need {cost:.2f}, have {self.cash:.2f}",
+                )
+
         applied = self.apply(fill)
         return OrderResult(
             order_id=order_id,

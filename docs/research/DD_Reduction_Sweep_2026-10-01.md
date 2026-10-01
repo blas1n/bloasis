@@ -244,12 +244,31 @@ sharpe that currently pass. The #85 founder decision (continue paper under a
 failing DD gate as evidence, or stop) should be taken on that basis, not on
 the two "yes" rows.
 
+### Addendum — the `pos=0.03` arms, after the F3 fix
+
+Measured the same day on the same cloned cache, after the simulator was changed
+to reject a BUY it cannot pay for instead of raising. All 14 earlier arms were
+re-run in the same process and reproduce the table above field for field, so
+these rows are on the same panel.
+
+| arm | DD ratio | sharpe vs SPY | α/yr | filled | cash-rejected | qualifies |
+|---|---|---|---|---|---|---|
+| B pos=0.03 sector=0.20 | 0.859 | 1.020 | +11.05% | 259 | 91 | no (DD) |
+| B pos=0.03 sector=0.40 | 0.859 | 1.020 | +11.05% | 259 | 91 | no (DD) |
+| B pos=0.03 sector=1.00 | 0.912 | 1.004 | +9.30% | 367 | 235 | no (DD) |
+
+None qualifies, so the verdict stands. Read the α with care: at 3% per name the
+runner's targets exceed cash, and between a quarter and two fifths of BUY
+orders are rejected. Which names get bought is then decided by the order
+signals arrive in, not by the sizing rule — the α is a property of that
+ordering, not of "3% positions".
+
 ### Decision (founder, 2026-10-01, after the result)
 
 - Paper trading on `edgar-rolling2` continues as evidence accumulation under a
   failing DD criterion; real money stays blocked.
 - The 0.85 DD bar itself is to be reviewed (#88).
 - F3 is fixed first (TDD, separate PR) so the three `pos=0.03` arms can be
-  measured and the pre-registered table completed.
+  measured and the pre-registered table completed (addendum above).
 
 Raw rows: the driver's JSON output (`--out`), not committed.
