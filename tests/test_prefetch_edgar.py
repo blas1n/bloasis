@@ -142,3 +142,65 @@ def test_live_candidates_see_a_10k_filed_after_the_cached_snapshot(tmp_path: Pat
 
     history = captured[0].risk_factors_history["AAPL"]
     assert [filed for filed, _period, _txt in history] == [date(2025, 6, 2), date(2026, 6, 1)]
+
+
+def test_live_candidates_get_the_heading_anchored_item_1a(tmp_path: Path) -> None:
+    # Issue #83 — the live paper path reads EDGAR through prefetch, so the
+    # text the scorer ranks must be the Item 1A section, not a span that
+    # started at a forward-looking-statements cross-reference and swallowed
+    # Item 1 Business plus the officer table.
+    from bloasis.cli import _build_live_candidates
+    from tests.test_sec_edgar import ten_k_with_forward_looking_cross_reference
+
+    edgar_dir = tmp_path / "edgar"
+    (edgar_dir / "filings").mkdir(parents=True)
+    (edgar_dir / "tickers.json").write_text(
+        json.dumps({"0": {"ticker": "AAPL", "cik_str": 320193, "title": "Apple"}})
+    )
+    block = {
+        "form": ["10-K", "10-K"],
+        "filingDate": ["2026-06-01", "2025-06-02"],
+        "reportDate": ["2026-03-31", "2025-03-31"],
+        "accessionNumber": ["acc-2026", "acc-2025"],
+        "primaryDocument": ["doc-2026.htm", "doc-2025.htm"],
+    }
+    (edgar_dir / "filings" / "0000320193.json").write_text(
+        json.dumps({"filings": {"recent": block}})
+    )
+    filing_html = ten_k_with_forward_looking_cross_reference()
+
+    def fake_get(url: str, *, accept: str = "text/html") -> bytes:
+        if "/Archives/edgar/data/" in url:
+            return filing_html.encode()
+        raise AssertionError(url)
+
+    cfg = StrategyConfig.model_validate(
+        {"scorer": {"type": "edgar_textdiff"}, "data": {"cache_dir": str(tmp_path)}}
+    )
+    today = pd.Timestamp.now(tz="UTC").normalize().tz_localize(None)
+    bars = pd.DataFrame({"close": [1.0]}, index=[today])
+    ohlcv = MagicMock()
+    ohlcv.fetch.return_value = bars
+    captured: list[Any] = []
+
+    def fake_backtester(_cfg: StrategyConfig, data: Any) -> MagicMock:
+        captured.append(data)
+        bt = MagicMock()
+        bt._build_candidates.return_value = ([], [])
+        return bt
+
+    with (
+        patch("bloasis.backtest.prefetch.YfOhlcvFetcher", return_value=ohlcv),
+        patch("bloasis.backtest.prefetch.YfMarketContextFetcher"),
+        patch("bloasis.backtest.engine.Backtester", side_effect=fake_backtester),
+        patch("bloasis.data.fetchers.sec_edgar._http_get", side_effect=fake_get),
+        patch("bloasis.data.fetchers.sec_edgar.time.sleep"),
+    ):
+        _build_live_candidates(cfg, ["AAPL"], days=400)
+
+    history = captured[0].risk_factors_history["AAPL"]
+    assert len(history) == 2
+    for _filed, _period, txt in history:
+        assert txt.startswith("Item 1A. Risk Factors.")
+        assert "Business prose." not in txt
+        assert "Chief Executive Officer" not in txt

@@ -35,6 +35,12 @@ from typing import Any, NotRequired, TypedDict
 logger = logging.getLogger(__name__)
 
 USER_AGENT = "BSVibe Bloasis Research bloasis@bsvibe.dev"
+# Extracted Item 1A text is cached per filing and the filing never changes,
+# so a parser fix would never reach a text already on disk. The cache is
+# keyed by this version — bump it whenever `_extract_item_1a` changes what
+# it returns. "v2" = heading-anchored span (issue #83); the unversioned
+# files below it are the pre-#83 spans, left for rollback.
+ITEM_1A_PARSER_VERSION = "v2"
 BASE_DELAY = 0.15  # 10 req/sec cap → 0.15s headroom
 DEFAULT_MAX_AGE_HOURS = 24
 # SEC throttling answers: once seen, more requests this run only dig deeper.
@@ -207,7 +213,10 @@ class EdgarClient:
     - filings/{cik}.json — submissions response (expires after max_age_hours)
     - filings/CIK…-submissions-NNN.json — older pages; valid only while no
       older than their snapshot, since page boundaries move with new filings
-    - risk_factors/{cik}_{accession}.txt — extracted Item 1A text (immutable)
+    - risk_factors/{parser_version}/{cik}_{accession}.txt — extracted Item 1A
+      text. Immutable per parser version: the filing never changes, so a
+      parser fix only reaches a cached text through a new version directory
+      (issue #83).
     """
 
     def __init__(
@@ -219,7 +228,7 @@ class EdgarClient:
     ) -> None:
         self._root = Path(cache_dir).expanduser() / "edgar"
         (self._root / "filings").mkdir(parents=True, exist_ok=True)
-        (self._root / "risk_factors").mkdir(parents=True, exist_ok=True)
+        (self._root / "risk_factors" / ITEM_1A_PARSER_VERSION).mkdir(parents=True, exist_ok=True)
         self._tickers: dict[str, str] | None = None
         self._max_age_s = max_age_hours * 3600
         self._refresh_disabled = False
@@ -436,7 +445,7 @@ class EdgarClient:
         if cik is None:
             return None
         acc_clean = filing["accession"].replace("-", "")
-        cache = self._root / "risk_factors" / f"{cik}_{acc_clean}.txt"
+        cache = self._root / "risk_factors" / ITEM_1A_PARSER_VERSION / f"{cik}_{acc_clean}.txt"
         if cache.exists():
             return cache.read_text()
 
@@ -481,8 +490,37 @@ def _tenk_rows(block: dict[str, list[str]], cik: str) -> list[TenKFiling]:
 
 
 # ---------------------------------------------------------------------------
-# Item 1A parser — finds the longest "Item 1A → Item 1B/Item 2" span. The
-# longest span heuristic dodges TOC and cross-references, which are short.
+# Item 1A parser — anchors the section on its heading (issue #83).
+#
+# The old rule maximized `end - start` over every (start, nearest-end) pair.
+# `_STRICT_START` also matches a cross-reference ("the risks described in
+# Item 1A. Risk Factors"), and forward-looking-statements boilerplate carries
+# one *before* Item 1 Business, so the longest span systematically won and
+# swallowed the business description and the officer table. Measured on
+# PARA FY2021-FY2024 and PSKY FY2025, every span started in that paragraph.
+#
+# Replacement, in order:
+#   1. Parse block-aware text (`_block_text`), where a block-level tag
+#      boundary is a newline, and collapse whitespace only on the extracted
+#      slice — `_collapse_whitespace(_block_text(html)) == _strip_html(html)`
+#      (guarded by a test), so a filing the old rule already read correctly
+#      extracts byte-identically (issue #73).
+#   2. A start counts only where it begins a line, preceded by heading noise
+#      at most (page label, "PART I", "Table of Contents"). A mid-sentence
+#      cross-reference can no longer anchor the span.
+#   3. The terminator is the next `Item 1B` / `1C` / `2` *heading* too — a
+#      mid-sentence "see Part I, Item 2. Management's Discussion" ended the
+#      span after 738 chars for UHS FY2022 and 9,904 for AMGN FY2024, and
+#      ALB sat at 780 chars for five straight years. A filing that styles no
+#      terminator on its own line falls back to the next occurrence
+#      anywhere (CEG FY2023).
+#   4. Reject a candidate whose span contains an `Item 1 ... Business`
+#      heading — this drops a table-of-contents entry whose nearest
+#      terminator is the real Item 1B far downstream.
+#   5. Only among the survivors does the longest span win; length is a
+#      tie-break between heading-anchored candidates (a running header
+#      repeating "Item 1A. Risk Factors" mid-section yields a shorter one),
+#      never the reason a candidate is chosen.
 # ---------------------------------------------------------------------------
 
 
@@ -496,33 +534,109 @@ _RELAXED_END = re.compile(
     r"(?i)\bi\s?tem\s*1\s*\.?\s*(?:[bc]|\([bc]\))(?![a-z0-9])"
     r"|\bi\s?tem\s*2(?![0-9])\s*[.:|(]"
 )
+# An Item 1 Business heading inside a span means the span opened before the
+# business section: "Item 1. Business", "ITEM 1 - BUSINESS", "I TEM 1: BUSINESS".
+_ITEM_1_BUSINESS = re.compile(r"(?i)\bi\s?tem\s*1\s*[.:)\-–—]*\s*business\b")
+_MIN_SECTION_CHARS = 500
+
+# Block-level markup — what the filer's layout renders as a line break, and
+# therefore where a heading can start. `span` is excluded on purpose: CHD's
+# drop-cap heading is spans inside one line ("I TEM 1A").
+_BLOCK_TAG = re.compile(
+    r"(?is)</?(?:p|div|br|hr|tr|td|th|table|tbody|thead|caption|h[1-6]|li|ul|ol|section)\b[^>]*>"
+)
+# Everything a heading is allowed to share its line with: page labels
+# ("I-13", "F-2", "14"), roman numerals, and running-header words.
+_HEADING_NOISE_WORDS = frozenset(
+    {
+        "table",
+        "of",
+        "contents",
+        "content",
+        "index",
+        "page",
+        "part",
+        "item",
+        "items",
+        "continued",
+        "cont",
+        "form",
+        "10",
+        "k",
+        "annual",
+        "report",
+    }
+)
+_PAGE_LABEL = re.compile(r"(?i)[a-z]?-?\d+|[ivxlcdm]{1,7}|10-k")
+_WORD = re.compile(r"[\w\-]+")
+_MAX_HEADING_PREFIX_CHARS = 60
 
 
 def _extract_item_1a(html: str) -> str | None:
-    """Item 1A text. The strict pattern runs first so every filing it already
-    parsed extracts byte-identically; the relaxed one only rescues misses."""
-    text = _strip_html(html)
-    return _longest_span(text, _STRICT_START, _STRICT_END) or _longest_span(
+    """Item 1A text, anchored on the section heading.
+
+    The strict spellings run first so every filing the strict pattern
+    already parsed extracts byte-identically; the relaxed ones (issue #70)
+    only rescue misses.
+    """
+    text = _block_text(html)
+    span = _section_span(text, _STRICT_START, _STRICT_END) or _section_span(
         text, _RELAXED_START, _RELAXED_END
+    )
+    if span is None:
+        return None
+    return _collapse_whitespace(text[span[0] : span[1]])
+
+
+def _section_span(
+    text: str, start_re: re.Pattern[str], end_re: re.Pattern[str]
+) -> tuple[int, int] | None:
+    """Widest heading-anchored span that holds no Item 1 Business heading."""
+    ends = [m.start() for m in end_re.finditer(text)]
+    heading_ends = [e for e in ends if _starts_a_line(text, e)]
+    best: tuple[int, int] | None = None
+    for match in start_re.finditer(text):
+        s = match.start()
+        if not _starts_a_line(text, s):
+            continue  # a cross-reference inside a sentence, not a heading
+        # The section ends at the next terminator *heading*; a filing that
+        # styles none on its own line (CEG FY2023) falls back to the next
+        # occurrence anywhere.
+        after = [e for e in heading_ends if e > s] or [e for e in ends if e > s]
+        if not after:
+            continue
+        e = min(after)
+        if e - s < _MIN_SECTION_CHARS:
+            continue
+        if _holds_item_1_business(text, s, e):
+            continue
+        if best is None or e - s > best[1] - best[0]:
+            best = (s, e)
+    return best
+
+
+def _holds_item_1_business(text: str, start: int, end: int) -> bool:
+    """True when `Item 1 Business` opens a line inside [start, end).
+
+    Only a heading counts — Item 1A text may cross-reference Item 1 in
+    prose, and that must not reject the real section.
+    """
+    return any(
+        _starts_a_line(text, start + m.start()) for m in _ITEM_1_BUSINESS.finditer(text[start:end])
     )
 
 
-def _longest_span(text: str, start_re: re.Pattern[str], end_re: re.Pattern[str]) -> str | None:
-    starts = [m.start() for m in start_re.finditer(text)]
-    ends = [m.start() for m in end_re.finditer(text)]
-    best: tuple[int, int] | None = None
-    best_len = 0
-    for s in starts:
-        valid = [e for e in ends if e > s]
-        if not valid:
-            continue
-        e = min(valid)
-        if e - s > best_len:
-            best_len = e - s
-            best = (s, e)
-    if best is None or best_len < 500:
-        return None
-    return text[best[0] : best[1]]
+def _starts_a_line(text: str, pos: int) -> bool:
+    """True when nothing but heading noise precedes `pos` on its line."""
+    prefix = text[text.rfind("\n", 0, pos) + 1 : pos].strip()
+    if not prefix:
+        return True
+    if len(prefix) > _MAX_HEADING_PREFIX_CHARS:
+        return False
+    return all(
+        word.lower() in _HEADING_NOISE_WORDS or _PAGE_LABEL.fullmatch(word)
+        for word in _WORD.findall(prefix)
+    )
 
 
 _HTML_ENTITIES = {
@@ -542,5 +656,18 @@ def _strip_html(html: str) -> str:
     text = re.sub(r"<[^>]+>", " ", html)
     for k, v in _HTML_ENTITIES.items():
         text = text.replace(k, v)
-    text = re.sub(r"\s+", " ", text)
-    return text
+    return _collapse_whitespace(text)
+
+
+def _block_text(html: str) -> str:
+    """`_strip_html` with one newline wherever the layout breaks a line."""
+    text = _BLOCK_TAG.sub("\n", html)
+    text = re.sub(r"<[^>]+>", " ", text)
+    for k, v in _HTML_ENTITIES.items():
+        text = text.replace(k, v)
+    text = re.sub(r"[^\S\n]+", " ", text)
+    return re.sub(r" ?\n[\s\n]*", "\n", text)
+
+
+def _collapse_whitespace(text: str) -> str:
+    return re.sub(r"\s+", " ", text)

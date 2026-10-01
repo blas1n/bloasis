@@ -13,6 +13,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from bloasis.data.fetchers.sec_edgar import (
+    ITEM_1A_PARSER_VERSION,
     EdgarClient,
     _extract_item_1a,
     _strip_html,
@@ -33,7 +34,7 @@ def test_strip_html_collapses_whitespace() -> None:
     assert _strip_html(html) == " a b c "
 
 
-def test_extract_item_1a_picks_longest_span() -> None:
+def test_extract_item_1a_prefers_the_heading_over_a_toc_entry() -> None:
     # Build a synthetic 10-K with a TOC reference + a real Item 1A section.
     long_risk_section = "Risk content. " * 200  # ~3000 chars
     html = (
@@ -134,7 +135,9 @@ def test_risk_factors_serves_text_cache(tmp_path: Path) -> None:
         json.dumps({"0": {"ticker": "AAPL", "cik_str": 320193, "title": "Apple Inc."}})
     )
     cached_text = "Cached risk factors content " * 50
-    (edgar / "risk_factors" / "0000320193_a1.txt").write_text(cached_text)
+    versioned = edgar / "risk_factors" / ITEM_1A_PARSER_VERSION
+    versioned.mkdir(parents=True)
+    (versioned / "0000320193_a1.txt").write_text(cached_text)
 
     client = EdgarClient(tmp_path)
     filing = {
@@ -176,7 +179,7 @@ def test_risk_factors_fetches_and_caches_when_absent(tmp_path: Path) -> None:
     assert out is not None
     assert "Risk content" in out
     # Cache file written
-    cache_file = edgar / "risk_factors" / "0000320193_a1.txt"
+    cache_file = edgar / "risk_factors" / ITEM_1A_PARSER_VERSION / "0000320193_a1.txt"
     assert cache_file.exists()
 
 
@@ -372,3 +375,177 @@ def test_list_10k_dedupes_filings_seen_in_recent_and_a_page(tmp_path: Path) -> N
     )
     out = EdgarClient(tmp_path).list_10k("USB", since=date(2020, 1, 1))
     assert [f["filed"] for f in out] == [date(2026, 2, 23), date(2025, 2, 21), date(2024, 2, 20)]
+
+
+# ---------------------------------------------------------------------------
+# Issue #83 — the span must be anchored on the Item 1A heading, not on the
+# longest match. A forward-looking-statements cross-reference sits before
+# Item 1 Business, so maximizing length swallowed the business description
+# and the officer table.
+# ---------------------------------------------------------------------------
+
+
+_OFFICER_TABLE = (
+    "<p>Information about our Executive Officers</p>"
+    "<table>"
+    "<tr><td>Jane Roe</td><td>President and Chief Executive Officer</td></tr>"
+    "<tr><td>John Doe</td><td>Executive Vice President and Chief Financial Officer</td></tr>"
+    "</table>"
+)
+
+
+def ten_k_with_forward_looking_cross_reference() -> str:
+    """A 10-K shaped like PARA/PSKY: TOC, then a forward-looking-statements
+    paragraph that cross-references Item 1A, then Item 1 Business with the
+    officer table, and only then the real Item 1A heading."""
+    return (
+        "<html><body>"
+        "<table>"
+        "<tr><td>PART I</td></tr>"
+        "<tr><td>Item 1. Business.</td><td>I-1</td></tr>"
+        "<tr><td>Item 1A. Risk Factors.</td><td>I-14</td></tr>"
+        "<tr><td>Item 1B. Unresolved Staff Comments.</td><td>I-41</td></tr>"
+        "<tr><td>Item 2. Properties.</td><td>I-42</td></tr>"
+        "</table>"
+        "<p>Forward-looking statements. These risks, uncertainties and other factors "
+        'are discussed in "Item 1A. Risk Factors" below and elsewhere in this Annual '
+        "Report on Form 10-K.</p>"
+        "<h2>Item 1. Business.</h2>"
+        f"<p>{'Business prose. ' * 400}</p>"
+        + _OFFICER_TABLE
+        + '<p>For additional information regarding competition, see "Item 1A. Risk '
+        'Factors - Risks Relating to Our Business".</p>'
+        "<p>I-13</p>"
+        f"<h2>Item 1A. Risk Factors.</h2><p>{_LONG_RISK}</p>"
+        "<h2>Item 1B. Unresolved Staff Comments.</h2><p>Not applicable.</p>"
+        "<h2>Item 2. Properties.</h2><p>Our properties.</p>"
+        "</body></html>"
+    )
+
+
+def test_extract_item_1a_anchors_on_the_heading_not_the_cross_reference() -> None:
+    section = _extract_item_1a(ten_k_with_forward_looking_cross_reference())
+    assert section is not None
+    assert section.startswith("Item 1A. Risk Factors.")
+    assert "Risk content." in section
+
+
+def test_extract_item_1a_excludes_item_1_business_and_the_officer_table() -> None:
+    section = _extract_item_1a(ten_k_with_forward_looking_cross_reference())
+    assert section is not None
+    assert "Business prose." not in section
+    assert "Executive Officers" not in section
+    assert "Chief Executive Officer" not in section
+    assert "Chief Financial Officer" not in section
+
+
+def test_extract_item_1a_stops_at_item_1b() -> None:
+    section = _extract_item_1a(ten_k_with_forward_looking_cross_reference())
+    assert section is not None
+    assert "Not applicable." not in section
+    assert "Our properties." not in section
+
+
+def test_extract_item_1a_ignores_a_toc_entry_that_has_no_toc_terminator() -> None:
+    # A table of contents listing Item 1 and Item 1A but no Item 1B / Item 2
+    # pairs its Item 1A entry with the real Item 1B far downstream — a span
+    # that contains the whole business section.
+    html = (
+        "<html><body>"
+        "<table><tr><td>Item 1. Business</td><td>1</td></tr>"
+        "<tr><td>Item 1A. Risk Factors</td><td>14</td></tr></table>"
+        "<h2>Item 1. Business</h2>"
+        f"<p>{'Business prose. ' * 400}</p>"
+        f"<h2>Item 1A. Risk Factors</h2><p>{_LONG_RISK}</p>"
+        "<h2>Item 1B. Unresolved Staff Comments</h2>"
+        "</body></html>"
+    )
+    section = _extract_item_1a(html)
+    assert section is not None
+    assert section.startswith("Item 1A. Risk Factors")
+    assert "Business prose." not in section
+
+
+def test_block_text_collapses_to_strip_html() -> None:
+    # The extraction runs on block-aware text so a heading boundary is
+    # visible; collapsing it must reproduce `_strip_html` byte for byte, so
+    # the extracted text of a correctly-parsed filing does not move (#73).
+    from bloasis.data.fetchers.sec_edgar import _block_text, _collapse_whitespace
+
+    for html in (
+        ten_k_with_forward_looking_cross_reference(),
+        "<p>Hello&nbsp;<b>world</b>&#160;test &amp; more</p>",
+        "<div>a\n\n\nb\t\tc</div>",
+        "<table><tr><td>x</td><td>y</td></tr></table>",
+    ):
+        assert _collapse_whitespace(_block_text(html)) == _strip_html(html)
+
+
+def test_risk_factors_ignores_text_cached_by_the_previous_parser(tmp_path: Path) -> None:
+    # The extracted text is cached per filing, so a parser fix reaches nothing
+    # that was already cached (issue #83: 7k texts in the live cache carry the
+    # cross-reference-anchored span). The cache is keyed by parser version.
+    edgar = tmp_path / "edgar"
+    (edgar / "filings").mkdir(parents=True)
+    (edgar / "risk_factors").mkdir(parents=True)
+    (edgar / "tickers.json").write_text(
+        json.dumps({"0": {"ticker": "AAPL", "cik_str": 320193, "title": "Apple Inc."}})
+    )
+    stale = "Stale span from the old parser. " * 50
+    (edgar / "risk_factors" / "0000320193_a1.txt").write_text(stale)
+
+    client = EdgarClient(tmp_path)
+    filing = {
+        "accession": "a1",
+        "primary_doc": "d1",
+        "filed": date(2024, 11, 1),
+        "period": date(2024, 9, 28),
+    }
+    with (
+        patch(
+            "bloasis.data.fetchers.sec_edgar._http_get",
+            return_value=ten_k_with_forward_looking_cross_reference().encode(),
+        ),
+        patch("bloasis.data.fetchers.sec_edgar.time.sleep"),
+    ):
+        out = client.risk_factors("AAPL", filing)  # type: ignore[arg-type]
+
+    assert out is not None
+    assert out != stale
+    assert out.startswith("Item 1A. Risk Factors.")
+    versioned = edgar / "risk_factors" / ITEM_1A_PARSER_VERSION / "0000320193_a1.txt"
+    assert versioned.read_text() == out
+
+
+def test_extract_item_1a_runs_past_an_item_2_cross_reference_in_prose() -> None:
+    # Issue #83, terminator side: AMGN FY2024 / UHS FY2022 / AEP FY2020 end
+    # their section with a mid-sentence "see Part I, Item 2. Management's
+    # Discussion", which truncated the span to 738-9,904 chars.
+    html = (
+        "<html><body>"
+        "<h2>Item 1A. Risk Factors</h2>"
+        f"<p>{_LONG_RISK}</p>"
+        "<p>Our facilities are listed in Item 2. Properties of this report.</p>"
+        f"<p>{'Later risk content. ' * 200}</p>"
+        "<h2>Item 1B. Unresolved Staff Comments</h2><p>None.</p>"
+        "</body></html>"
+    )
+    section = _extract_item_1a(html)
+    assert section is not None
+    assert "Later risk content." in section
+    assert "None." not in section
+
+
+def test_extract_item_1a_accepts_an_inline_terminator_when_no_heading_one_exists() -> None:
+    # CEG FY2023 styles no Item 1B/1C heading on its own line, so requiring a
+    # line-anchored terminator alone would drop the filing.
+    html = (
+        "<html><body>"
+        "<h2>Item 1A. Risk Factors</h2>"
+        f"<p>{_LONG_RISK} See ITEM 1C. CYBERSECURITY for more information.</p>"
+        "</body></html>"
+    )
+    section = _extract_item_1a(html)
+    assert section is not None
+    assert "Risk content." in section
+    assert "CYBERSECURITY" not in section
