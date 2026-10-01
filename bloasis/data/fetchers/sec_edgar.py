@@ -508,15 +508,16 @@ def _tenk_rows(block: dict[str, list[str]], cik: str) -> list[TenKFiling]:
 #   2. A start counts only where it begins a line, preceded by heading noise
 #      at most (page label, "PART I", "Table of Contents"). A mid-sentence
 #      cross-reference can no longer anchor the span.
-#   3. Reject a candidate whose span contains an `Item 1 ... Business`
+#   3. The terminator is the next `Item 1B` / `1C` / `2` *heading* too — a
+#      mid-sentence "see Part I, Item 2. Management's Discussion" ended the
+#      span after 738 chars for UHS FY2022 and 9,904 for AMGN FY2024, and
+#      ALB sat at 780 chars for five straight years. A filing that styles no
+#      terminator on its own line falls back to the next occurrence
+#      anywhere (CEG FY2023).
+#   4. Reject a candidate whose span contains an `Item 1 ... Business`
 #      heading — this drops a table-of-contents entry whose nearest
 #      terminator is the real Item 1B far downstream.
-#   3b. The terminator is the next `Item 1B` / `1C` / `2` *heading* too — a
-#      mid-sentence "see Part I, Item 2. Management's Discussion" ended the
-#      span after 738 chars for UHS FY2022 and 9,904 for AMGN FY2024. A
-#      filing that styles no terminator on its own line falls back to the
-#      next occurrence anywhere (CEG FY2023).
-#   4. Only among the survivors does the longest span win; length is a
+#   5. Only among the survivors does the longest span win; length is a
 #      tie-break between heading-anchored candidates (a running header
 #      repeating "Item 1A. Risk Factors" mid-section yields a shorter one),
 #      never the reason a candidate is chosen.
@@ -533,8 +534,8 @@ _RELAXED_END = re.compile(
     r"(?i)\bi\s?tem\s*1\s*\.?\s*(?:[bc]|\([bc]\))(?![a-z0-9])"
     r"|\bi\s?tem\s*2(?![0-9])\s*[.:|(]"
 )
-# The heading that opens the section Item 1A must not contain: "Item 1.
-# Business", "ITEM 1 - BUSINESS", "I TEM 1: BUSINESS".
+# An Item 1 Business heading inside a span means the span opened before the
+# business section: "Item 1. Business", "ITEM 1 - BUSINESS", "I TEM 1: BUSINESS".
 _ITEM_1_BUSINESS = re.compile(r"(?i)\bi\s?tem\s*1\s*[.:)\-–—]*\s*business\b")
 _MIN_SECTION_CHARS = 500
 
