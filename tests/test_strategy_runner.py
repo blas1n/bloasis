@@ -144,6 +144,40 @@ def test_sim_portfolio_buy_persists_position_via_get_positions() -> None:
     assert pos[0].quantity == pytest.approx(3.0)
 
 
+def test_sim_portfolio_buy_over_cash_is_rejected_not_raised() -> None:
+    """A BUY that costs more than the cash left is a broker rejection,
+    as `PaperBroker` and Alpaca report it — not an exception that aborts
+    the whole backtest. The runner sizes on equity, not cash, so a step's
+    later BUYs can outrun cash at larger position sizes (#85 F3).
+    """
+    panel = _make_panel("AAPL", signal_close=100.0, next_open=100.0)
+    p = SimulatedPortfolio(initial_capital=1_000.0, data_panel=panel, execution_cfg=_exec_cfg())
+    p.advance_clock(date(2026, 5, 8))
+
+    result = p.place_market_order(BrokerOrder("AAPL", "buy", 11.0, "buy-over"))
+
+    assert result.status == "rejected"
+    assert "insufficient cash" in result.reason
+    assert result.filled_qty == 0.0
+    assert p.cash == pytest.approx(1_000.0)
+    assert p.get_positions() == []
+
+
+def test_sim_portfolio_order_after_cash_rejection_still_fills() -> None:
+    """The rejection leaves the book untouched, so a smaller BUY placed
+    next in the same step fills against the full remaining cash."""
+    panel = _make_panel("AAPL", signal_close=100.0, next_open=100.0)
+    p = SimulatedPortfolio(initial_capital=1_000.0, data_panel=panel, execution_cfg=_exec_cfg())
+    p.advance_clock(date(2026, 5, 8))
+
+    p.place_market_order(BrokerOrder("AAPL", "buy", 11.0, "buy-over"))
+    result = p.place_market_order(BrokerOrder("AAPL", "buy", 9.0, "buy-fits"))
+
+    assert result.status == "filled"
+    assert p.cash == pytest.approx(100.0)
+    assert p.get_positions()[0].quantity == pytest.approx(9.0)
+
+
 # ---------------------------------------------------------------------------
 # AlpacaBrokerAdapter still satisfies BrokerAdapter (no regression)
 # ---------------------------------------------------------------------------
