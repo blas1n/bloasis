@@ -549,3 +549,36 @@ def test_extract_item_1a_accepts_an_inline_terminator_when_no_heading_one_exists
     assert section is not None
     assert "Risk content." in section
     assert "CYBERSECURITY" not in section
+
+
+# ---------------------------------------------------------------------------
+# Issue #92 — SIC code from the submissions snapshot (sector source)
+# ---------------------------------------------------------------------------
+
+
+def _write_submissions(edgar: Path, cik: int, payload: dict[str, object]) -> None:
+    (edgar / "filings").mkdir(parents=True, exist_ok=True)
+    (edgar / "filings" / f"{cik:010d}.json").write_text(json.dumps(payload))
+
+
+def test_sic_reads_the_cached_submissions_snapshot(tmp_path: Path) -> None:
+    _write_tickers(tmp_path / "edgar", {"ABT": 1800})
+    _write_submissions(tmp_path / "edgar", 1800, {"sic": "2834", "filings": {"recent": {}}})
+    client = EdgarClient(tmp_path)
+    assert client.sic("ABT") == "2834"
+
+
+def test_sic_follows_the_same_class_share_spelling_as_cik(tmp_path: Path) -> None:
+    # Same ticker resolution as the 10-K history, so sector and text come
+    # from one registrant.
+    _write_tickers(tmp_path / "edgar", {"BRK-B": 1067983})
+    _write_submissions(tmp_path / "edgar", 1067983, {"sic": "6331", "filings": {"recent": {}}})
+    assert EdgarClient(tmp_path).sic("BRK.B") == "6331"
+
+
+def test_sic_is_none_for_unknown_ticker_or_blank_code(tmp_path: Path) -> None:
+    _write_tickers(tmp_path / "edgar", {"SHELL": 42})
+    _write_submissions(tmp_path / "edgar", 42, {"sic": "", "filings": {"recent": {}}})
+    client = EdgarClient(tmp_path)
+    assert client.sic("ZZZZ") is None
+    assert client.sic("SHELL") is None

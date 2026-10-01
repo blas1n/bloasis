@@ -79,7 +79,11 @@ def test_prefetch_passes_edgar_max_age_to_client(tmp_path: Path, scorer_type: st
     if scorer_type == "edgar_textdiff":
         # Only the 10-K client follows CIK successions (issue #75).
         expected["successions"] = cfg.data.edgar_successions
-    client_cls.assert_called_once_with(**expected)
+    # The scorer's client, plus the sector client (#92) — every one of them
+    # must carry the configured max age.
+    calls = [c.kwargs for c in client_cls.call_args_list]
+    assert expected in calls
+    assert all(c["max_age_hours"] == 7 for c in calls)
 
 
 def test_live_candidates_see_a_10k_filed_after_the_cached_snapshot(tmp_path: Path) -> None:

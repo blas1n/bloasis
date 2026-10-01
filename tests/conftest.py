@@ -35,3 +35,20 @@ def baseline_config() -> StrategyConfig:
 @pytest.fixture
 def tmp_db_path(tmp_path: Path) -> Iterator[Path]:
     yield tmp_path / "test.db"
+
+
+@pytest.fixture(autouse=True)
+def _no_sec_network(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Block real SEC EDGAR HTTP in every test.
+
+    Prefetch now looks up a sector per symbol from EDGAR whenever a sector
+    cap can bind (#92) — which the default config's 0.30 cap does — so a
+    backtest smoke test would otherwise reach data.sec.gov. A test that needs
+    EDGAR responses patches `_http_get` itself, which overrides this.
+    """
+    import bloasis.data.fetchers.sec_edgar as sec_edgar
+
+    def _blocked(url: str, *args: object, **kwargs: object) -> bytes:
+        raise OSError(f"SEC network is blocked in tests: {url}")
+
+    monkeypatch.setattr(sec_edgar, "_http_get", _blocked)

@@ -33,6 +33,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from enum import StrEnum
@@ -1364,13 +1365,14 @@ def _current_symbols(cfg: StrategyConfig, symbols: list[str]) -> list[str]:
 class LiveMarketInputs:
     """Market state the live runner needs, as of the latest bar (#91).
 
-    The same two inputs the backtester hands `execute_strategy_step` each
-    step: the VIX close (risk gates) and trailing SPY daily returns (regime
-    overlay).
+    The same inputs the backtester hands `execute_strategy_step` each step:
+    the VIX close (risk gates), trailing SPY daily returns (regime overlay),
+    and the symbol -> sector map the sector cap buckets on (#92).
     """
 
     vix: float
     spy_returns: pd.Series
+    sectors: Mapping[str, str | None]
 
 
 def _live_market_inputs(data: BacktestData, as_of: pd.Timestamp) -> LiveMarketInputs:
@@ -1383,7 +1385,9 @@ def _live_market_inputs(data: BacktestData, as_of: pd.Timestamp) -> LiveMarketIn
     if vix.empty:
         raise ValueError(f"no VIX close on or before {as_of.date()} — refusing to trade")
     spy_returns = data.spy_close_series.sort_index().pct_change().dropna().loc[:as_of]
-    return LiveMarketInputs(vix=float(vix.iloc[-1]), spy_returns=spy_returns)
+    return LiveMarketInputs(
+        vix=float(vix.iloc[-1]), spy_returns=spy_returns, sectors=dict(data.sectors)
+    )
 
 
 def _build_live_candidates(
@@ -1485,10 +1489,15 @@ def _execute_against_broker(
     # Same market inputs the backtester gives each step (#91): the latest VIX
     # close drives the risk gates, trailing SPY returns drive the overlay.
     market_state = MarketState(timestamp=submitted_at, vix=market.vix)
-    portfolio_state = PortfolioState(
-        total_value=broker.get_account().equity,
-        sector_concentrations={},  # broker doesn't report sector mix (#92)
-    )
+    # The broker does not report sector mix, so bucket held market value by
+    # the panel's sector map, the way the simulated portfolio does (#92).
+    equity = broker.get_account().equity
+    concentrations: dict[str, float] = {}
+    if equity > 0:
+        for bp in broker_positions:
+            sector = market.sectors.get(bp.symbol) or "_unknown"
+            concentrations[sector] = concentrations.get(sector, 0.0) + bp.market_value / equity
+    portfolio_state = PortfolioState(total_value=equity, sector_concentrations=concentrations)
     spy_returns_to_date = market.spy_returns
 
     step = execute_strategy_step(
@@ -1638,9 +1647,16 @@ def grid_run(
     # Union of scorer types across every combination — so prefetch fans out
     # exactly the data sources any combo will consume.
     from bloasis.backtest.grid import apply_overrides as _apply
+    from bloasis.backtest.prefetch import sectors_needed
 
     combos = expand_combinations(spec)
-    scorer_types = {_apply(base_cfg, c).scorer.type for c in combos}
+    combo_cfgs = [_apply(base_cfg, c) for c in combos]
+    scorer_types = {c.scorer.type for c in combo_cfgs}
+    # One panel serves every combo, so it carries sectors if any combo's
+    # sector cap can bind (#92).
+    need_sectors = sectors_needed(
+        scorer_types, [c.risk.max_sector_concentration for c in combo_cfgs]
+    )
 
     console.print(
         f"[cyan]grid {spec.name}: {len(combos)} combinations across "
@@ -1655,6 +1671,7 @@ def grid_run(
             end_d,
             scorer_types=scorer_types,
             console=console,
+            need_sectors=need_sectors,
         )
     except ValueError as exc:
         raise typer.BadParameter(str(exc)) from exc

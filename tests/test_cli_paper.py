@@ -80,7 +80,7 @@ def _fake_position(symbol: str, qty: float = 5.0, price: float = 195.0) -> Magic
 def _calm_market() -> LiveMarketInputs:
     """VIX well under the gates and no SPY history — these tests are about
     persistence, not risk gating (that is `test_cli_live_market.py`)."""
-    return LiveMarketInputs(vix=15.0, spy_returns=pd.Series(dtype=float))
+    return LiveMarketInputs(vix=15.0, spy_returns=pd.Series(dtype=float), sectors={})
 
 
 def _patch_broker_and_pipeline(monkeypatch: pytest.MonkeyPatch, symbols: list[str]) -> MagicMock:

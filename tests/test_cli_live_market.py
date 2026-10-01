@@ -64,7 +64,7 @@ def test_live_step_rejects_buys_when_vix_is_extreme(broker: MagicMock) -> None:
     from bloasis.cli import LiveMarketInputs, _execute_against_broker
 
     cfg = StrategyConfig()  # vix_extreme 40
-    market = LiveMarketInputs(vix=45.0, spy_returns=_calm_returns())
+    market = LiveMarketInputs(vix=45.0, spy_returns=_calm_returns(), sectors={})
 
     _execute_against_broker(cfg, [], broker, market=market, label="paper")
 
@@ -76,7 +76,7 @@ def test_live_step_buys_when_vix_is_calm(broker: MagicMock) -> None:
     from bloasis.cli import LiveMarketInputs, _execute_against_broker
 
     cfg = StrategyConfig()
-    market = LiveMarketInputs(vix=15.0, spy_returns=_calm_returns())
+    market = LiveMarketInputs(vix=15.0, spy_returns=_calm_returns(), sectors={})
 
     _execute_against_broker(cfg, [], broker, market=market, label="paper")
 
@@ -90,7 +90,7 @@ def _first_buy_qty(broker: MagicMock) -> float:
 def test_live_step_regime_overlay_shrinks_size_in_a_stormy_market(broker: MagicMock) -> None:
     from bloasis.cli import LiveMarketInputs, _execute_against_broker
 
-    market = LiveMarketInputs(vix=15.0, spy_returns=_stormy_returns())
+    market = LiveMarketInputs(vix=15.0, spy_returns=_stormy_returns(), sectors={})
 
     off = StrategyConfig()
     _execute_against_broker(off, [], broker, market=market, label="paper")
@@ -113,6 +113,7 @@ def _fake_panel(bar_dates: list[str], market_dates: list[str]) -> SimpleNamespac
         bars={"AAPL": pd.DataFrame({"close": 1.0}, index=bar_idx)},
         vix_series=pd.Series(np.arange(len(mkt_idx), dtype=float) + 20.0, index=mkt_idx),
         spy_close_series=pd.Series(np.linspace(400.0, 410.0, len(mkt_idx)), index=mkt_idx),
+        sectors={},
     )
 
 
@@ -152,3 +153,60 @@ def test_build_live_candidates_refuses_to_trade_without_a_vix_close() -> None:
         pytest.raises(ValueError, match="VIX"),
     ):
         _build_live_candidates(StrategyConfig(), ["AAPL", "MSFT"], 365)
+
+
+# ---------------------------------------------------------------------------
+# Issue #92 — live sector concentrations come from held positions × sector map
+# ---------------------------------------------------------------------------
+
+
+def test_live_step_rejects_a_buy_into_a_sector_already_at_the_cap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from bloasis.broker import BrokerAdapter
+    from bloasis.cli import LiveMarketInputs, _execute_against_broker
+
+    BrokerAdapter.register(MagicMock)
+    b = MagicMock()
+    b.mode = "paper"
+    b.get_account.return_value = MagicMock(cash=70_000.0, equity=100_000.0)
+    b.get_positions.return_value = [
+        MagicMock(symbol="XOM", quantity=300.0, avg_cost=100.0, market_value=30_000.0)
+    ]
+    b.place_market_order.return_value = MagicMock(
+        status="filled", filled_qty=10.0, filled_avg_price=200.0, reason=None
+    )
+    cvx, aapl = _buy_signal("CVX"), _buy_signal("AAPL")
+    cvx.sector, aapl.sector = "Energy", "Information Technology"
+    sig_gen = MagicMock()
+    sig_gen.return_value.generate.return_value = [cvx, aapl]
+    monkeypatch.setattr("bloasis.signal.SignalGenerator", sig_gen)
+
+    cfg = StrategyConfig.model_validate({"risk": {"max_sector_concentration": 0.25}})
+    market = LiveMarketInputs(
+        vix=15.0,
+        spy_returns=_calm_returns(),
+        sectors={"XOM": "Energy", "CVX": "Energy", "AAPL": "Information Technology"},
+    )
+
+    _execute_against_broker(cfg, [], b, market=market, label="paper")
+
+    bought = [c.args[0].symbol for c in b.place_market_order.call_args_list]
+    assert bought == ["AAPL"]  # Energy already 30% >= 25% cap
+
+
+def test_build_live_candidates_hands_on_the_panel_sector_map() -> None:
+    from bloasis.cli import _build_live_candidates
+
+    data = _fake_panel(["2026-09-30"], ["2026-09-30"])
+    data.sectors = {"AAPL": "Information Technology"}
+    bt = MagicMock()
+    bt._build_candidates.return_value = ([], [])
+
+    with (
+        patch("bloasis.backtest.prefetch.prefetch_backtest_data", return_value=data),
+        patch("bloasis.backtest.engine.Backtester", return_value=bt),
+    ):
+        _c, _l, market = _build_live_candidates(StrategyConfig(), ["AAPL", "MSFT"], 365)
+
+    assert market.sectors == {"AAPL": "Information Technology"}
