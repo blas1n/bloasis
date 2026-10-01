@@ -158,6 +158,15 @@ def main() -> int:
         f"[green]prefetch done: {len(data.symbols)} symbols with bars, "
         f"{len(data.risk_factors_history)} with 10-K history[/green]"
     )
+    # Validity sensor for the `max_sector_concentration` axis: the risk
+    # evaluator buckets a position under `signal.sector or "_unknown"`, so if
+    # the panel carries no sector map the cap degenerates into a single-bucket
+    # gross-exposure cap. Print it rather than assume either way.
+    n_sectors = len({s for s in data.sectors.values() if s})
+    console.print(
+        f"[cyan]sector map: {len(data.sectors)} entries, "
+        f"{n_sectors} distinct non-null sectors[/cyan]"
+    )
 
     arms = [a for a in ARMS if args.only is None or args.only in a[0]]
     rows: list[dict[str, Any]] = []

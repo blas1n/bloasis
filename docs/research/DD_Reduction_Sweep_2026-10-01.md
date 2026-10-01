@@ -100,6 +100,51 @@ uv run python scripts/dd-sweep-85.py \
 The first run re-extracts Item 1A into `edgar/risk_factors/v2/` (the #83
 parser version), ~3k 10-K downloads, ~30 min.
 
+## Harness findings (found while wiring the sweep, before any arm was scored)
+
+Two of the pre-registered knobs do not mean in this system what their names
+say. Both are recorded here because they change how the arm table must be
+read, and neither was found by looking at results.
+
+### F1 — The regime overlay cannot act in paper or live trading
+
+`compute_regime_scale()` returns `1.0` whenever it is handed fewer than
+`vol_lookback_days` (126) SPY returns. The live path
+(`bloasis/cli.py`, the `trade` command) constructs
+`spy_returns_to_date = pd.Series([], dtype=float)` — an empty series — so the
+overlay is a pass-through there no matter what the config says. Measured
+directly with the most aggressive parameters the config can express:
+
+```
+sigma_target=0.01, bear_scale=0.01, scale_clip=(0.0, 1.0)
+  empty series (the live path)  -> scale 1.0
+  125 bars                      -> scale 1.0
+  600 noisy bars                -> scale 0.0003
+```
+
+The same call site also passes `vix=0.0`, so the VIX risk gates are inert
+live as well. Consequence for this sweep: **any block-A arm that qualified in
+backtest would be a no-op in paper trading** until that wiring is fixed. The
+overlay is, today, a backtest-only knob.
+
+### F2 — `max_sector_concentration` is a gross-exposure cap in backtest and inert live
+
+`RiskEvaluator` buckets a position under `signal.sector or "_unknown"`
+(`bloasis/risk.py:99`). `prefetch_backtest_data()` never populates
+`BacktestData.sectors` — the only place in the repo that fills it is
+`tests/test_backtest_engine.py:70`. So in every real backtest every holding
+lands in one `_unknown` bucket and the "sector" cap limits **total invested
+fraction**, not sector mix. Live is the mirror image: `cli.py` passes
+`sector_concentrations={}`, so `existing` is always 0 and the cap can only
+clip one order's size.
+
+Consequence: block B's sector axis measures gross exposure, i.e. the same
+mechanism as its position-cap axis, and it cannot test the hypothesis it was
+chosen for ("diversify across sectors to cut DD without cutting exposure").
+The arms are still reported as pre-registered and are still informative —
+together the two axes map the exposure/DD/α frontier — but they are not a
+test of sector diversification.
+
 ## Results
 
 <!-- filled in after the run -->
