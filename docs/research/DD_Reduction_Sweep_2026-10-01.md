@@ -244,4 +244,12 @@ sharpe that currently pass. The #85 founder decision (continue paper under a
 failing DD gate as evidence, or stop) should be taken on that basis, not on
 the two "yes" rows.
 
+### Decision (founder, 2026-10-01, after the result)
+
+- Paper trading on `edgar-rolling2` continues as evidence accumulation under a
+  failing DD criterion; real money stays blocked.
+- The 0.85 DD bar itself is to be reviewed (#88).
+- F3 is fixed first (TDD, separate PR) so the three `pos=0.03` arms can be
+  measured and the pre-registered table completed.
+
 Raw rows: the driver's JSON output (`--out`), not committed.

@@ -46,6 +46,12 @@ change. Founder decision 2026-10-01: **paper trading continues as evidence
 accumulation while DD-reduction research runs**; real money stays blocked. Full
 record: [`research/EDGAR_Rolling2_Gate_Remeasurement_2026-10-01.md`](./research/EDGAR_Rolling2_Gate_Remeasurement_2026-10-01.md).
 
+The pre-registered DD-reduction sweep found no setting that clears DD through a
+mechanism that exists in paper trading
+([`research/DD_Reduction_Sweep_2026-10-01.md`](./research/DD_Reduction_Sweep_2026-10-01.md)).
+Founder decision 2026-10-01 after the sweep: paper continues, and the 0.85 DD
+bar itself is put up for review (#88).
+
 ---
 
 ## Phase 2 — M2+ Signal Edge (in progress)
@@ -64,9 +70,11 @@ one live-tracking.
       grid measurement. Signal did not survive walk-forward on the
       universe we use.
 - ❌ **Regime overlay** — hurt EDGAR-rolling2 **returns** in grid
-      measurement. Never evaluated against the drawdown criterion, which is
-      the only gate criterion now failing (#85) — being re-measured against
-      DD specifically.
+      measurement. Re-measured against drawdown in the pre-registered #85
+      sweep (2026-10-01): every arm cuts DD (0.46–0.66) only by turning α
+      negative and sharpe < 1.0. Also inert in paper/live — the trade path
+      hands it an empty SPY series
+      ([`research/DD_Reduction_Sweep_2026-10-01.md`](./research/DD_Reduction_Sweep_2026-10-01.md)).
 - ❌ **Knob sweep / EDGAR∩JT intersect** — 12 combos measured, none
       beat baseline. Hypothesis falsified (PR22).
 - ✅ **Position size 0.03/0.05** — α +4.2% variant shipped-adjacent
