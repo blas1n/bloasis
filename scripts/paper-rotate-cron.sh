@@ -18,7 +18,13 @@ REPO=/Users/blasin/Works/bloasis/main
 # between annual 10-K filings, so the paper session could not test the
 # backtest claim. New session name = clean equity series for the new
 # universe; the old session was closed.
-SESSION_NAME="edgar-rolling2-sp500-paper-2026-09"
+# 2026-10-01: new session after #83. The Item 1A extraction had been ranking a
+# blob that included Item 1 Business and the officer table, and fixing it moved
+# 13 of the 48 selected names (12 of them held). A 6-month paper track record
+# that spans both signals cannot support the real-money decision in
+# docs/mission.md, and the previous session was two days old, so it was closed
+# and this one starts clean.
+SESSION_NAME="edgar-rolling2-sp500-paper-2026-10"
 CONFIG="configs/edgar-rolling2.yaml"
 UNIVERSE="sp500"
 
