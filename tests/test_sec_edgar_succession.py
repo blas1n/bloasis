@@ -30,6 +30,7 @@ from bloasis.data.fetchers.sec_edgar import (
     CikSuccession,
     EdgarClient,
 )
+from tests.market_stub import market_fetcher
 
 _HTTP = "bloasis.data.fetchers.sec_edgar._http_get"
 _SLEEP = "bloasis.data.fetchers.sec_edgar.time.sleep"
@@ -327,7 +328,10 @@ def _live_history(tmp_path: Path, fake_get: Callable[..., bytes]) -> Any:
 
     with (
         patch("bloasis.backtest.prefetch.YfOhlcvFetcher", return_value=ohlcv),
-        patch("bloasis.backtest.prefetch.YfMarketContextFetcher"),
+        patch(
+            "bloasis.backtest.prefetch.YfMarketContextFetcher",
+            return_value=market_fetcher([today]),
+        ),
         patch("bloasis.backtest.engine.Backtester", side_effect=fake_backtester),
         patch(_HTTP, side_effect=fake_get),
         patch(_SLEEP),

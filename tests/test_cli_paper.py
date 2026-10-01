@@ -16,7 +16,7 @@ import yaml
 from sqlalchemy import select
 from typer.testing import CliRunner
 
-from bloasis.cli import app
+from bloasis.cli import LiveMarketInputs, app
 from bloasis.storage import (
     create_all,
     get_engine,
@@ -77,6 +77,12 @@ def _fake_position(symbol: str, qty: float = 5.0, price: float = 195.0) -> Magic
     return pos
 
 
+def _calm_market() -> LiveMarketInputs:
+    """VIX well under the gates and no SPY history — these tests are about
+    persistence, not risk gating (that is `test_cli_live_market.py`)."""
+    return LiveMarketInputs(vix=15.0, spy_returns=pd.Series(dtype=float))
+
+
 def _patch_broker_and_pipeline(monkeypatch: pytest.MonkeyPatch, symbols: list[str]) -> MagicMock:
     """Stub Alpaca + candidate builder + SignalGenerator. Returns broker mock."""
     broker = MagicMock()
@@ -104,7 +110,7 @@ def _patch_broker_and_pipeline(monkeypatch: pytest.MonkeyPatch, symbols: list[st
     monkeypatch.setattr("bloasis.broker.AlpacaBrokerAdapter", lambda mode="paper": broker)
     monkeypatch.setattr(
         "bloasis.cli._build_live_candidates",
-        lambda cfg, symbols, days: ([MagicMock(symbol=s) for s in symbols], {}),
+        lambda cfg, symbols, days: ([MagicMock(symbol=s) for s in symbols], {}, _calm_market()),
     )
 
     sig_gen_cls = MagicMock()
@@ -409,7 +415,7 @@ def test_paper_run_universe_resolves_symbols_for_candidate_builder(
 
     def _capture(cfg, symbols, days):  # type: ignore[no-untyped-def]
         seen.append(list(symbols))
-        return [MagicMock(symbol=s) for s in symbols], {}
+        return [MagicMock(symbol=s) for s in symbols], {}, _calm_market()
 
     monkeypatch.setattr("bloasis.cli._build_live_candidates", _capture)
 
