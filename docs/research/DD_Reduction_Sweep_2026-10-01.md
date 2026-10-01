@@ -147,4 +147,101 @@ test of sector diversification.
 
 ## Results
 
-<!-- filled in after the run -->
+Run 2026-10-01, one process, cloned cache. Sensors printed by the driver:
+7 folds; universe 503 symbols, 493 with bars, 478 with 10-K history;
+**sector map 0 entries** (F2 confirmed on the run itself, not only by
+reading code). The baseline reproduces the gate re-measurement exactly
+(DD 0.873 / sharpe 1.013 / α +3.74% / 398 trades), so the panel matches the
+one #85 was filed on.
+
+**14 of 17 arms ran. The three `pos=0.03` arms could not be measured** —
+the backtester raised on the first of them (see F3). They are reported as
+not measured, not dropped.
+
+| arm | DD ratio | sharpe vs SPY | α/yr | trades | qualifies |
+|---|---|---|---|---|---|
+| baseline (live config) | 0.873 | 1.013 | +3.74% | 398 | no (DD) |
+| A σ=0.08 bear=0.25 clip=1.0 | 0.464 | 0.974 | −3.12% | 398 | no (sharpe, α) |
+| A σ=0.08 bear=0.25 clip=1.5 | 0.464 | 0.974 | −3.12% | 398 | no (sharpe, α) |
+| A σ=0.08 bear=0.50 clip=1.0 | 0.464 | 0.990 | −3.11% | 398 | no (sharpe, α) |
+| A σ=0.08 bear=0.50 clip=1.5 | 0.464 | 0.990 | −3.11% | 398 | no (sharpe, α) |
+| A σ=0.12 bear=0.25 clip=1.0 | 0.626 | 0.978 | −1.54% | 398 | no (sharpe, α) |
+| A σ=0.12 bear=0.25 clip=1.5 | 0.662 | 0.978 | −1.54% | 398 | no (sharpe, α) |
+| A σ=0.12 bear=0.50 clip=1.0 | 0.626 | 0.996 | −1.53% | 398 | no (sharpe, α) |
+| A σ=0.12 bear=0.50 clip=1.5 | 0.662 | 0.996 | −1.53% | 398 | no (sharpe, α) |
+| B pos=0.01 sector=0.20 | 0.435 | 1.002 | −2.36% | 357 | no (α) |
+| B pos=0.01 sector=0.40 | 0.435 | 1.002 | −2.36% | 357 | no (α) |
+| B pos=0.01 sector=1.00 | 0.459 | 0.999 | −2.77% | 398 | no (sharpe, α) |
+| B pos=0.02 sector=0.20 | 0.828 | 1.015 | +6.01% | 357 | **yes** |
+| B pos=0.02 sector=0.40 | 0.828 | 1.015 | +6.01% | 357 | **yes** |
+| B pos=0.03 sector=0.20 | — | — | — | — | not measured (F3) |
+| B pos=0.03 sector=0.40 | — | — | — | — | not measured (F3) |
+| B pos=0.03 sector=1.00 | — | — | — | — | not measured (F3) |
+
+Per-fold DD ratios, baseline vs the qualifying arm:
+
+```
+baseline          0.873 0.768 1.478 1.063 0.772 1.004 0.626   median 0.873
+pos=0.02 sec=0.2  0.828 0.772 1.478 1.002 0.772 0.977 0.606   median 0.828
+```
+
+### Reading
+
+**Block A — the overlay cuts DD hard and pays for it in α, every arm.**
+DD falls to 0.46–0.66, but α goes negative (−1.5% to −3.1%) and sharpe drops
+under 1.0. Same trade count as the baseline in every arm: the overlay does not
+change *what* is bought, only how much, so this is the exposure/return
+trade-off and nothing else. It is also inert live (F1). The roadmap's
+"overlay hurts returns" verdict now holds against DD as well. `clip` 1.0 vs
+1.5 changes nothing at σ=0.08 — the scale never rises above 1 there.
+
+**Block B, `pos=0.01` — halving size halves DD and makes α negative.** Pure
+gross exposure, as expected.
+
+**Block B, `pos=0.02 sector∈{0.2, 0.4}` — two arms qualify, and they should
+not be read as a DD fix.**
+
+1. **They are not a sector test** (F2: zero sectors, everything is
+   `_unknown`).
+2. **They are not even a gross-exposure cap in the sense F2 assumed.** The
+   risk check compares against `PortfolioState.sector_concentrations`, which
+   the engine snapshots once per rebalance step (`engine.py:267`) and does not
+   update as the step's BUYs are placed. So the rule is "reject every new BUY
+   in a step whose *opening* invested fraction is already ≥ cap (clip each
+   one to the remaining room if it is just under)"; below that, any number of
+   2% buys in the same step go through, because the snapshot never grows. 0.20 and 0.40 give byte-identical
+   results, i.e. the opening invested fraction never landed between them at
+   a buying step. What qualified is a step-start exposure gate with a one-step
+   lag — a mechanism nobody designed.
+3. **It is inert live** (F2: `cli.py` passes `sector_concentrations={}`).
+4. **It is an in-sample pick over 17 pre-registered arms with a 0.022
+   margin**, and it moves DD in only four of seven folds (1, 4, 6, 7); the
+   worst fold (3, 1.478) is untouched.
+
+Per the decision rule, any qualifying arm needs out-of-sample confirmation
+before it goes near the live config. Here there is nothing coherent to
+confirm: the qualifying behaviour comes from an unintended snapshot artefact
+of a knob that does not exist in paper trading.
+
+### F3 — The backtester has no cash check on BUY sizing
+
+`execute_strategy_step` sizes a BUY as `equity × size_pct × regime_scale`
+(`runner.py`) with no reference to available cash, and `BacktestPortfolio.apply`
+raises `ValueError("insufficient cash: need 297.00, have 199.00")` when the
+step's BUYs exceed it. At `pos=0.02` the step's buys happen to fit; at
+`pos=0.03` the first arm aborts the process. This also means the overlay's
+`clip > 1.0` lever-up path can only ever have run where it did not need more
+cash than was there. Making the `pos=0.03` arms measurable requires an engine
+change (clip or skip on insufficient cash); that is a behaviour change to the
+backtester, so it is not made inside this sweep.
+
+### Verdict
+
+**No pre-registered setting clears the DD gate through a mechanism that exists
+in paper trading.** The two qualifying arms are an in-sample artefact of an
+inert live knob. Block A and `pos=0.01` buy DD only by giving up the α and
+sharpe that currently pass. The #85 founder decision (continue paper under a
+failing DD gate as evidence, or stop) should be taken on that basis, not on
+the two "yes" rows.
+
+Raw rows: the driver's JSON output (`--out`), not committed.
