@@ -30,14 +30,21 @@ machine-verifiable gate; we do not advance phases on vibes.
 - [x] **PR51-52** — Fill reconciliation + `friction` → `entry-gap` honest
       renaming (gap drift is regime, not execution slippage)
 
-### Phase 1 Exit Gate (met by `configs/edgar-rolling2.yaml`)
+### Phase 1 Exit Gate (no longer met as of 2026-10-01 — see #85)
 
 ```yaml
-walk_forward_min_folds: 5
-median_alpha_annualized: -0.005      # measured +4.09% (PR20)
-median_sharpe_vs_spy: 1.0            # measured 1.334 (PR20)
-median_max_dd_ratio_to_spy: 0.85     # measured 0.80 (PR20)
+walk_forward_min_folds: 5            # 7 folds
+median_alpha_annualized: -0.005      # 2026-05: +4.09% | 2026-10-01: +3.74%  PASS
+median_sharpe_vs_spy: 1.0            # 2026-05: 1.334  | 2026-10-01: 1.013   PASS
+median_max_dd_ratio_to_spy: 0.85     # 2026-05: 0.80   | 2026-10-01: 0.873   FAIL
 ```
+
+Re-measured on the canonical 7-fold protocol
+(`configs/grids/pr21-edgar-rolling.yaml`) on 2026-10-01: drawdown is now the
+only failing criterion, caused by data drift since 2026-05 rather than a code
+change. Founder decision 2026-10-01: **paper trading continues as evidence
+accumulation while DD-reduction research runs**; real money stays blocked. Full
+record: [`research/EDGAR_Rolling2_Gate_Remeasurement_2026-10-01.md`](./research/EDGAR_Rolling2_Gate_Remeasurement_2026-10-01.md).
 
 ---
 
@@ -56,7 +63,10 @@ one live-tracking.
 - ❌ **PEAD** (post-earnings announcement drift) — falsified in PR22-23
       grid measurement. Signal did not survive walk-forward on the
       universe we use.
-- ❌ **Regime overlay** — hurt EDGAR-rolling2 performance in grid measurement.
+- ❌ **Regime overlay** — hurt EDGAR-rolling2 **returns** in grid
+      measurement. Never evaluated against the drawdown criterion, which is
+      the only gate criterion now failing (#85) — being re-measured against
+      DD specifically.
 - ❌ **Knob sweep / EDGAR∩JT intersect** — 12 combos measured, none
       beat baseline. Hypothesis falsified (PR22).
 - ✅ **Position size 0.03/0.05** — α +4.2% variant shipped-adjacent

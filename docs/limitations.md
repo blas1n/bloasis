@@ -216,10 +216,17 @@ with no period (CINF, ICE). The strict parser still runs first, so every
 filing it already extracted is unchanged.
 
 **Current mitigation**: none needed for correctness. The backtest applies
-the same exclusion, so live and backtest agree. The Item 1A span is the
-longest `Item 1A` → next-item span. When a cross-reference precedes the
-real heading, the text includes some Item 1 prose. That happens the same
-way every year, so the year-over-year cosine stays comparable.
+the same exclusion, so live and backtest agree.
+
+> Correction 2026-10-01 (#85): the paragraph here used to say the span is
+> the *longest* `Item 1A` → next-item span and that the extra Item 1 prose
+> from a preceding cross-reference "happens the same way every year, so the
+> year-over-year cosine stays comparable." Both halves were wrong and #83
+> replaced the parser: the span is now anchored on the Item 1A **heading**
+> (`ITEM_1A_PARSER_VERSION = "v2"`), because maximizing span length
+> systematically picked the cross-reference start and swallowed the business
+> description. It did *not* happen the same way every year — XOM's
+> FY2024↔FY2023 cosine moved 0.5292 → 0.9918 once the span was anchored.
 
 **Planned resolution**: add heading-based extraction ("Risk Factors" →
 next heading) for cross-reference-index filers, and EX-13 fetch for

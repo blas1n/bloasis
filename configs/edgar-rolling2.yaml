@@ -5,14 +5,29 @@
 # one-off filings dialect noise and isolates the persistent
 # disclosure-shift signal.
 #
-# Measurement (SP500, 2022-2024, 7 walk-forward folds):
-#                       PR19 monthly  PR20 rolling=2 (this)
-#   alpha               +2.92%        +4.09%   ← +1.17pp
-#   sharpe              1.015         1.334    ← +0.32
-#   DD ratio to SPY     0.800         0.80     ← unchanged
-#   passed live-gate    NO (DD)       YES      ← all 4 PASS
+# Measurement (SP500, 7 walk-forward folds). Protocol for every column:
+# configs/grids/pr21-edgar-rolling.yaml -- 2022-01-01..2024-10-17,
+# train 180 / test 120 / step 120, universe sp500_at:2024-12-31.
 #
-# First bloasis config to clear live-gate (sharpe ≥ 1.0, α ≥ -0.5%, DD ≤ 0.85).
+#                     PR19 monthly  PR20 rolling=2  re-measured
+#                     (2026-05-09)  (2026-05-09)    2026-10-01
+#   alpha             +2.92%        +4.09%          +3.74%
+#   sharpe vs SPY     1.015         1.334           1.013
+#   DD ratio to SPY   0.800         0.80            0.873
+#   live-gate         NO (DD)       YES             NO (DD)
+#
+# As re-measured on 2026-10-01 (post-#83, same universe and OHLCV parquet)
+# this config FAILS the live-trading gate on the drawdown criterion only:
+# sharpe >= 1.0 and alpha >= -0.5% still pass, median max-DD ratio to SPY
+# is 0.873 against a 0.85 bar. The 2026-05-09 "passed live-gate YES" claim
+# no longer holds. The cause is data drift since 2026-05 (487 resolved
+# names vs 490, re-adjusted yfinance prices, four more months of 10-Ks in
+# the rolling 5-year window), not a code regression -- the pre-#83 code
+# measures 0.883 on the same inputs.
+#
+# Issue #85 / docs/research/EDGAR_Rolling2_Gate_Remeasurement_2026-10-01.md.
+# Founder decision 2026-10-01: paper trading continues as evidence
+# accumulation while DD-reduction research runs. Real money stays blocked.
 
 universe:
   source: sp500
