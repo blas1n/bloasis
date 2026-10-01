@@ -18,6 +18,7 @@ Phase 1~3 의 측정 로그·리서치·설계 lock-in. **코드가 이 문서�
 | **Phase 2 (rule + LightGBM)** | `Phase2_ML_Design_Lockin_2026-05-07.md` · `Phase2_Final_Measurement_2026-05-07.md` · **`Phase2_Postmortem_2026-05-07.md`** |
 | **Phase 3 (modern candidates)** | `Phase3_Modern_Candidates_2026-05-08.md` · `Phase3D_Final_Measurement_2026-05-09.md` |
 | **PR 측정 로그** | `PR12_*` · `PR18_*` · `PR19_*` · `PR20_*` · `PR21_*` · `PR22_*` · `PR23_*` |
+| **게이트 재산정** | `EDGAR_Rolling2_Gate_Remeasurement_2026-10-01.md` |
 | **리서치 (spec 원본)** | `Research_DM_Dynamic_Momentum.md` · `Research_AQR_Factor_Blend.md` · `Research_Qlib_Features.md` · `Quant_References.md` · `Quant_Robustness_2026-05-07.md` · `Modern_Alpha_Research_2026-05-09.md` · `Modern_AI_Investing_References_2026-05-07.md` |
 | **재설계** | `Redesign_Brief_2026-05-07.md` |
 | **이벤트 스터디** | `Trump_Mention_Event_Study_2026-06-03.md` · `Trump_Mention_Baseline_Correction_2026-06-03.md` |

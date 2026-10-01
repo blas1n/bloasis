@@ -7,8 +7,19 @@ combinatorial config 로 검증하는 것이 목적.
 ## Setup
 
 - Universe: S&P 500 (constituent at 2024-12-31, 13 delistings skipped → 490 symbols)
-- Backtest: walk-forward 7 folds, 2022-07-01 .. 2024-10-17
-- Engine: `bloasis backtest --train-days 365 --test-days 120 --step-days 120`
+- Backtest: walk-forward 7 folds, 2022-01-01 .. 2024-10-17,
+  train 180 / test 120 / step 120 — the canonical protocol, kept as
+  `configs/grids/pr21-edgar-rolling.yaml`
+- Engine: `bloasis grid run configs/grids/pr21-edgar-rolling.yaml`, or per
+  variant `bloasis backtest --start 2022-01-01 --end 2024-10-17
+  --train-days 180 --test-days 120 --step-days 120`
+  > Correction 2026-10-01 (#85): this line previously read
+  > `2022-07-01 .. 2024-10-17` with `--train-days 365`, which generates
+  > **3 folds**, not the 7 folds measured below. The results in this
+  > document are unchanged; only the reproduction command was wrong.
+  > Fold counts are deterministic in `generate_folds()`:
+  > 2022-01-01..2024-10-17 / 180 / 120 / 120 → 7 folds;
+  > 2022-07-01..2024-10-17 / 365 / 120 / 120 → 3 folds.
 - All EDGAR variants share `monthly rebalance (rebalance_days=21)` from PR19.
 - Mission acceptance gate (paper): sharpe ≥ 0.7, alpha ≥ -0.5%, DD ≤ 0.85, folds ≥ 5
 
