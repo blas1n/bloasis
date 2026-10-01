@@ -30,6 +30,7 @@ from bloasis.data.fetchers.sec_edgar import (
     TickerRename,
     resolve_current_symbols,
 )
+from tests.market_stub import market_fetcher
 
 _HTTP = "bloasis.data.fetchers.sec_edgar._http_get"
 _SLEEP = "bloasis.data.fetchers.sec_edgar.time.sleep"
@@ -212,7 +213,10 @@ def _paper_run(
 
     with (
         patch("bloasis.backtest.prefetch.YfOhlcvFetcher", return_value=ohlcv),
-        patch("bloasis.backtest.prefetch.YfMarketContextFetcher"),
+        patch(
+            "bloasis.backtest.prefetch.YfMarketContextFetcher",
+            return_value=market_fetcher([today]),
+        ),
         patch("bloasis.backtest.engine.Backtester", side_effect=fake_backtester),
         patch(_HTTP, side_effect=AssertionError("no SEC network in tests")),
         patch(_SLEEP),

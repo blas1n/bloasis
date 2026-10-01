@@ -33,6 +33,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
@@ -49,8 +50,10 @@ from bloasis.scoring.features import FeatureVector
 from bloasis.storage import create_all, get_engine, metadata
 
 if TYPE_CHECKING:
+    import pandas as pd
     from sqlalchemy import Engine
 
+    from bloasis.backtest.result import BacktestData
     from bloasis.broker import BrokerAdapter
     from bloasis.signal import CandidateData
 
@@ -1158,7 +1161,7 @@ def trade_dry_run(
         raise typer.BadParameter("at least 2 --symbol/-s entries required")
 
     cfg = _load_or_default_config(config_path)
-    candidates, last_closes = _build_live_candidates(cfg, symbols, days)
+    candidates, last_closes, market = _build_live_candidates(cfg, symbols, days)
 
     if not candidates:
         console.print("[yellow]no candidates produced (need 2+ symbols with data)[/yellow]")
@@ -1169,7 +1172,7 @@ def trade_dry_run(
         initial_cash=cfg.execution.initial_capital,
         slippage_bps=cfg.execution.market_slippage_bps,
     )
-    _execute_against_broker(cfg, candidates, broker, label="dry-run")
+    _execute_against_broker(cfg, candidates, broker, market=market, label="dry-run")
 
 
 @trade_app.command("paper")
@@ -1212,7 +1215,7 @@ def trade_paper(
     if not symbols or len(symbols) < 2:
         raise typer.BadParameter("at least 2 --symbol/-s entries required")
 
-    candidates, _last_closes = _build_live_candidates(cfg, symbols, days)
+    candidates, _last_closes, market = _build_live_candidates(cfg, symbols, days)
     if not candidates:
         console.print("[yellow]no candidates produced[/yellow]")
         raise typer.Exit(code=1)
@@ -1242,7 +1245,9 @@ def trade_paper(
             console.print(f"[yellow]reconcile skipped: {exc}[/yellow]")
 
     broker = AlpacaBrokerAdapter(mode="paper")
-    _execute_against_broker(cfg, candidates, broker, label="paper", session_id=session_id)
+    _execute_against_broker(
+        cfg, candidates, broker, market=market, label="paper", session_id=session_id
+    )
 
 
 @trade_app.command("live")
@@ -1323,13 +1328,13 @@ def trade_live(
             console.print("aborted")
             raise typer.Exit(code=1)
 
-    candidates, _last_closes = _build_live_candidates(cfg, symbols, days)
+    candidates, _last_closes, market = _build_live_candidates(cfg, symbols, days)
     if not candidates:
         console.print("[yellow]no candidates produced[/yellow]")
         raise typer.Exit(code=1)
 
     broker = AlpacaBrokerAdapter(mode="live")
-    _execute_against_broker(cfg, candidates, broker, label="live")
+    _execute_against_broker(cfg, candidates, broker, market=market, label="live")
 
 
 def _current_symbols(cfg: StrategyConfig, symbols: list[str]) -> list[str]:
@@ -1355,11 +1360,37 @@ def _current_symbols(cfg: StrategyConfig, symbols: list[str]) -> list[str]:
     return resolved
 
 
+@dataclass(frozen=True)
+class LiveMarketInputs:
+    """Market state the live runner needs, as of the latest bar (#91).
+
+    The same two inputs the backtester hands `execute_strategy_step` each
+    step: the VIX close (risk gates) and trailing SPY daily returns (regime
+    overlay).
+    """
+
+    vix: float
+    spy_returns: pd.Series
+
+
+def _live_market_inputs(data: BacktestData, as_of: pd.Timestamp) -> LiveMarketInputs:
+    """VIX close and SPY daily returns on or before `as_of`, sliced the way
+    `Backtester` slices them for a step, so live and backtest see the same
+    inputs. Refuses to return a VIX it does not have: trading with the risk
+    gates silently off is the #91 defect.
+    """
+    vix = data.vix_series.sort_index().loc[:as_of].dropna()
+    if vix.empty:
+        raise ValueError(f"no VIX close on or before {as_of.date()} — refusing to trade")
+    spy_returns = data.spy_close_series.sort_index().pct_change().dropna().loc[:as_of]
+    return LiveMarketInputs(vix=float(vix.iloc[-1]), spy_returns=spy_returns)
+
+
 def _build_live_candidates(
     cfg: StrategyConfig,
     symbols: list[str],
     days: int,
-) -> tuple[list[CandidateData], dict[str, float]]:
+) -> tuple[list[CandidateData], dict[str, float], LiveMarketInputs]:
     """Pull OHLCV + scorer-specific data, build candidates ranked by score.
 
     PR48 — runs the **same scoring pipeline as the backtester** by
@@ -1384,7 +1415,9 @@ def _build_live_candidates(
     data = prefetch_backtest_data(cfg, upper_syms, start, end)
 
     if not data.bars:
-        return [], {}
+        import pandas as pd
+
+        return [], {}, _live_market_inputs(data, pd.Timestamp(end, tz="UTC"))
 
     # The latest bar present in the prefetched panel — yfinance can be
     # 1-2 trading days behind for some symbols, so use the max across
@@ -1396,7 +1429,7 @@ def _build_live_candidates(
     scorer = bt._build_scorer(start, end)
     candidates, _fvs = bt._build_candidates(latest_date, scorer)
     last_closes = {c.feature_vector.symbol: c.last_close for c in candidates}
-    return list(candidates), last_closes
+    return list(candidates), last_closes, _live_market_inputs(data, latest)
 
 
 def _execute_against_broker(
@@ -1404,6 +1437,7 @@ def _execute_against_broker(
     candidates: list[CandidateData],
     broker: BrokerAdapter,
     *,
+    market: LiveMarketInputs,
     label: str,
     session_id: int | None = None,
 ) -> None:
@@ -1448,18 +1482,14 @@ def _execute_against_broker(
     engine = get_engine() if session_id is not None else None
     submitted_at = datetime.now(tz=UTC)
 
-    # Build market / portfolio state for the runner. Live has no precomputed
-    # VIX series — pass 0.0; risk_evaluator's VIX gate only fires on backtest
-    # bars exceeding cfg.risk.max_vix anyway. SPY returns also empty for the
-    # live one-shot call → regime overlay defaults to scale=1.0 (no shrink).
-    import pandas as pd_mod
-
-    market_state = MarketState(timestamp=submitted_at, vix=0.0)
+    # Same market inputs the backtester gives each step (#91): the latest VIX
+    # close drives the risk gates, trailing SPY returns drive the overlay.
+    market_state = MarketState(timestamp=submitted_at, vix=market.vix)
     portfolio_state = PortfolioState(
         total_value=broker.get_account().equity,
-        sector_concentrations={},  # broker doesn't report sector mix
+        sector_concentrations={},  # broker doesn't report sector mix (#92)
     )
-    spy_returns_to_date = pd_mod.Series([], dtype=float)
+    spy_returns_to_date = market.spy_returns
 
     step = execute_strategy_step(
         cfg=cfg,

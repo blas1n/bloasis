@@ -19,6 +19,7 @@ import pytest
 
 from bloasis.backtest.prefetch import prefetch_backtest_data
 from bloasis.config import StrategyConfig
+from tests.market_stub import market_fetcher
 
 
 def test_prefetch_passes_window_start_to_list_10k(tmp_path: Path) -> None:
@@ -133,7 +134,10 @@ def test_live_candidates_see_a_10k_filed_after_the_cached_snapshot(tmp_path: Pat
 
     with (
         patch("bloasis.backtest.prefetch.YfOhlcvFetcher", return_value=ohlcv),
-        patch("bloasis.backtest.prefetch.YfMarketContextFetcher"),
+        patch(
+            "bloasis.backtest.prefetch.YfMarketContextFetcher",
+            return_value=market_fetcher([today]),
+        ),
         patch("bloasis.backtest.engine.Backtester", side_effect=fake_backtester),
         patch("bloasis.data.fetchers.sec_edgar._http_get", side_effect=fake_get),
         patch("bloasis.data.fetchers.sec_edgar.time.sleep"),
@@ -191,7 +195,10 @@ def test_live_candidates_get_the_heading_anchored_item_1a(tmp_path: Path) -> Non
 
     with (
         patch("bloasis.backtest.prefetch.YfOhlcvFetcher", return_value=ohlcv),
-        patch("bloasis.backtest.prefetch.YfMarketContextFetcher"),
+        patch(
+            "bloasis.backtest.prefetch.YfMarketContextFetcher",
+            return_value=market_fetcher([today]),
+        ),
         patch("bloasis.backtest.engine.Backtester", side_effect=fake_backtester),
         patch("bloasis.data.fetchers.sec_edgar._http_get", side_effect=fake_get),
         patch("bloasis.data.fetchers.sec_edgar.time.sleep"),
