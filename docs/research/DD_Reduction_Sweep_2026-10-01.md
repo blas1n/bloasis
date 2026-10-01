@@ -22,9 +22,11 @@ the only criterion now failing.
 
 Written and committed **before** any arm was run. This is a sweep whose
 explicit aim is to make a gate pass, which is the multiple-testing trap this
-project has already been burned by (`docs/limitations.md`); the arm list, the
-protocol and the decision rule are therefore fixed up front and the full table
-is reported, not the best arm.
+project has already been burned by — `docs/roadmap.md` lists PEAD, the knob
+sweep / EDGAR∩JT intersect (12 combos) and the regime overlay itself as
+falsified after exactly this kind of search. The arm list, the protocol and the
+decision rule are therefore fixed up front, and the full table is reported, not
+the best arm.
 
 ### Knobs and grids
 
