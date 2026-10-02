@@ -284,3 +284,92 @@ def test_execute_step_submits_buy_for_buy_signal_via_executor() -> None:
     assert order.qty > 0
     assert sig.action == "BUY"
     assert "AAPL" in res.new_buy_set
+
+
+# ---------------------------------------------------------------------------
+# Issue #93 — BUYs accepted earlier in a step count toward the sector cap
+# ---------------------------------------------------------------------------
+
+
+def _energy_buys(monkeypatch: pytest.MonkeyPatch, symbols: list[str]) -> None:
+    def sig(sym: str) -> MagicMock:
+        s = MagicMock()
+        s.action, s.symbol, s.sector = "BUY", sym, "Energy"
+        s.entry_price, s.target_size_pct = 100.0, 0.02
+        return s
+
+    gen = MagicMock()
+    gen.return_value.generate.return_value = [sig(s) for s in symbols]
+    monkeypatch.setattr("bloasis.signal.SignalGenerator", gen)
+
+
+def _step(executor: MagicMock, state: object, cap: float) -> object:
+    from bloasis.config import StrategyConfig
+    from bloasis.risk import MarketState
+    from bloasis.strategy.runner import execute_strategy_step
+
+    cfg = StrategyConfig.model_validate({"risk": {"max_sector_concentration": cap}})
+    return execute_strategy_step(
+        cfg=cfg,
+        candidates=[],
+        held_positions=[],
+        market_state=MarketState(timestamp=datetime(2026, 5, 11, tzinfo=UTC), vix=15.0),
+        spy_returns_to_date=pd.Series([], dtype=float),
+        portfolio_state=state,  # type: ignore[arg-type]
+        signal_date=datetime(2026, 5, 11, tzinfo=UTC),
+        executor=executor,
+    )
+
+
+def _executor(status: str = "filled") -> MagicMock:
+    ex = MagicMock(spec=BrokerAdapter)
+    ex.get_account.return_value = AccountInfo(cash=100_000.0, equity=100_000.0, buying_power=0.0)
+    ex.get_positions.return_value = []
+    ex.place_market_order.return_value = OrderResult(
+        order_id="x",
+        client_order_id="y",
+        status=status,  # type: ignore[arg-type]
+        filled_qty=0.0,
+        filled_avg_price=0.0,
+        submitted_at=datetime(2026, 5, 11, tzinfo=UTC),
+    )
+    return ex
+
+
+def _bought_fraction(ex: MagicMock) -> list[float]:
+    return [c.args[0].qty * 100.0 / 100_000.0 for c in ex.place_market_order.call_args_list]
+
+
+def test_same_step_buys_cannot_overshoot_the_sector_cap(monkeypatch: pytest.MonkeyPatch) -> None:
+    from bloasis.risk import PortfolioState
+
+    _energy_buys(monkeypatch, ["XOM", "CVX", "COP"])
+    ex = _executor()
+
+    _step(ex, PortfolioState(total_value=100_000.0, sector_concentrations={}), cap=0.05)
+
+    fractions = _bought_fraction(ex)
+    assert fractions == pytest.approx([0.02, 0.02, 0.01])  # third clipped to the room left
+    assert sum(fractions) <= 0.05 + 1e-9
+
+
+def test_rejected_buy_does_not_use_up_sector_room(monkeypatch: pytest.MonkeyPatch) -> None:
+    from bloasis.risk import PortfolioState
+
+    _energy_buys(monkeypatch, ["XOM", "CVX", "COP"])
+    ex = _executor(status="rejected")
+
+    _step(ex, PortfolioState(total_value=100_000.0, sector_concentrations={}), cap=0.05)
+
+    assert _bought_fraction(ex) == pytest.approx([0.02, 0.02, 0.02])
+
+
+def test_step_does_not_mutate_the_callers_snapshot(monkeypatch: pytest.MonkeyPatch) -> None:
+    from bloasis.risk import PortfolioState
+
+    _energy_buys(monkeypatch, ["XOM"])
+    state = PortfolioState(total_value=100_000.0, sector_concentrations={"Energy": 0.01})
+
+    _step(_executor(), state, cap=0.05)
+
+    assert state.sector_concentrations == {"Energy": 0.01}
