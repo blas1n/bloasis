@@ -255,3 +255,44 @@ def test_paper_run_keeps_listed_symbol_when_sec_disagrees(
 
     assert "SATS" in requested and "ECHO" not in requested
     assert ordered == ["AAPL"]
+
+
+# ---------------------------------------------------------------------------
+# Issue #103 — historical S&P 500 renames (verified 2026-10-02)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("listed", "current", "cik"),
+    [
+        ("ANTM", "ELV", "0001156039"),
+        ("FB", "META", "0001326801"),
+        ("ABC", "COR", "0001140859"),
+        ("HCP", "DOC", "0000765880"),
+        ("PEAK", "DOC", "0000765880"),
+        ("UTX", "RTX", "0000101829"),
+        ("DISCA", "WBD", "0001437107"),
+    ],
+)
+def test_default_table_carries_verified_historical_renames(
+    listed: str, current: str, cik: str
+) -> None:
+    by_listed = {r.listed: r for r in DEFAULT_TICKER_RENAMES}
+    assert listed in by_listed
+    r = by_listed[listed]
+    assert (r.current, r.cik) == (current, cik)
+
+
+def test_default_table_lists_each_old_ticker_once() -> None:
+    listed = [r.listed for r in DEFAULT_TICKER_RENAMES]
+    assert len(listed) == len(set(listed))
+    currents = {r.current for r in DEFAULT_TICKER_RENAMES}
+    assert not set(listed) & currents
+
+
+def test_excluded_cases_are_not_in_the_default_table() -> None:
+    # New registrant (Linde plc, Kraft Heinz, Viatris, HF Sinclair), bankrupt
+    # and re-issued equity (Valaris), another share class (DISCK), or a
+    # successor that no longer trades (CBS/VIAC -> Paramount, CDAY -> DAY).
+    listed = {r.listed for r in DEFAULT_TICKER_RENAMES}
+    assert not listed & {"PX", "KRFT", "MYL", "HFC", "ESV", "DISCK", "CBS", "VIAC", "CDAY", "BXLT"}

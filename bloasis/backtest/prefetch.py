@@ -33,6 +33,30 @@ _FORM4_SCORERS = ("insider_cluster",)
 _FORM8K_SCORERS = ("form_8k_event",)
 
 
+def current_symbols(cfg: StrategyConfig, symbols: list[str], console: Console) -> list[str]:
+    """Replace constituents listed under a stale ticker with today's (#80, #103).
+
+    Applied on every prefetch, so backtests over historical constituent lists
+    fetch a renamed company under the symbol its price history lives on, as
+    the live path always did. The SEC ticker map is read only when a symbol
+    is in `data.ticker_renames`, and a rename it does not confirm is skipped.
+    """
+    from bloasis.data.fetchers.sec_edgar import EdgarClient, resolve_current_symbols
+
+    renames = cfg.data.ticker_renames
+    listed = {r.listed for r in renames}
+    if not listed.intersection(s.upper() for s in symbols):
+        return symbols
+    edgar = EdgarClient(
+        cache_dir=cfg.data.cache_dir, max_age_hours=cfg.data.edgar_cache_max_age_hours
+    )
+    resolved = resolve_current_symbols(symbols, renames, edgar.cik)
+    for r in renames:
+        if r.listed in symbols and r.listed not in resolved:
+            console.print(f"[dim]ticker rename: {r.listed} -> {r.current}[/dim]")
+    return resolved
+
+
 def sectors_needed(scorer_types: Iterable[str], sector_caps: Iterable[float]) -> bool:
     """Whether a panel must carry a sector per symbol (#92).
 
@@ -66,6 +90,8 @@ def prefetch_backtest_data(
     if scorer_types is None:
         scorer_types = (cfg.scorer.type,)
     types = set(scorer_types)
+
+    symbols = current_symbols(cfg, list(symbols), console)
 
     cache = ParquetCache(cfg.data.cache_dir, namespace="ohlcv")
     ohlcv = YfOhlcvFetcher(cache=cache, max_age_hours=cfg.data.ohlcv_cache_max_age_hours)
