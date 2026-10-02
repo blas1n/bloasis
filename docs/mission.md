@@ -46,6 +46,13 @@ median_max_dd_ratio_to_spy: 0.85     # ≤ 85% of SPY drawdown (DD edge)
 A config passing this gate may be deployed to **paper trading** (Alpaca
 paper) for shadow-running. Real money is still blocked.
 
+> **Status, 2026-10-02.** The config in paper, `edgar-rolling2`, has no
+> demonstrated out-of-window edge: α ≈ +0.01%/yr over 2018–2021 and −1.92%/yr
+> over 2024-10..2026-06, against +3.74% on the window it was chosen on
+> ([`research/Edge_Robustness_2026-10-02.md`](./research/Edge_Robustness_2026-10-02.md)).
+> It stays in paper as zero-cost forward data. Its paper record alone does
+> not satisfy the live-trading gate below. Next research protocol: #103.
+
 ### Live-trading gate (M3 entry)
 
 ```yaml

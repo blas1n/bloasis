@@ -28,6 +28,14 @@
 # Issue #85 / docs/research/EDGAR_Rolling2_Gate_Remeasurement_2026-10-01.md.
 # Founder decision 2026-10-01: paper trading continues as evidence
 # accumulation while DD-reduction research runs. Real money stays blocked.
+#
+# OUT-OF-WINDOW (2026-10-02, docs/research/Edge_Robustness_2026-10-02.md):
+# the edge does NOT replicate outside the window this config was chosen on.
+#   2018-2021 (10 folds)          alpha +0.01%/yr   DD ratio 0.883
+#   2024-10..2026-06 (5 folds)    alpha -1.92%/yr   DD ratio 0.898
+# Founder decision 2026-10-02: keep paper running as zero-cost forward data,
+# marked unproven; its paper record cannot by itself ground a real-money
+# decision. Next research protocol: issue #103.
 
 universe:
   source: sp500
