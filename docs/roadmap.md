@@ -77,8 +77,15 @@ one live-tracking.
       ([`research/DD_Reduction_Sweep_2026-10-01.md`](./research/DD_Reduction_Sweep_2026-10-01.md)).
 - ❌ **Knob sweep / EDGAR∩JT intersect** — 12 combos measured, none
       beat baseline. Hypothesis falsified (PR22).
-- ✅ **Position size 0.03/0.05** — α +4.2% variant shipped-adjacent
-      (small lift from PR23 grid).
+- ❌ **Position size 0.03/0.05** — the PR23 grid's +0.1pp lift was not
+      concentration. The grid moved only `signal.position_size_max_pct`;
+      `edgar-rolling2`'s `risk.max_single_order_pct: 0.02` clips both 0.03
+      and 0.05 to 2%. So they bought the same names as 0.02, sized at a flat
+      2% instead of 2% × score. Re-run on the current engine (2026-10-02, #95):
+      all five sizes make the same 398 trades (360 buys / 38 sells, 0 cash
+      rejections). 0.02 → 0.03 → 0.05 gives α +3.74 / +3.90 / +3.97%, DD
+      0.873 / 0.882 / 0.883. Size changes how much of each name is held,
+      never how many names.
 - ❌ **`fundamental_llm` scorer** — llama3.2:3b too weak; documented
       but not promoted.
 - ~ **Correlation clustering / event-study CLIs** (PR53-54) — research
@@ -92,7 +99,11 @@ one live-tracking.
       real prospective signal accumulating from 2026-06-05. Falsify or
       confirm target: end of 2026-Q3.
 - 🔄 **LightGBM ML scorer** (PR13-17) — trained end-to-end but only
-      +0.28 sharpe shift vs rule scorer, still failed acceptance.
+      +0.28 sharpe shift vs rule scorer, still failed acceptance. Measured
+      before #92: both configs used the 0.30 default sector cap while every
+      holding sat in one `_unknown` bucket, so both ran near 30% invested
+      (rule DD ratio 0.559). The rule-vs-ML comparison shares that condition;
+      the absolute α / DD do not carry over to the current engine (#95).
       Available in `bloasis ml` if we accumulate more OOS features.
 
 ### Phase 2 Exit Gate
