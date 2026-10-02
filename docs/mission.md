@@ -53,6 +53,33 @@ paper) for shadow-running. Real money is still blocked.
 > It stays in paper as zero-cost forward data. Its paper record alone does
 > not satisfy the live-trading gate below. Next research protocol: #103.
 
+#### Holdout and fragility conditions (adopted 2026-10-02, #103)
+
+The gate above is measured on the **development window** (2022-01-01 ..
+2024-10-17, the canonical 7-fold protocol). From 2026-10-02 a candidate also
+needs all of the following before it may enter paper:
+
+```yaml
+holdout_H1: 2013-01-01 .. 2017-12-31   # walk-forward 180/120/120, sp500 point-in-time
+holdout_H2: 2018-01-01 .. 2021-12-31   # same protocol (already viewed once, in #102)
+each_holdout:
+  walk_forward_min_folds: 5
+  median_alpha_annualized: "> 0.0"
+  median_max_dd_ratio_to_spy: 0.85
+fragility: development-window α survives a meaning-preserving input
+           perturbation fixed in the pre-registration (template: #99)
+```
+
+- Each holdout runs **once per candidate**, after the development result is
+  recorded. Nothing is tuned after a holdout result is seen.
+- Every candidate is pre-registered: arms, protocol and decision rule are
+  committed before the first run (`docs/research/README.md`).
+- H1 covers 66–77% of the index and misses most acquired and delisted names.
+  A holdout result is reported with its coverage, and a pass there is weaker
+  evidence than the number alone suggests.
+- These conditions are procedural. The research record checks them, not
+  `bloasis backtest`.
+
 ### Live-trading gate (M3 entry)
 
 ```yaml
