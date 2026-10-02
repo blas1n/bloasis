@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from typing import TYPE_CHECKING
 
@@ -108,9 +108,15 @@ def execute_strategy_step(
     equity = account.equity
     held_qty_by_symbol = {p.symbol: p.quantity for p in executor.get_positions()}
 
+    # Issue #93 — the caller's snapshot is taken once per step. Grow a
+    # private copy as BUYs go out, so the sector cap sees this step's earlier
+    # BUYs too. SELLs do not free room until the next step's snapshot.
+    exposure = dict(portfolio_state.sector_concentrations)
+
     submitted: list[tuple[BrokerOrder, OrderResult, TradingSignal]] = []
     for sig in signals:
-        decision = risk.evaluate(sig, portfolio_state, market_state)
+        step_state = replace(portfolio_state, sector_concentrations=dict(exposure))
+        decision = risk.evaluate(sig, step_state, market_state)
         if decision.action == "REJECT":
             continue
         size_pct = (
@@ -147,6 +153,9 @@ def execute_strategy_step(
             continue
 
         result = executor.place_market_order(order)
+        if order.side == "buy" and result.status != "rejected":
+            bucket = sig.sector or "_unknown"
+            exposure[bucket] = exposure.get(bucket, 0.0) + sized
         submitted.append((order, result, sig))
         if persist_hook is not None:
             persist_hook(order, result, sig)

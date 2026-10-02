@@ -273,6 +273,14 @@ identical to the baseline. **0 of 17 arms qualify.** This is the outcome
 "Reading" §1–2 predicted: what qualified was the single `_unknown` bucket, not
 sector diversification. Full re-run table: `docs/e2e/sic-sectors-checklist.md`.
 
+### Addendum — re-run with in-step exposure (#93, 2026-10-02)
+
+With BUYs earlier in a step now counted toward the cap, only the two
+`sector=0.2` arms move. `pos=0.02 sector=0.2` gives DD 0.833 / sharpe 0.995 /
+α +1.90%. That passes DD but fails sharpe, so it does not qualify, and it would
+be an in-sample pick in any case. Still 0 of 17. Details:
+`docs/e2e/step-exposure-checklist.md`.
+
 ### Decision (founder, 2026-10-01, after the result)
 
 - Paper trading on `edgar-rolling2` continues as evidence accumulation under a
