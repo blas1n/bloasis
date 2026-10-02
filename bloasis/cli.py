@@ -1339,26 +1339,10 @@ def trade_live(
 
 
 def _current_symbols(cfg: StrategyConfig, symbols: list[str]) -> list[str]:
-    """Replace constituents listed under a stale ticker with today's (issue #80).
+    """Live-path entry to `current_symbols` (#80); prefetch applies it too (#103)."""
+    from bloasis.backtest.prefetch import current_symbols
 
-    The resolved symbol is the canonical one downstream: it is fetched,
-    scored, ordered at the broker and stored in the paper session. The SEC
-    ticker map is only read when a symbol is in `data.ticker_renames`.
-    """
-    from bloasis.data.fetchers.sec_edgar import EdgarClient, resolve_current_symbols
-
-    renames = cfg.data.ticker_renames
-    listed = {r.listed for r in renames}
-    if not listed.intersection(symbols):
-        return symbols
-    edgar = EdgarClient(
-        cache_dir=cfg.data.cache_dir, max_age_hours=cfg.data.edgar_cache_max_age_hours
-    )
-    resolved = resolve_current_symbols(symbols, renames, edgar.cik)
-    for r in renames:
-        if r.listed in symbols and r.listed not in resolved:
-            console.print(f"[dim]ticker rename: {r.listed} -> {r.current}[/dim]")
-    return resolved
+    return current_symbols(cfg, symbols, console)
 
 
 @dataclass(frozen=True)

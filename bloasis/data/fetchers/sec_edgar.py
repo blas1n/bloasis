@@ -151,6 +151,165 @@ DEFAULT_TICKER_RENAMES: tuple[TickerRename, ...] = (
         cik="0001415404",
         evidence_accession="0001415404-26-000030",
     ),
+    # Historical S&P 500 constituents listed under a retired ticker (#103),
+    # verified 2026-10-02. For each: SEC's ticker map gives the current
+    # symbol to this CIK, the CIK itself filed 10-Ks while the old ticker was
+    # in the index, the old ticker belongs to no other registrant today, and
+    # the cited 10-K tags the current symbol as dei:TradingSymbol on its
+    # cover. Excluded on purpose: new registrants (PX->Linde, KRFT->KHC,
+    # MYL->VTRS, HFC->DINO), re-issued equity (ESV->VAL), another share class
+    # (DISCK), successors that no longer trade (CBS/VIAC, CDAY), and
+    # spin-off look-alikes (BXLT is not BAX).
+    TickerRename(
+        listed="ANTM",
+        current="ELV",
+        cik="0001156039",
+        evidence_accession="0001156039-26-000013",
+    ),  # Elevance Health, Inc.
+    TickerRename(
+        listed="BLL",
+        current="BALL",
+        cik="0000009389",
+        evidence_accession="0001104659-26-017410",
+    ),  # BALL Corp
+    TickerRename(
+        listed="ABC",
+        current="COR",
+        cik="0001140859",
+        evidence_accession="0001140859-25-000131",
+    ),  # Cencora, Inc.
+    TickerRename(
+        listed="FB",
+        current="META",
+        cik="0001326801",
+        evidence_accession="0001628280-26-003942",
+    ),  # Meta Platforms, Inc.
+    TickerRename(
+        listed="PKI",
+        current="RVTY",
+        cik="0000031791",
+        evidence_accession="0000031791-26-000012",
+    ),  # REVVITY, INC.
+    TickerRename(
+        listed="HCP",
+        current="DOC",
+        cik="0000765880",
+        evidence_accession="0001628280-26-005044",
+    ),  # HEALTHPEAK PROPERTIES, INC.
+    TickerRename(
+        listed="PEAK",
+        current="DOC",
+        cik="0000765880",
+        evidence_accession="0001628280-26-005044",
+    ),  # HEALTHPEAK PROPERTIES, INC.
+    TickerRename(
+        listed="JEC",
+        current="J",
+        cik="0000052988",
+        evidence_accession="0001628280-25-053316",
+    ),  # JACOBS SOLUTIONS INC.
+    TickerRename(
+        listed="KORS",
+        current="CPRI",
+        cik="0001530721",
+        evidence_accession="0001530721-26-000047",
+    ),  # Capri Holdings Ltd
+    TickerRename(
+        listed="SYMC",
+        current="GEN",
+        cik="0000849399",
+        evidence_accession="0000849399-26-000017",
+    ),  # Gen Digital Inc.
+    TickerRename(
+        listed="NLOK",
+        current="GEN",
+        cik="0000849399",
+        evidence_accession="0000849399-26-000017",
+    ),  # Gen Digital Inc.
+    TickerRename(
+        listed="UTX",
+        current="RTX",
+        cik="0000101829",
+        evidence_accession="0000101829-26-000006",
+    ),  # RTX Corp
+    TickerRename(
+        listed="WLTW",
+        current="WTW",
+        cik="0001140536",
+        evidence_accession="0001193125-26-069307",
+    ),  # WILLIS TOWERS WATSON PLC
+    TickerRename(
+        listed="FLT",
+        current="CPAY",
+        cik="0001175454",
+        evidence_accession="0001175454-26-000018",
+    ),  # CORPAY, INC.
+    TickerRename(
+        listed="GPS",
+        current="GAP",
+        cik="0000039911",
+        evidence_accession="0001628280-26-018573",
+    ),  # GAP INC
+    TickerRename(
+        listed="ARNC",
+        current="HWM",
+        cik="0000004281",
+        evidence_accession="0000004281-26-000012",
+    ),  # Howmet Aerospace Inc.
+    TickerRename(
+        listed="BHGE",
+        current="BKR",
+        cik="0001701605",
+        evidence_accession="0001701605-26-000007",
+    ),  # Baker Hughes Co
+    TickerRename(
+        listed="DWDP",
+        current="DD",
+        cik="0001666700",
+        evidence_accession="0001666700-26-000013",
+    ),  # DuPont de Nemours, Inc.
+    TickerRename(
+        listed="CTL",
+        current="LUMN",
+        cik="0000018926",
+        evidence_accession="0000018926-26-000014",
+    ),  # Lumen Technologies, Inc.
+    TickerRename(
+        listed="HRS",
+        current="LHX",
+        cik="0000202058",
+        evidence_accession="0000202058-26-000015",
+    ),  # L3HARRIS TECHNOLOGIES, INC. /DE/
+    TickerRename(
+        listed="RE",
+        current="EG",
+        cik="0001095073",
+        evidence_accession="0001095073-26-000006",
+    ),  # EVEREST GROUP, LTD.
+    TickerRename(
+        listed="TMK",
+        current="GL",
+        cik="0000320335",
+        evidence_accession="0000320335-26-000090",
+    ),  # GLOBE LIFE INC.
+    TickerRename(
+        listed="ADS",
+        current="BFH",
+        cik="0001101215",
+        evidence_accession="0001101215-26-000016",
+    ),  # BREAD FINANCIAL HOLDINGS, INC.
+    TickerRename(
+        listed="FBHS",
+        current="FBIN",
+        cik="0001519751",
+        evidence_accession="0001193125-26-063960",
+    ),  # Fortune Brands Innovations, Inc.
+    TickerRename(
+        listed="DISCA",
+        current="WBD",
+        cik="0001437107",
+        evidence_accession="0001437107-26-000020",
+    ),  # Warner Bros. Discovery, Inc.
 )
 
 
