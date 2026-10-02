@@ -95,6 +95,12 @@ class CikSuccession:
 # Exxon Mobil Corp (34088) in the 2026-07-01 redomiciliation merger; its
 # 8-K12B says so under Rule 12g-3(a). Every Exxon 10-K through 2026-02-18
 # is filed under 34088.
+#
+# Deliberately absent: Paramount Skydance (PSKY, 2041610) over Paramount
+# Global (813828). Its 8-K12B names Paramount Global as sole predecessor and
+# would pass verification, but it is a merger of two businesses, not one
+# company re-registering — the rolling cosine would compare different firms'
+# risk factors (0.720, rank 482/483). Founder decision 2026-10-02 (#82).
 DEFAULT_SUCCESSIONS: tuple[CikSuccession, ...] = (
     CikSuccession(
         successor_cik="0002115436",
