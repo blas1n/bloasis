@@ -72,6 +72,10 @@ one live-tracking.
       canonical protocol it also takes α from +3.74% to +0.01%. Not adopted;
       part of the measured edge moves with name frequency
       ([`research/Name_Normalization_2026-10-02.md`](./research/Name_Normalization_2026-10-02.md), #99).
+      ⚠️ Out-of-window check (2026-10-02): raw α ≈ +0.01%/yr over 2018–2021
+      (10 folds) and −1.92%/yr over 2024-10..2026-06 (5 folds); DD ratio
+      0.883 / 0.898. The canonical +3.74% does not replicate
+      ([`research/Edge_Robustness_2026-10-02.md`](./research/Edge_Robustness_2026-10-02.md)).
 - ❌ **PEAD** (post-earnings announcement drift) — falsified in PR22-23
       grid measurement. Signal did not survive walk-forward on the
       universe we use.

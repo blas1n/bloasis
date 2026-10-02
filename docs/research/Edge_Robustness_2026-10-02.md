@@ -80,4 +80,63 @@ downloads them.
 
 ## Results
 
-<!-- filled in after the run -->
+Run 2026-10-02, one cloned cache, window B then A. Both windows met the fold
+minimum (B 5, A 10). Names with 10-K history: B 488, A 447.
+
+| window | arm | α/yr (median) | sharpe vs SPY | DD ratio | trades |
+|---|---|---|---|---|---|
+| A 2018–2021 | raw | **+0.01%** | 1.305 | 0.883 | 536 |
+| A 2018–2021 | normalized | −0.53% | 1.310 | 0.893 | 546 |
+| B 2024-10–2026-06 | raw | **−1.92%** | 1.276 | 0.898 | 294 |
+| B 2024-10–2026-06 | normalized | −3.81% | 0.876 | 1.015 | 302 |
+| *canonical 2022–2024 (#99)* | *raw* | *+3.74%* | *1.013* | *0.873* | *398* |
+
+```
+fold α  A raw         -0.078 0.147 0.024 -0.024 -0.085 -0.033 -0.221 0.345 0.044 0.058
+        A normalized  -0.062 0.146 0.024 -0.034 -0.089 -0.062 -0.183 0.351 0.059 0.081
+        B raw         -0.066 -0.019 -0.039 0.026 0.090
+        B normalized  -0.065 -0.038 -0.014 -0.055 0.033
+```
+
+Mechanism check (median name-token share of the latest 10-K):
+
+| as-of | selected | rest | selected above rest median |
+|---|---|---|---|
+| 2019-06-30 | 0.14% | 0.11% | 51% |
+| 2021-06-30 | 0.11% | 0.10% | 52% |
+| 2025-06-30 | 0.10% | 0.11% | 46% |
+| 2026-09-30 | 0.07% | 0.11% | 38% |
+
+### Verdict under the pre-registered rule
+
+**Inconclusive.** α_raw is +0.01% in A and −1.92% in B. "No out-of-window
+edge" needs α_raw ≤ 0 in both windows, and A misses by one basis point. The
+language-vs-name rules need α_raw > 0 in both, and B fails. The mechanism check
+does **not** support the name explanation: the selected names' median share
+is above the rest's at two of four dates and below at the other two.
+
+### What the numbers say, beyond the rule
+
+1. **The canonical +3.74% does not replicate outside 2022–2024.** Raw α is
+   about zero over ten folds in 2018–2021 and negative over five folds after
+   October 2024, the period the paper session is drawing from. Fold α swings
+   from −22% to +35% in A, so a median a few points from zero is well inside
+   the spread.
+2. **Drawdown fails out of window too.** DD ratio is 0.883 in A and 0.898 in B,
+   against the 0.85 bar.
+3. **#99's "edge moves with the name" reads better as "the in-sample α is
+   fragile".** Name tokens are about 0.1% of the median 10-K, and selected
+   names do not consistently say their own name more than the rest. That makes
+   the name an unlikely driver for most selections, though not for every one
+   (JPM's is 5%). Yet removing name forms, which changed a handful of
+   selections, erased the canonical α. A result that a handful of
+   swaps can erase is not a stable edge, whatever caused the swaps.
+4. Sharpe vs SPY above 1.0 next to α ≤ 0 is not a contradiction worth reading
+   into. The two metrics answer different questions, and the gate already
+   requires both.
+
+This does not falsify the "Lazy Prices" hypothesis in general. It says that
+this implementation, on S&P 500 names at this selection depth, shows no edge
+outside the window it was chosen on.
+
+Raw output: the driver's JSON (`--out`), not committed.
