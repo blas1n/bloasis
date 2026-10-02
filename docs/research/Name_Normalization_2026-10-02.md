@@ -82,4 +82,55 @@ selection changes, the paper session is rotated, as #86 did for #83.
 
 ## Results
 
-<!-- filled in after the run -->
+Run 2026-10-02, one process, cloned cache.
+
+**Validity: passes.** JPM FY2024 vs FY2023 is 0.4255 raw and **0.9964**
+normalized, back in line with its other year pairs (≥ 0.994).
+
+**Backtest (7 folds): fails all three tolerances.**
+
+| arm | DD ratio | sharpe vs SPY | α/yr | trades |
+|---|---|---|---|---|
+| raw (live config) | 0.873 | 1.013 | +3.74% | 398 |
+| normalized | 0.933 | 0.951 | +0.01% | 406 |
+| tolerance | ≤ 0.883 | ≥ 0.993 | ≥ +3.24% | |
+
+```
+per-fold DD  raw         0.873 0.768 1.478 1.063 0.772 1.004 0.626
+             normalized  0.933 0.776 1.405 1.065 0.820 0.982 0.756
+```
+
+**Live (2026-10-02):** 485 eligible; 6 names move by more than 0.01 (JPM
+0.704 → 0.981, WMB 0.790 → 0.877, OXY 0.839 → 0.915, ETN, FITB, ABT); the
+cutoff goes from 0.99669 to 0.99645; 46 of 48 selected names are kept (+SYF,
++TTWO / −EVRG, −SOLV).
+
+### Verdict
+
+**Not adopted.** The variant fixes the artefact it targets, but costs 0.06
+sharpe and 3.7pp of α and adds 0.06 to DD on the canonical protocol. Per the
+pre-registration, no second variant is tried, and the live scorer and the
+paper session are unchanged.
+
+### What this implies — read before trusting the edge
+
+The variant changes only one thing: the registrant's own name no longer
+counts toward the cosine. That removing it erases nearly all of the backtest
+α (+3.74% → +0.01%) means **a large part of `edgar-rolling2`'s measured edge
+moves with name-token frequency, not with risk-factor language**.
+
+The mechanism is plausible. A name repeated hundreds of times is a large,
+nearly constant component of both years' vectors, and it pulls the cosine
+toward 1. It does so most for registrants that repeat their own name: FITB's
+name is 11.6% of its tokens, and its cosine drops from 0.9941 to 0.9808 once the
+name is removed. Which selected names owe their place to this was not broken
+down here.
+
+This is one in-sample protocol, 7 folds, and α differences of a few points
+are within what the project has called noise before. It is not proof that the
+edge is an artefact, but it is the first measurement that ties the edge to
+something other than the hypothesis it was shipped on. It bears directly on
+the 6-month paper record (#85, #88) that the real-money decision will rest
+on.
+
+Raw output: the driver's JSON (`--out`), not committed.

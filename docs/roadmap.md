@@ -66,6 +66,12 @@ one live-tracking.
 - ✅ **EDGAR text-diff scorer** (Cohen-Malloy-Nguyen "Lazy Prices") —
       shipped as `edgar-rolling2`. Buys names whose 10-K language
       changes least YoY.
+      ⚠️ The cosine counts each registrant's own name, its most frequent
+      token. A re-spelling (JPM's FY2024 "JPMorganChase") reads as a large
+      language change. Removing distinctive name forms fixes that, but on the
+      canonical protocol it also takes α from +3.74% to +0.01%. Not adopted;
+      part of the measured edge moves with name frequency
+      ([`research/Name_Normalization_2026-10-02.md`](./research/Name_Normalization_2026-10-02.md), #99).
 - ❌ **PEAD** (post-earnings announcement drift) — falsified in PR22-23
       grid measurement. Signal did not survive walk-forward on the
       universe we use.
