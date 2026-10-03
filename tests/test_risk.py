@@ -185,3 +185,34 @@ def test_high_vix_and_sector_cap_both_apply() -> None:
     assert d.adjusted_size_pct == pytest.approx(0.03)
     assert any("halved" in r for r in d.reasons)
     assert any("sector" in r for r in d.reasons)
+
+
+# ---------------------------------------------------------------------------
+# A cap of 1.0 means "no sector cap" — it must never bind.
+# ---------------------------------------------------------------------------
+
+
+def test_cap_of_one_never_binds_on_the_unknown_bucket() -> None:
+    # Panels without a sector map put every holding under `_unknown`. On a
+    # rotation step the runner counts the step's buys but frees sells only at
+    # the next snapshot (#93), so `_unknown` can sit at ~96% while new buys
+    # arrive. With cap 1.0 ("no cap") those buys must still go through.
+    ev = RiskEvaluator(_risk_cfg(max_sector_concentration=1.0))
+    portfolio = PortfolioState(sector_concentrations={"_unknown": 0.99})
+    d = ev.evaluate(_signal(target_size_pct=0.02, sector=None), portfolio, _market())
+    assert d.action == "APPROVE"
+    assert d.adjusted_size_pct == pytest.approx(0.02)
+
+
+def test_cap_of_one_never_binds_on_a_named_sector() -> None:
+    ev = RiskEvaluator(_risk_cfg(max_sector_concentration=1.0))
+    portfolio = PortfolioState(sector_concentrations={"Energy": 1.0})
+    d = ev.evaluate(_signal(target_size_pct=0.02, sector="Energy"), portfolio, _market())
+    assert d.action == "APPROVE"
+
+
+def test_a_cap_just_under_one_still_applies() -> None:
+    ev = RiskEvaluator(_risk_cfg(max_sector_concentration=0.99))
+    portfolio = PortfolioState(sector_concentrations={"Energy": 0.99})
+    d = ev.evaluate(_signal(target_size_pct=0.02, sector="Energy"), portfolio, _market())
+    assert d.action == "REJECT"
