@@ -66,4 +66,42 @@ arms.
 
 ## Results
 
-<!-- filled in after the run -->
+Run 2026-10-03, one cloned cache. Development panel: 503 names, 493 with bars.
+
+**No arm passes stage 1.** Neither arm reaches the fragility or holdout
+stages, per the pre-registration.
+
+| arm | α/yr | sharpe vs SPY | DD ratio | trades | dev gate |
+|---|---|---|---|---|---|
+| J0 residual | +1.16% | 1.049 | **1.020** | 691 | fail (DD) |
+| J1 residual + vol target | **−4.86%** | 0.981 | **0.897** | 785 | fail (α, DD) |
+| *edgar-rolling2, same frame* | *+3.74%* | *1.013* | *0.873* | *398* | *fail (DD)* |
+
+```
+fold α  J0  0.475 -0.145 -0.198 -0.033  0.415  0.211  0.012
+        J1  0.163 -0.118 -0.186 -0.068 -0.049  0.211  0.019
+```
+
+### Verdict
+
+**No paper candidate.** As pre-registered, this ends the round. No third arm,
+no parameter change and no holdout run follows.
+
+### Reading
+
+- Residual momentum in this portfolio frame earns a little α (+1.2%) and
+  draws down about as deeply as SPY (DD ratio 1.02). Fold α swings from −20%
+  to +48%: the signal is a high-variance bet, not a drawdown edge.
+- Volatility targeting does what it did to the EDGAR signal in #85. It cuts
+  drawdown (1.02 → 0.90) and takes α with it (+1.2% → −4.9%), and it still
+  does not reach the 0.85 bar. A momentum-specific prior did not change that.
+- The 0.85 drawdown bar has now been failed by every signal measured in this
+  frame: EDGAR, JT residual, and both with the overlay. Whether a long-only,
+  2%-sized S&P 500 book can meet it at all is a fair question for the gate
+  (#88, deferred), but it is not a reason to loosen the bar after the fact.
+
+Driver note: the first run saved its JSON before recording J1's
+`stopped_at: "dev"`. The verdict was unaffected, and the script now saves
+after recording the stop.
+
+Raw output: the driver's JSON (`--out`), not committed.

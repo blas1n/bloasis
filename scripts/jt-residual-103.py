@@ -135,6 +135,7 @@ def main() -> int:
         save()
         if not dev["pass"]:
             rec["stopped_at"] = "dev"
+            save()
             continue
 
         # Stage 2 -- fragility: drop 5% of the universe at random, 3 seeds.
@@ -151,6 +152,7 @@ def main() -> int:
         save()
         if not frag_pass:
             rec["stopped_at"] = "fragility"
+            save()
             continue
 
         # Stage 3 -- holdouts, each once.
