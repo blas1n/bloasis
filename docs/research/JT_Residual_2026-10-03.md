@@ -105,3 +105,19 @@ Driver note: the first run saved its JSON before recording J1's
 after recording the stop.
 
 Raw output: the driver's JSON (`--out`), not committed.
+
+## Correction (2026-10-04, #109)
+
+These arms ran on a price-only panel, where a cap of 1.0 still bound through
+the `_unknown` sector bucket on rotation steps. See the correction in
+`Random_Baseline_2026-10-03.md`. The driver was re-run unchanged on the fixed
+engine:
+
+| arm | α/yr | sharpe vs SPY | DD ratio | trades | dev gate |
+|---|---|---|---|---|---|
+| J0 residual | **+7.70%** (was +1.16%) | 1.068 | **1.203** | 805 | fail (DD) |
+| J1 residual + vol target | **−4.86%** | 0.972 | **0.967** | 805 | fail (α, DD) |
+
+**The verdict stands:** no arm passes the development gate, so no fragility
+or holdout run follows. J0's α is larger than first recorded, and so is its
+drawdown. The overlay still cuts DD only by giving up all of the α.

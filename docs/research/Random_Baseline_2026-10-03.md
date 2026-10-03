@@ -97,3 +97,30 @@ is better than 85% of random books (J1 0.897: 80%, J0 1.020: 30%). EDGAR's
 These are inputs to the #88 decision. Nothing here changes the gate.
 
 Raw output: the driver's JSON (`--out`), not committed.
+
+## Correction (2026-10-04, #109) — the R1 results above are invalid
+
+The run above used a price-only panel, which has no sector map. In it, a
+`max_sector_concentration` of 1.0 ("no cap") still bound: every holding sat in
+one `_unknown` bucket, and on rotation steps #93 counts the step's buys before
+its sells free room. A probe of R1 seed 1 found 585 of 1,305 BUY decisions
+rejected by that bucket. The low R1 drawdowns came from blocked buys, not from
+turnover. #109 fixed the risk rule; the driver was re-run unchanged on
+2026-10-04:
+
+| window / kind | DD ratio p10 / median / p90 | seeds ≤ 0.85 | α p10 / median / p90 | median trades |
+|---|---|---|---|---|
+| dev / R1 | 0.891 / 0.989 / 1.116 | 0/20 | −13.8% / −8.0% / −2.5% | 2,179 |
+| dev / R2 | 0.865 / 0.952 / 1.108 | 1/20 | −7.8% / −1.8% / +5.3% | 518 |
+| H2 / R1 | 0.896 / 0.966 / 1.014 | 0/20 | −8.3% / −3.1% / +0.0% | 2,784 |
+| H2 / R2 | 0.884 / 0.951 / 1.037 | 0/20 | −5.0% / −1.7% / +1.5% | 710 |
+
+**Corrected verdict under the pre-registered rule:** for both kinds in both
+windows, the bar is out of the frame's reach (random p10 0.865–0.896 > 0.85).
+
+**Withdrawn:** "the DD ratio mostly measures turnover". Churning does not buy a
+low drawdown. R1 is worse than R2 on both DD and α.
+
+**Unchanged in substance:** EDGAR's development DD (0.873) is above the R2 p10,
+and its α (+3.74%) is below the corrected R2 p90 (+5.3%). It does not stand out
+from no-skill books with its turnover.
