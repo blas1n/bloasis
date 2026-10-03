@@ -95,10 +95,15 @@ class RiskEvaluator:
             size = self._cfg.max_single_order_pct
 
         # Rule 4: sector concentration. After this BUY, the sector exposure
-        # must remain at or below `max_sector_concentration`.
+        # must remain at or below `max_sector_concentration`. A cap of 1.0
+        # means "no cap": without this guard it still bound on rotation steps,
+        # where the step's buys are counted but its sells free room only at
+        # the next snapshot, and on panels with no sector map, where every
+        # holding sits in the single `_unknown` bucket.
         sector = signal.sector or "_unknown"
         existing = portfolio.sector_concentrations.get(sector, 0.0)
-        if existing + size > self._cfg.max_sector_concentration:
+        cap = self._cfg.max_sector_concentration
+        if cap < 1.0 and existing + size > cap:
             allowed = self._cfg.max_sector_concentration - existing
             if allowed <= 0:
                 return RiskDecision(
