@@ -58,4 +58,42 @@ in the random distribution is reported as context.
 
 ## Results
 
-<!-- filled in after the run -->
+Run 2026-10-03, one cloned cache, 80 backtests. Coverage: development 493/503
+names with bars, H2 468/505.
+
+| window / kind | DD ratio p10 / median / p90 | seeds ≤ 0.85 | α p10 / median / p90 | median trades |
+|---|---|---|---|---|
+| dev / R1 | 0.543 / 0.640 / 0.682 | **20/20** | −9.0% / −3.3% / +3.3% | 1,354 |
+| dev / R2 | **0.865** / 0.952 / 1.108 | 1/20 | −10.6% / −3.6% / +4.3% | 434 |
+| H2 / R1 | 0.551 / 0.629 / 0.695 | **20/20** | −15.5% / −9.6% / −6.2% | 1,870 |
+| H2 / R2 | **0.868** / 0.907 / 1.006 | 0/20 | −5.3% / −2.8% / −0.8% | 599 |
+
+Measured strategies against the development R2 distribution: EDGAR DD 0.873
+is better than 85% of random books (J1 0.897: 80%, J0 1.020: 30%). EDGAR's
+α +3.74% is better than 85% of them, which is below the random p90 (+4.3%).
+
+### Verdict under the pre-registered rule
+
+- **R2, the turnover EDGAR-like signals actually have: the bar is out of the
+  frame's reach** in both windows (random p10 0.865 and 0.868 > 0.85).
+- R1: the bar is **not a skill test** (random median 0.64 and 0.63 ≤ 0.85).
+
+### What this says about the DD criterion
+
+1. **The DD ratio mostly measures turnover, not selection.** The same random
+   selection passes 0.85 every time when it churns monthly (R1) and almost
+   never when it holds for a year (R2). R1 buys low drawdown with time out of
+   the market, and pays for it in α (median −3.3% / −9.6%). A strategy can
+   meet the bar by churning, and a low-turnover strategy with real skill can
+   miss it.
+2. **For low-turnover books, 0.85 asks for more than the frame allows.** The
+   best tenth of random persistent books lands at about 0.87. EDGAR's 0.873 is
+   already near that edge. That is consistent with every signal measured so
+   far failing the bar by a small margin.
+3. **EDGAR's development α is not distinguishable from luck at the usual
+   level.** About one random persistent book in seven to ten matches it. This
+   agrees with the out-of-window result (#102).
+
+These are inputs to the #88 decision. Nothing here changes the gate.
+
+Raw output: the driver's JSON (`--out`), not committed.
