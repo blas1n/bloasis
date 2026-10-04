@@ -38,10 +38,25 @@ evaluated by `bloasis backtest`. Promotion is one-way (paper before live).
 
 ```yaml
 walk_forward_min_folds: 5            # at least 5 independent OOS periods
-median_alpha_annualized: -0.005      # within 50 bps of SPY (parity)
 median_sharpe_vs_spy: 0.7            # honest retail target
-median_max_dd_ratio_to_spy: 0.85     # ≤ 85% of SPY drawdown (DD edge)
+skill_relative:                      # adopted 2026-10-04 (#88), scripts/skill-gate.py
+  baseline: same config, signal replaced by a seeded random rank,
+            20 seeds per kind (R1 redrawn each rebalance, R2 yearly),
+            kind matched to the candidate's turnover
+  median_max_dd_ratio_to_spy: "< baseline p10"
+  median_alpha_annualized:    "> baseline p90"
 ```
+
+Until 2026-10-04 this gate used fixed bars, α ≥ −0.5% and DD ratio ≤ 0.85.
+The no-skill baseline (`research/Random_Baseline_2026-10-03.md`, corrected
+after #109) showed that even the best tenth of random books in this frame
+has a DD ratio of 0.865–0.896, whether they turn over monthly or yearly, in
+both the development window and H2. A fixed 0.85 was out of the frame's reach
+and could not separate skill from luck. The skill-relative gate asks for the
+best tenth of no-skill books in the same frame on both drawdown and alpha.
+The `acceptance_criteria` blocks in `configs/*.yaml`, which `bloasis backtest`
+checks, still hold the old fixed values; the skill gate is run with
+`scripts/skill-gate.py`.
 
 A config passing this gate may be deployed to **paper trading** (Alpaca
 paper) for shadow-running. Real money is still blocked.
@@ -64,8 +79,7 @@ holdout_H1: 2013-01-01 .. 2017-12-31   # walk-forward 180/120/120, sp500 point-i
 holdout_H2: 2018-01-01 .. 2021-12-31   # same protocol (already viewed once, in #102)
 each_holdout:
   walk_forward_min_folds: 5
-  median_alpha_annualized: "> 0.0"
-  median_max_dd_ratio_to_spy: 0.85
+  skill_relative: passes on that window   # scripts/skill-gate.py --window H1|H2
 fragility: development-window α survives a meaning-preserving input
            perturbation fixed in the pre-registration (template: #99)
 ```
